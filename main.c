@@ -42,6 +42,18 @@ static const uint8_t moveq_test[] = {
     0x60, 0xFC,               /* 0x16: BRA.S -4 (loop) */
 };
 
+/* ADD.L test: 10 + 32 = 42 in D1 */
+static const uint8_t add_test[] = {
+    0x00, 0x00, 0x00, 0x10,   /* Reset: PC = 0x00000010 */
+    0x00, 0x00, 0x10, 0x00,   /* Reset: SP = 0x00001000 */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  /* Padding */
+    0x70, 0x0A,               /* 0x10: MOVEQ #10, D0 */
+    0x72, 0x20,               /* 0x12: MOVEQ #32, D1 */
+    0xD8, 0x80,               /* 0x14: ADD.L D0, D1  (D1 = 10 + 32 = 42) */
+    0x4E, 0x71,               /* 0x16: NOP */
+    0x60, 0xFC,               /* 0x18: BRA.S -4 (loop) */
+};
+
 int main(int argc, char *argv[])
 {
     mem_init();
@@ -53,6 +65,9 @@ int main(int argc, char *argv[])
     } else if (argc >= 2 && strcmp(argv[1], "moveq") == 0) {
         mem_load_rom(moveq_test, sizeof(moveq_test));
         printf("Running MOVEQ test\n");
+    } else if (argc >= 2 && strcmp(argv[1], "add") == 0) {
+        mem_load_rom(add_test, sizeof(add_test));
+        printf("Running ADD.L test\n");
     } else if (argc >= 2) {
         FILE *f = fopen(argv[1], "rb");
         if (!f) {
@@ -96,6 +111,9 @@ int main(int argc, char *argv[])
         printf("D0=0x%08X D1=0x%08X D2=0x%08X\n", cpu.d[0], cpu.d[1], cpu.d[2]);
     if (argc >= 2 && strcmp(argv[1], "moveq") == 0)
         printf("D0=0x%08X D1=0x%08X (expected: D0=42, D1=0xFFFFFFFF) SR=0x%04X\n",
+               cpu.d[0], cpu.d[1], cpu.sr);
+    if (argc >= 2 && strcmp(argv[1], "add") == 0)
+        printf("D0=0x%08X D1=0x%08X (expected: D0=10, D1=42) SR=0x%04X\n",
                cpu.d[0], cpu.d[1], cpu.sr);
 
     return 0;

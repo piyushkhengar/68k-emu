@@ -79,6 +79,39 @@ static void op_moveq(uint16_t op)
         cpu.sr |= SR_N;
 }
 
+static void op_add_l_dn_dn(uint16_t op)
+{
+    /* ADD.L Ds, Dd: Dd = Dd + Ds
+     * Format: high byte 0xD0+8*d, low byte 0x80+s
+     * dest_reg = ((op >> 8) - 0xD0) >> 3
+     * source_reg = (op & 0xFF) - 0x80
+     * Sets N, Z, V, C
+     */
+    int dest_reg = ((op >> 8) - 0xD0) >> 3;
+    int source_reg = (op & 0xFF) - 0x80;
+
+    uint32_t dest_val = cpu.d[dest_reg];
+    uint32_t source_val = cpu.d[source_reg];
+    uint32_t result = dest_val + source_val;
+
+    cpu.d[dest_reg] = result;
+
+    /* Update CCR */
+    cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);
+    if (result == 0)
+        cpu.sr |= SR_Z;
+    if (result & 0x80000000)
+        cpu.sr |= SR_N;
+    if (result < dest_val)  /* Carry out (unsigned overflow) */
+        cpu.sr |= SR_C;
+    /* Signed overflow: both same sign, result different sign */
+    {
+        int32_t a = (int32_t)dest_val, b = (int32_t)source_val, r = (int32_t)result;
+        if ((a > 0 && b > 0 && r < 0) || (a < 0 && b < 0 && r > 0))
+            cpu.sr |= SR_V;
+    }
+}
+
 static void op_bra(uint16_t op)
 {
     /* BRA.S: 0x60xx - branch with 8-bit displacement */
@@ -110,6 +143,12 @@ static void execute(uint16_t op)
     /* MOVEQ #imm, Dn: 0x7xxx */
     if ((op & 0xF000) == 0x7000) {
         op_moveq(op);
+        return;
+    }
+
+    /* ADD.L Dn, Dn: high byte 0xD0+8*dest, low byte 0x80+source */
+    if ((op & 0xF0F8) == 0xD080) {
+        op_add_l_dn_dn(op);
         return;
     }
 

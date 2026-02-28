@@ -22,6 +22,9 @@ make
 # Run MOVEQ test (exercises MOVEQ #imm, Dn)
 ./68k-emu moveq
 
+# Run ADD.L test (10 + 32 = 42)
+./68k-emu add
+
 # Run a ROM file (e.g. Klaus Dormann's 68000 test suite)
 ./68k-emu path/to/rom.bin
 ```
@@ -46,6 +49,7 @@ make
 - [x] NOP, BRA.S
 - [x] MOVE.L Dn, Dn (first data-moving instruction)
 - [x] MOVEQ #imm, Dn (load constants, updates N/Z flags)
+- [x] ADD.L Dn, Dn (updates N, Z, V, C flags)
 
 ### Phase 2: Core Instructions
 - [ ] MOVE.W, MOVE.B, MOVE immediate (full), MOVE to/from memory
