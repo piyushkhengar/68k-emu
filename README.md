@@ -28,6 +28,9 @@ make
 # Run SUB.L test (50 - 8 = 42)
 ./68k-emu sub
 
+# Run CMP.L test (compare 10 and 10, Z flag set)
+./68k-emu cmp
+
 # Run a ROM file (e.g. 68K test suite binary)
 ./68k-emu path/to/rom.bin
 ```
@@ -54,10 +57,11 @@ make
 - [x] MOVEQ #imm, Dn (load constants, updates N/Z flags)
 - [x] ADD.L Dn, Dn (updates N, Z, V, C flags)
 - [x] SUB.L Dn, Dn (updates N, Z, V, C flags)
+- [x] CMP.L Dn, Dn (compare, sets flags for Bcc)
 
 ### Phase 2: Core Instructions
 - [ ] MOVE.W, MOVE.B, MOVE immediate (full), MOVE to/from memory
-- [ ] CMP (compare, sets flags for Bcc)
+- [ ] CMP variants (other sizes, addressing modes)
 - [ ] ADD/SUB variants (other sizes, addressing modes)
 - [ ] AND, OR, EOR, NOT
 - [ ] ASL, ASR, LSL, LSR, ROL, ROR

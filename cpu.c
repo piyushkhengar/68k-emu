@@ -143,6 +143,35 @@ static void op_sub_l_dn_dn(uint16_t op)
     }
 }
 
+static void op_cmp_l_dn_dn(uint16_t op)
+{
+    /* CMP.L Ds, Dd: compute Dd - Ds, set flags, don't store
+     * Format: high byte 0xB0+8*dest, low byte 0x80+source (same as SUB)
+     */
+    int dest_reg = ((op >> 8) - 0xB0) >> 3;
+    int source_reg = (op & 0xFF) - 0x80;
+
+    uint32_t dest_val = cpu.d[dest_reg];
+    uint32_t source_val = cpu.d[source_reg];
+    uint32_t result = dest_val - source_val;
+
+    /* No store - only set flags */
+
+    /* Update CCR */
+    cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);
+    if (result == 0)
+        cpu.sr |= SR_Z;
+    if (result & 0x80000000)
+        cpu.sr |= SR_N;
+    if (dest_val < source_val)
+        cpu.sr |= SR_C;
+    {
+        int32_t a = (int32_t)dest_val, b = (int32_t)source_val, r = (int32_t)result;
+        if ((a >= 0 && b < 0 && r < 0) || (a < 0 && b >= 0 && r > 0))
+            cpu.sr |= SR_V;
+    }
+}
+
 static void op_bra(uint16_t op)
 {
     /* BRA.S: 0x60xx - branch with 8-bit displacement */
@@ -186,6 +215,12 @@ static void execute(uint16_t op)
     /* SUB.L Dn, Dn: high byte 0x90+8*dest, low byte 0x80+source */
     if ((op & 0xF0F8) == 0x9080) {
         op_sub_l_dn_dn(op);
+        return;
+    }
+
+    /* CMP.L Dn, Dn: high byte 0xB0+8*dest, low byte 0x80+source */
+    if ((op & 0xF0F8) == 0xB080) {
+        op_cmp_l_dn_dn(op);
         return;
     }
 
