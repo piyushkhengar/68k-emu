@@ -25,6 +25,9 @@ make
 # Run ADD.L test (10 + 32 = 42)
 ./68k-emu add
 
+# Run SUB.L test (50 - 8 = 42)
+./68k-emu sub
+
 # Run a ROM file (e.g. Klaus Dormann's 68000 test suite)
 ./68k-emu path/to/rom.bin
 ```
@@ -50,10 +53,12 @@ make
 - [x] MOVE.L Dn, Dn (first data-moving instruction)
 - [x] MOVEQ #imm, Dn (load constants, updates N/Z flags)
 - [x] ADD.L Dn, Dn (updates N, Z, V, C flags)
+- [x] SUB.L Dn, Dn (updates N, Z, V, C flags)
 
 ### Phase 2: Core Instructions
 - [ ] MOVE.W, MOVE.B, MOVE immediate (full), MOVE to/from memory
-- [ ] ADD, SUB, CMP (and flag updates)
+- [ ] CMP (compare, sets flags for Bcc)
+- [ ] ADD/SUB variants (other sizes, addressing modes)
 - [ ] AND, OR, EOR, NOT
 - [ ] ASL, ASR, LSL, LSR, ROL, ROR
 
