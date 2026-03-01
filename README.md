@@ -28,7 +28,7 @@ make
 # Run SUB.L test (50 - 8 = 42)
 ./68k-emu sub
 
-# Run a ROM file (e.g. Klaus Dormann's 68000 test suite)
+# Run a ROM file (e.g. 68K test suite binary)
 ./68k-emu path/to/rom.bin
 ```
 
@@ -70,7 +70,7 @@ make
 ### Phase 4: Remaining ISA
 - [ ] MULU, MULS, DIVU, DIVS
 - [ ] Addressing modes
-- [ ] Klaus Dormann test suite – pass all tests
+- [ ] 68K test suite (TomHarte/SingleStepTests) – pass all tests
 
 ### Phase 5: Amiga (future)
 - [ ] Add custom chips (Paula, Denise, Agnus)
@@ -80,5 +80,5 @@ make
 ## Resources
 
 - **M68000 Programmer's Reference Manual** – authoritative
-- **Klaus Dormann's 68000 test suite** – verify correctness
+- **TomHarte/ProcessorTests** or **SingleStepTests/m68000** – 68K test suites for emulator validation
 - 68K opcode tables for instruction encoding
