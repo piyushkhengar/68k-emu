@@ -8,6 +8,14 @@ A Motorola 68000 CPU emulator written in C for learning purposes. The eventual g
 make
 ```
 
+## Testing
+
+Run all regression tests (verifies nop, move, moveq, add, sub, cmp, bcc, bcc_all, bsr_rts):
+
+```bash
+make test
+```
+
 ## Running
 
 ```bash
