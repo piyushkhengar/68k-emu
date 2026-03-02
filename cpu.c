@@ -46,6 +46,13 @@ static void op_nop(void)
     /* NOP: 0x4E71 - do nothing */
 }
 
+static void op_rts(void)
+{
+    /* RTS: 0x4E75 - pop return address from stack, jump to it */
+    cpu.pc = mem_read32(cpu.a[7]);
+    cpu.a[7] += 4;
+}
+
 static void op_move_l_dn_dn(uint16_t op)
 {
     /* MOVE.L Ds, Dd: 0x2000 + (d<<3) + s
@@ -185,7 +192,7 @@ static int bcc_condition_met(uint8_t cond)
 
     switch (cond) {
         case 0x0: return 1;           /* BRA - always */
-        case 0x1: return 0;           /* BSR - treat as no branch for now */
+        case 0x1: return 1;           /* BSR - handled separately in op_bcc */
         case 0x2: return !c && !z;     /* BHI */
         case 0x3: return c || z;      /* BLS */
         case 0x4: return !c;          /* BCC/BHS */
@@ -215,8 +222,14 @@ static void op_bcc(uint16_t op)
         disp = (int16_t)fetch16();     /* 16-bit displacement */
     }
 
-    if (bcc_condition_met(cond))
+    if (cond == 0x1) {
+        /* BSR: push return address (current PC) to stack, then branch */
+        cpu.a[7] -= 4;
+        mem_write32(cpu.a[7], cpu.pc);
         cpu.pc += disp;
+    } else if (bcc_condition_met(cond)) {
+        cpu.pc += disp;
+    }
 }
 
 static void op_unimplemented(uint16_t op)
@@ -268,6 +281,9 @@ static void execute(uint16_t op)
     switch (op) {
         case 0x4E71: /* NOP */
             op_nop();
+            break;
+        case 0x4E75: /* RTS */
+            op_rts();
             break;
         default:
             op_unimplemented(op);

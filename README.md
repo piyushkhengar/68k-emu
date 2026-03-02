@@ -34,8 +34,11 @@ make
 # Run Bcc test (BEQ/BNE conditional branches driven by CMP)
 ./68k-emu bcc
 
-# Run Bcc comprehensive test (all 14 conditions: BRA, BHI, BLS, BCC, BCS, BNE, BEQ, BVC, BPL, BMI, BGE, BLT, BGT, BLE)
+# Run Bcc comprehensive test (all 15 conditions: BRA, BSR, BHI, BLS, BCC, BCS, BNE, BEQ, BVC, BPL, BMI, BGE, BLT, BGT, BLE)
 ./68k-emu bcc_all
+
+# Run BSR/RTS test (subroutine call and return)
+./68k-emu bsr_rts
 
 # Run a ROM file (e.g. 68K test suite binary)
 ./68k-emu path/to/rom.bin
@@ -64,7 +67,8 @@ make
 - [x] ADD.L Dn, Dn (updates N, Z, V, C flags)
 - [x] SUB.L Dn, Dn (updates N, Z, V, C flags)
 - [x] CMP.L Dn, Dn (compare, sets flags for Bcc)
-- [x] Bcc (BEQ, BNE, BRA, and all 16 conditions; 8-bit and 16-bit displacement)
+- [x] Bcc (BEQ, BNE, BRA, BSR, and all 16 conditions; 8-bit and 16-bit displacement)
+- [x] BSR (branch to subroutine), RTS (return from subroutine)
 
 ### Phase 2: Core Instructions
 - [ ] MOVE.W, MOVE.B, MOVE immediate (full), MOVE to/from memory
@@ -74,7 +78,7 @@ make
 - [ ] ASL, ASR, LSL, LSR, ROL, ROR
 
 ### Phase 3: Control Flow
-- [ ] BSR, RTS, RTE
+- [ ] RTE (return from exception)
 - [ ] TRAP, exceptions
 
 ### Phase 4: Remaining ISA

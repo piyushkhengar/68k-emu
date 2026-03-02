@@ -76,8 +76,8 @@ static const uint8_t bcc_test[] = {
     0x60, 0xFC,               /* 0x28: BRA.S -4 (loop to NOP) */
 };
 
-/* Bcc comprehensive test: all 14 testable conditions. D2 = count of conditions that branched.
- * Expected: 14 (BRA,BHI,BLS,BCC,BCS,BNE,BEQ,BVC,BPL,BMI,BGE,BLT,BGT,BLE). BSR and BVS skipped. */
+/* Bcc comprehensive test: all 15 testable conditions. D2 = count of conditions that branched.
+ * Expected: 15 (BRA,BSR,BHI,BLS,BCC,BCS,BNE,BEQ,BVC,BPL,BMI,BGE,BLT,BGT,BLE). BVS skipped. */
 static const uint8_t bcc_all_test[] = {
     0x00, 0x00, 0x00, 0x10,   /* Reset: PC = 0x00000010 */
     0x00, 0x00, 0x10, 0x00,   /* Reset: SP = 0x00001000 */
@@ -89,8 +89,8 @@ static const uint8_t bcc_all_test[] = {
     0x76, 0x00,               /* MOVEQ #0, D3 (not-taken) */
     0x76, 0x01,               /* MOVEQ #1, D3 (taken) */
     0xE0, 0x83,               /* ADD.L D3, D2 */
-    /* Phase 1: BSR - skip (not implemented, should not branch). Use skip pattern. */
-    0x76, 0x00, 0x61, 0x06, 0x76, 0x00, 0x60, 0x04, 0x76, 0x01, 0xE0, 0x83,               /* ADD.L D3, D2 */
+    /* Phase 1: BSR - always branches, pushes return addr, then branches */
+    0x76, 0x00, 0x61, 0x02, 0x76, 0x00, 0x76, 0x01, 0xE0, 0x83,               /* ADD.L D3, D2 */
     /* Phase 2: BHI (D1>D0 unsigned): D0=50, D1=100, CMP.L D0,D1 -> 50, C=0 Z=0 */
     0x70, 0x32,               /* MOVEQ #50, D0 */
     0x72, 0x64,               /* MOVEQ #100, D1 (0x64) */
@@ -139,6 +139,18 @@ static const uint8_t bcc_all_test[] = {
     /* Loop */
     0x4E, 0x71,               /* NOP */
     0x60, 0xFE,               /* BRA.S -2 */
+};
+
+/* BSR/RTS test: repeatedly call subroutine that sets D2=42, return, loop back to BSR */
+static const uint8_t bsr_rts_test[] = {
+    0x00, 0x00, 0x00, 0x10,   /* Reset: PC = 0x00000010 */
+    0x00, 0x00, 0x10, 0x00,   /* Reset: SP = 0x00001000 */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  /* Padding */
+    0x61, 0x06,               /* 0x10: BSR.S +6 (call subroutine at 0x18) */
+    0x60, 0xFC,               /* 0x12: BRA.S -4 (loop back to BSR, call again) */
+    0x00, 0x00, 0x00, 0x00,   /* 0x14: padding (4 bytes so MOVEQ at 0x18) */
+    0x74, 0x2A,               /* 0x18: MOVEQ #42, D2 (subroutine) */
+    0x4E, 0x75,               /* 0x1A: RTS */
 };
 
 /* SUB.L test: 50 - 8 = 42 in D1 */
@@ -190,7 +202,10 @@ int main(int argc, char *argv[])
         printf("Running Bcc (BEQ/BNE) test\n");
     } else if (argc >= 2 && strcmp(argv[1], "bcc_all") == 0) {
         mem_load_rom(bcc_all_test, sizeof(bcc_all_test));
-        printf("Running Bcc comprehensive test (all 14 conditions)\n");
+        printf("Running Bcc comprehensive test (all 15 conditions)\n");
+    } else if (argc >= 2 && strcmp(argv[1], "bsr_rts") == 0) {
+        mem_load_rom(bsr_rts_test, sizeof(bsr_rts_test));
+        printf("Running BSR/RTS test\n");
     } else if (argc >= 2) {
         FILE *f = fopen(argv[1], "rb");
         if (!f) {
@@ -250,8 +265,11 @@ int main(int argc, char *argv[])
         printf("D0=0x%08X D1=0x%08X D2=0x%08X (expected: D2=2, BEQ+BNE both branched) SR=0x%04X\n",
                cpu.d[0], cpu.d[1], cpu.d[2], cpu.sr);
     if (argc >= 2 && strcmp(argv[1], "bcc_all") == 0)
-        printf("D2=0x%08X (expected: 14 conditions branched) SR=0x%04X\n",
+        printf("D2=0x%08X (expected: 15 conditions branched) SR=0x%04X\n",
                cpu.d[2], cpu.sr);
+    if (argc >= 2 && strcmp(argv[1], "bsr_rts") == 0)
+        printf("D2=0x%08X SP=0x%08X (expected: D2=42, BSR/RTS worked) SR=0x%04X\n",
+               cpu.d[2], cpu.a[7], cpu.sr);
 
     return 0;
 }
