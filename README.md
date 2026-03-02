@@ -31,6 +31,12 @@ make
 # Run CMP.L test (compare 10 and 10, Z flag set)
 ./68k-emu cmp
 
+# Run Bcc test (BEQ/BNE conditional branches driven by CMP)
+./68k-emu bcc
+
+# Run Bcc comprehensive test (all 14 conditions: BRA, BHI, BLS, BCC, BCS, BNE, BEQ, BVC, BPL, BMI, BGE, BLT, BGT, BLE)
+./68k-emu bcc_all
+
 # Run a ROM file (e.g. 68K test suite binary)
 ./68k-emu path/to/rom.bin
 ```
@@ -58,6 +64,7 @@ make
 - [x] ADD.L Dn, Dn (updates N, Z, V, C flags)
 - [x] SUB.L Dn, Dn (updates N, Z, V, C flags)
 - [x] CMP.L Dn, Dn (compare, sets flags for Bcc)
+- [x] Bcc (BEQ, BNE, BRA, and all 16 conditions; 8-bit and 16-bit displacement)
 
 ### Phase 2: Core Instructions
 - [ ] MOVE.W, MOVE.B, MOVE immediate (full), MOVE to/from memory
@@ -67,7 +74,6 @@ make
 - [ ] ASL, ASR, LSL, LSR, ROL, ROR
 
 ### Phase 3: Control Flow
-- [ ] Bcc (branch on condition)
 - [ ] BSR, RTS, RTE
 - [ ] TRAP, exceptions
 

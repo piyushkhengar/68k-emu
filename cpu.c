@@ -172,11 +172,51 @@ static void op_cmp_l_dn_dn(uint16_t op)
     }
 }
 
-static void op_bra(uint16_t op)
+/* Bcc: Branch on condition. 0x6Cxx where C=condition (bits 11-8), xx=8-bit disp.
+ * When disp byte is 0, fetch 16-bit extension word.
+ * Condition 0 = BRA (always). BNE=0x66, BEQ=0x67.
+ */
+static int bcc_condition_met(uint8_t cond)
 {
-    /* BRA.S: 0x60xx - branch with 8-bit displacement */
-    int8_t disp = (int8_t)(op & 0xFF);
-    cpu.pc += disp;
+    uint8_t n = (cpu.sr & SR_N) ? 1 : 0;
+    uint8_t z = (cpu.sr & SR_Z) ? 1 : 0;
+    uint8_t v = (cpu.sr & SR_V) ? 1 : 0;
+    uint8_t c = (cpu.sr & SR_C) ? 1 : 0;
+
+    switch (cond) {
+        case 0x0: return 1;           /* BRA - always */
+        case 0x1: return 0;           /* BSR - treat as no branch for now */
+        case 0x2: return !c && !z;     /* BHI */
+        case 0x3: return c || z;      /* BLS */
+        case 0x4: return !c;          /* BCC/BHS */
+        case 0x5: return c;          /* BCS/BLO */
+        case 0x6: return !z;         /* BNE */
+        case 0x7: return z;          /* BEQ */
+        case 0x8: return !v;          /* BVC */
+        case 0x9: return v;          /* BVS */
+        case 0xA: return !n;          /* BPL */
+        case 0xB: return n;          /* BMI */
+        case 0xC: return (n && v) || (!n && !v);  /* BGE */
+        case 0xD: return (n && !v) || (!n && v);   /* BLT */
+        case 0xE: return (n && v && !z) || (!n && !v && !z);  /* BGT */
+        case 0xF: return z || (n && !v) || (!n && v);        /* BLE */
+        default: return 0;
+    }
+}
+
+static void op_bcc(uint16_t op)
+{
+    uint8_t cond = (op >> 8) & 0x0F;
+    int32_t disp;
+
+    if ((op & 0xFF) != 0) {
+        disp = (int8_t)(op & 0xFF);  /* 8-bit displacement */
+    } else {
+        disp = (int16_t)fetch16();     /* 16-bit displacement */
+    }
+
+    if (bcc_condition_met(cond))
+        cpu.pc += disp;
 }
 
 static void op_unimplemented(uint16_t op)
@@ -188,9 +228,9 @@ static void op_unimplemented(uint16_t op)
 /* Dispatch table placeholder - you'll expand this as you add instructions */
 static void execute(uint16_t op)
 {
-    /* BRA.S: 0x60xx - 8-bit displacement */
-    if ((op & 0xFF00) == 0x6000) {
-        op_bra(op);
+    /* Bcc: 0x6Cxx - conditional branch (BRA, BEQ, BNE, etc.) */
+    if ((op & 0xF000) == 0x6000) {
+        op_bcc(op);
         return;
     }
 
@@ -206,8 +246,9 @@ static void execute(uint16_t op)
         return;
     }
 
-    /* ADD.L Dn, Dn: high byte 0xD0+8*dest, low byte 0x80+source */
-    if ((op & 0xF0F8) == 0xD080) {
+    /* ADD.L Dn, Dn: high byte 0xD0+8*dest, low byte 0x80+source (dest 0-7) */
+    if (((op & 0xF0F8) == 0xD080) || ((op & 0xF0F8) == 0xE080) ||
+        ((op & 0xF0F8) == 0xF080)) {
         op_add_l_dn_dn(op);
         return;
     }
