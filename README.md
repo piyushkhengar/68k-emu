@@ -27,6 +27,9 @@ make test
 # or
 ./68k-emu test
 
+# Run MOVE.L memory test (store/load via (A7))
+./68k-emu move_mem
+
 # Run MOVEQ test (exercises MOVEQ #imm, Dn)
 ./68k-emu moveq
 
@@ -71,6 +74,7 @@ make test
 - [x] Fetch-decode-execute loop
 - [x] NOP, BRA.S
 - [x] MOVE.L Dn, Dn (first data-moving instruction)
+- [x] MOVE.L (An), Dn and MOVE.L Dn, (An) (memory load/store)
 - [x] MOVEQ #imm, Dn (load constants, updates N/Z flags)
 - [x] ADD.L Dn, Dn (updates N, Z, V, C flags)
 - [x] SUB.L Dn, Dn (updates N, Z, V, C flags)

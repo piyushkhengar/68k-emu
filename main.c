@@ -31,6 +31,18 @@ static const uint8_t move_test[] = {
     0x60, 0xFC,               /* 0x16: BRA.S -4 (loop back to MOVE) */
 };
 
+/* MOVE.L memory test: store D0 to (A7), load into D1. Uses stack at 0x1000. */
+static const uint8_t move_mem_test[] = {
+    0x00, 0x00, 0x00, 0x10,   /* Reset: PC = 0x00000010 */
+    0x00, 0x00, 0x10, 0x00,   /* Reset: SP = 0x00001000 */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  /* Padding */
+    0x70, 0x2A,               /* 0x10: MOVEQ #42, D0 */
+    0x25, 0xC0,               /* 0x12: MOVE.L D0, (A7) - store to 0x1000 */
+    0x20, 0x57,               /* 0x14: MOVE.L (A7), D1 - load from 0x1000 */
+    0x4E, 0x71,               /* 0x16: NOP */
+    0x60, 0xFC,               /* 0x18: BRA.S -4 (loop) */
+};
+
 /* MOVEQ test: loads 42 into D0, -1 into D1, then loops */
 static const uint8_t moveq_test[] = {
     0x00, 0x00, 0x00, 0x10,   /* Reset: PC = 0x00000010 */
@@ -185,6 +197,9 @@ int main(int argc, char *argv[])
     if (argc >= 2 && (strcmp(argv[1], "move") == 0 || strcmp(argv[1], "test") == 0)) {
         mem_load_rom(move_test, sizeof(move_test));
         printf("Running MOVE.L test\n");
+    } else if (argc >= 2 && strcmp(argv[1], "move_mem") == 0) {
+        mem_load_rom(move_mem_test, sizeof(move_mem_test));
+        printf("Running MOVE.L (An)/Dn memory test\n");
     } else if (argc >= 2 && strcmp(argv[1], "moveq") == 0) {
         mem_load_rom(moveq_test, sizeof(moveq_test));
         printf("Running MOVEQ test\n");
@@ -249,6 +264,9 @@ int main(int argc, char *argv[])
            steps, cpu.pc, cpu.halted ? "(halted)" : "");
     if (argc >= 2 && (strcmp(argv[1], "move") == 0 || strcmp(argv[1], "test") == 0))
         printf("D0=0x%08X D1=0x%08X D2=0x%08X\n", cpu.d[0], cpu.d[1], cpu.d[2]);
+    if (argc >= 2 && strcmp(argv[1], "move_mem") == 0)
+        printf("D0=0x%08X D1=0x%08X (expected: both 42, store/load via A7) SR=0x%04X\n",
+               cpu.d[0], cpu.d[1], cpu.sr);
     if (argc >= 2 && strcmp(argv[1], "moveq") == 0)
         printf("D0=0x%08X D1=0x%08X (expected: D0=42, D1=0xFFFFFFFF) SR=0x%04X\n",
                cpu.d[0], cpu.d[1], cpu.sr);

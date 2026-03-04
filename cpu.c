@@ -65,6 +65,42 @@ static void op_move_l_dn_dn(uint16_t op)
     cpu.d[dest_reg] = cpu.d[source_reg];
 }
 
+/* MOVE.L (An), Dn: load from memory at address in An. EA: dest=Dn (mode 0) in bits 11-6, source=(An) (mode 2) in bits 5-0.
+ * Dest reg = (op >> 6) & 7, addr reg = op & 7. Sets N, Z; clears V, C. */
+static void op_move_l_an_dn(uint16_t op)
+{
+    int dest_reg = (op >> 6) & 7;
+    int addr_reg = op & 7;
+    uint32_t addr = cpu.a[addr_reg];
+    uint32_t val = mem_read32(addr);
+
+    cpu.d[dest_reg] = val;
+
+    cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);
+    if (val == 0)
+        cpu.sr |= SR_Z;
+    if (val & 0x80000000)
+        cpu.sr |= SR_N;
+}
+
+/* MOVE.L Dn, (An): store to memory at address in An. EA: source=Dn (mode 0), dest=(An) (mode 2).
+ * Dest EA in bits 11-6: mode in 11-9, reg in 8-6. Source reg in bits 2-0. */
+static void op_move_l_dn_an(uint16_t op)
+{
+    int source_reg = op & 7;
+    int addr_reg = (op >> 6) & 7;
+    uint32_t addr = cpu.a[addr_reg];
+    uint32_t val = cpu.d[source_reg];
+
+    mem_write32(addr, val);
+
+    cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);
+    if (val == 0)
+        cpu.sr |= SR_Z;
+    if (val & 0x80000000)
+        cpu.sr |= SR_N;
+}
+
 static void op_moveq(uint16_t op)
 {
     /* MOVEQ #<data>, Dn: 0111 0nnn 0ddd dddd
@@ -247,10 +283,23 @@ static void execute(uint16_t op)
         return;
     }
 
-    /* MOVE.L Dn, Dn: 0x2000 + (dest<<3) + source, both EAs are Dn */
-    if ((op & 0xF1C0) == 0x2000) {
-        op_move_l_dn_dn(op);
-        return;
+    /* MOVE.L: 0x2xxx. Check mode bits: 0x0E00=dest mode, 0x0038=source mode */
+    if ((op & 0xF000) == 0x2000) {
+        if ((op & 0x0E38) == 0) {
+            /* MOVE.L Dn, Dn: both mode 0 */
+            op_move_l_dn_dn(op);
+            return;
+        }
+        if ((op & 0x0E00) == 0 && (op & 0x0038) == 0x10) {
+            /* MOVE.L (An), Dn: dest Dn (mode 0), source (An) (mode 2) */
+            op_move_l_an_dn(op);
+            return;
+        }
+        if ((op & 0x0E00) == 0x0400 && (op & 0x0038) == 0) {
+            /* MOVE.L Dn, (An): source Dn (mode 0), dest (An) (mode 2). 0x0E00 extracts mode; mode 2 gives 0x0400 */
+            op_move_l_dn_an(op);
+            return;
+        }
     }
 
     /* MOVEQ #imm, Dn: 0x7xxx */
