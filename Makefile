@@ -25,6 +25,10 @@ test: $(TARGET)
 	output=$$(./$(TARGET) 2>&1); echo "$$output" | grep -q "PC=0x00000012" && echo "  nop:     PASS" || { echo "  nop:     FAIL"; failed=1; }; \
 	output=$$(./$(TARGET) move 2>&1); echo "$$output" | grep -q "D2=0x00000000" && echo "  move:   PASS" || { echo "  move:   FAIL"; failed=1; }; \
 	output=$$(./$(TARGET) move_mem 2>&1); echo "$$output" | grep -q "D1=0x0000002A" && echo "  move_mem: PASS" || { echo "  move_mem: FAIL"; failed=1; }; \
+	output=$$(./$(TARGET) move_w 2>&1); echo "$$output" | grep -q "D1=0x0000002A" && echo "  move_w:   PASS" || { echo "  move_w:   FAIL"; failed=1; }; \
+	output=$$(./$(TARGET) move_b 2>&1); echo "$$output" | grep -q "D1=0x0000002A" && echo "  move_b:   PASS" || { echo "  move_b:   FAIL"; failed=1; }; \
+	output=$$(./$(TARGET) move_w_mem 2>&1); echo "$$output" | grep -q "D1=0x0000FFFF" && echo "  move_w_mem: PASS" || { echo "  move_w_mem: FAIL"; failed=1; }; \
+	output=$$(./$(TARGET) move_b_mem 2>&1); echo "$$output" | grep -q "D1=0x000000AB" && echo "  move_b_mem: PASS" || { echo "  move_b_mem: FAIL"; failed=1; }; \
 	output=$$(./$(TARGET) moveq 2>&1); echo "$$output" | grep -q "D0=0x0000002A" && echo "$$output" | grep -q "D1=0xFFFFFFFF" && echo "  moveq:  PASS" || { echo "  moveq:  FAIL"; failed=1; }; \
 	output=$$(./$(TARGET) add 2>&1); echo "$$output" | grep -q "D1=0x0000002A" && echo "  add:    PASS" || { echo "  add:    FAIL"; failed=1; }; \
 	output=$$(./$(TARGET) sub 2>&1); echo "$$output" | grep -q "D1=0x0000002A" && echo "  sub:    PASS" || { echo "  sub:    FAIL"; failed=1; }; \

@@ -43,6 +43,52 @@ static const uint8_t move_mem_test[] = {
     0x60, 0xFC,               /* 0x18: BRA.S -4 (loop) */
 };
 
+/* MOVE.W test: MOVEQ #42, D0; MOVE.W D0, D1; D1 lower word = 0x002A */
+static const uint8_t move_w_test[] = {
+    0x00, 0x00, 0x00, 0x10,   /* Reset: PC = 0x00000010 */
+    0x00, 0x00, 0x10, 0x00,   /* Reset: SP = 0x00001000 */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  /* Padding */
+    0x70, 0x2A,               /* 0x10: MOVEQ #42, D0 */
+    0x30, 0x40,               /* 0x12: MOVE.W D0, D1 */
+    0x4E, 0x71,               /* 0x14: NOP */
+    0x60, 0xFC,               /* 0x16: BRA.S -4 (loop) */
+};
+
+/* MOVE.B test: MOVEQ #42, D0; MOVE.B D0, D1; D1 lower byte = 0x2A */
+static const uint8_t move_b_test[] = {
+    0x00, 0x00, 0x00, 0x10,   /* Reset: PC = 0x00000010 */
+    0x00, 0x00, 0x10, 0x00,   /* Reset: SP = 0x00001000 */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  /* Padding */
+    0x70, 0x2A,               /* 0x10: MOVEQ #42, D0 */
+    0x10, 0x40,               /* 0x12: MOVE.B D0, D1 */
+    0x4E, 0x71,               /* 0x14: NOP */
+    0x60, 0xFC,               /* 0x16: BRA.S -4 (loop) */
+};
+
+/* MOVE.W memory test: store 0xFFFF to (A7), load into D1 */
+static const uint8_t move_w_mem_test[] = {
+    0x00, 0x00, 0x00, 0x10,   /* Reset: PC = 0x00000010 */
+    0x00, 0x00, 0x10, 0x00,   /* Reset: SP = 0x00001000 */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  /* Padding */
+    0x70, 0xFF,               /* 0x10: MOVEQ #-1, D0 */
+    0x35, 0xC0,               /* 0x12: MOVE.W D0, (A7) */
+    0x30, 0x57,               /* 0x14: MOVE.W (A7), D1 */
+    0x4E, 0x71,               /* 0x16: NOP */
+    0x60, 0xFC,               /* 0x18: BRA.S -4 (loop) */
+};
+
+/* MOVE.B memory test: store 0xAB to (A7), load into D1 */
+static const uint8_t move_b_mem_test[] = {
+    0x00, 0x00, 0x00, 0x10,   /* Reset: PC = 0x00000010 */
+    0x00, 0x00, 0x10, 0x00,   /* Reset: SP = 0x00001000 */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  /* Padding */
+    0x70, 0xAB,               /* 0x10: MOVEQ #-85, D0 (0xAB) */
+    0x15, 0xC0,               /* 0x12: MOVE.B D0, (A7) */
+    0x10, 0x57,               /* 0x14: MOVE.B (A7), D1 */
+    0x4E, 0x71,               /* 0x16: NOP */
+    0x60, 0xFC,               /* 0x18: BRA.S -4 (loop) */
+};
+
 /* MOVEQ test: loads 42 into D0, -1 into D1, then loops */
 static const uint8_t moveq_test[] = {
     0x00, 0x00, 0x00, 0x10,   /* Reset: PC = 0x00000010 */
@@ -200,6 +246,18 @@ int main(int argc, char *argv[])
     } else if (argc >= 2 && strcmp(argv[1], "move_mem") == 0) {
         mem_load_rom(move_mem_test, sizeof(move_mem_test));
         printf("Running MOVE.L (An)/Dn memory test\n");
+    } else if (argc >= 2 && strcmp(argv[1], "move_w") == 0) {
+        mem_load_rom(move_w_test, sizeof(move_w_test));
+        printf("Running MOVE.W test\n");
+    } else if (argc >= 2 && strcmp(argv[1], "move_b") == 0) {
+        mem_load_rom(move_b_test, sizeof(move_b_test));
+        printf("Running MOVE.B test\n");
+    } else if (argc >= 2 && strcmp(argv[1], "move_w_mem") == 0) {
+        mem_load_rom(move_w_mem_test, sizeof(move_w_mem_test));
+        printf("Running MOVE.W memory test\n");
+    } else if (argc >= 2 && strcmp(argv[1], "move_b_mem") == 0) {
+        mem_load_rom(move_b_mem_test, sizeof(move_b_mem_test));
+        printf("Running MOVE.B memory test\n");
     } else if (argc >= 2 && strcmp(argv[1], "moveq") == 0) {
         mem_load_rom(moveq_test, sizeof(moveq_test));
         printf("Running MOVEQ test\n");
@@ -266,6 +324,18 @@ int main(int argc, char *argv[])
         printf("D0=0x%08X D1=0x%08X D2=0x%08X\n", cpu.d[0], cpu.d[1], cpu.d[2]);
     if (argc >= 2 && strcmp(argv[1], "move_mem") == 0)
         printf("D0=0x%08X D1=0x%08X (expected: both 42, store/load via A7) SR=0x%04X\n",
+               cpu.d[0], cpu.d[1], cpu.sr);
+    if (argc >= 2 && strcmp(argv[1], "move_w") == 0)
+        printf("D0=0x%08X D1=0x%08X (expected: D0=42, D1 lower word=0x002A) SR=0x%04X\n",
+               cpu.d[0], cpu.d[1], cpu.sr);
+    if (argc >= 2 && strcmp(argv[1], "move_b") == 0)
+        printf("D0=0x%08X D1=0x%08X (expected: D0=42, D1 lower byte=0x2A) SR=0x%04X\n",
+               cpu.d[0], cpu.d[1], cpu.sr);
+    if (argc >= 2 && strcmp(argv[1], "move_w_mem") == 0)
+        printf("D0=0x%08X D1=0x%08X (expected: D1 lower word=0xFFFF) SR=0x%04X\n",
+               cpu.d[0], cpu.d[1], cpu.sr);
+    if (argc >= 2 && strcmp(argv[1], "move_b_mem") == 0)
+        printf("D0=0x%08X D1=0x%08X (expected: D1 lower byte=0xAB) SR=0x%04X\n",
                cpu.d[0], cpu.d[1], cpu.sr);
     if (argc >= 2 && strcmp(argv[1], "moveq") == 0)
         printf("D0=0x%08X D1=0x%08X (expected: D0=42, D1=0xFFFFFFFF) SR=0x%04X\n",

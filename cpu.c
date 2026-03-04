@@ -32,6 +32,7 @@ static inline uint16_t fetch16(void)
     return w;
 }
 
+__attribute__((unused))
 static inline uint32_t fetch32(void)
 {
     uint32_t w = mem_read32(cpu.pc);
@@ -63,6 +64,104 @@ static void op_move_l_dn_dn(uint16_t op)
     int dest_reg = (x >> 3) & 7;
     int source_reg = x & 7;
     cpu.d[dest_reg] = cpu.d[source_reg];
+}
+
+/* MOVE.W Ds, Dd: 0x3xxx, standard EA format - dest in bits 11-6, source in 5-0. Upper 16 bits of Dd unchanged. */
+static void op_move_w_dn_dn(uint16_t op)
+{
+    int dest_reg = (op >> 6) & 7;
+    int source_reg = op & 7;
+    uint32_t val = cpu.d[source_reg] & 0xFFFF;
+    cpu.d[dest_reg] = (cpu.d[dest_reg] & 0xFFFF0000) | val;
+
+    cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);
+    if (val == 0)
+        cpu.sr |= SR_Z;
+    if (val & 0x8000)
+        cpu.sr |= SR_N;
+}
+
+/* MOVE.B Ds, Dd: 0x1xxx, standard EA format. Upper 24 bits of Dd unchanged. */
+static void op_move_b_dn_dn(uint16_t op)
+{
+    int dest_reg = (op >> 6) & 7;
+    int source_reg = op & 7;
+    uint32_t val = cpu.d[source_reg] & 0xFF;
+    cpu.d[dest_reg] = (cpu.d[dest_reg] & 0xFFFFFF00) | val;
+
+    cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);
+    if (val == 0)
+        cpu.sr |= SR_Z;
+    if (val & 0x80)
+        cpu.sr |= SR_N;
+}
+
+/* MOVE.W (An), Dn */
+static void op_move_w_an_dn(uint16_t op)
+{
+    int dest_reg = (op >> 6) & 7;
+    int addr_reg = op & 7;
+    uint32_t addr = cpu.a[addr_reg];
+    uint32_t val = mem_read16(addr) & 0xFFFF;
+
+    cpu.d[dest_reg] = (cpu.d[dest_reg] & 0xFFFF0000) | val;
+
+    cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);
+    if (val == 0)
+        cpu.sr |= SR_Z;
+    if (val & 0x8000)
+        cpu.sr |= SR_N;
+}
+
+/* MOVE.B (An), Dn */
+static void op_move_b_an_dn(uint16_t op)
+{
+    int dest_reg = (op >> 6) & 7;
+    int addr_reg = op & 7;
+    uint32_t addr = cpu.a[addr_reg];
+    uint32_t val = mem_read8(addr) & 0xFF;
+
+    cpu.d[dest_reg] = (cpu.d[dest_reg] & 0xFFFFFF00) | val;
+
+    cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);
+    if (val == 0)
+        cpu.sr |= SR_Z;
+    if (val & 0x80)
+        cpu.sr |= SR_N;
+}
+
+/* MOVE.W Dn, (An) */
+static void op_move_w_dn_an(uint16_t op)
+{
+    int source_reg = op & 7;
+    int addr_reg = (op >> 6) & 7;
+    uint32_t addr = cpu.a[addr_reg];
+    uint32_t val = cpu.d[source_reg] & 0xFFFF;
+
+    mem_write16(addr, (uint16_t)val);
+
+    cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);
+    if (val == 0)
+        cpu.sr |= SR_Z;
+    if (val & 0x8000)
+        cpu.sr |= SR_N;
+}
+
+/* MOVE.B Dn, (An) */
+static void op_move_b_dn_an(uint16_t op)
+{
+    int source_reg = op & 7;
+    int addr_reg = (op >> 6) & 7;
+    uint32_t addr = cpu.a[addr_reg];
+    uint32_t val = cpu.d[source_reg] & 0xFF;
+
+    mem_write8(addr, (uint8_t)val);
+
+    cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);
+    if (val == 0)
+        cpu.sr |= SR_Z;
+    if (val & 0x80)
+        cpu.sr |= SR_N;
 }
 
 /* MOVE.L (An), Dn: load from memory at address in An. EA: dest=Dn (mode 0) in bits 11-6, source=(An) (mode 2) in bits 5-0.
@@ -283,6 +382,24 @@ static void execute(uint16_t op)
         return;
     }
 
+    /* MOVE.B: 0x1xxx. Check mode bits: 0x0E00=dest mode, 0x0038=source mode */
+    if ((op & 0xF000) == 0x1000) {
+        if ((op & 0x0E38) == 0) {
+            /* MOVE.B Dn, Dn: both mode 0 */
+            op_move_b_dn_dn(op);
+            return;
+        }
+        if ((op & 0x0E00) == 0 && (op & 0x0038) == 0x10) {
+            /* MOVE.B (An), Dn: dest Dn (mode 0), source (An) (mode 2) */
+            op_move_b_an_dn(op);
+            return;
+        }
+        if ((op & 0x0E00) == 0x0400 && (op & 0x0038) == 0) {
+            /* MOVE.B Dn, (An): source Dn (mode 0), dest (An) (mode 2) */
+            op_move_b_dn_an(op);
+            return;
+        }
+    }
     /* MOVE.L: 0x2xxx. Check mode bits: 0x0E00=dest mode, 0x0038=source mode */
     if ((op & 0xF000) == 0x2000) {
         if ((op & 0x0E38) == 0) {
@@ -298,6 +415,24 @@ static void execute(uint16_t op)
         if ((op & 0x0E00) == 0x0400 && (op & 0x0038) == 0) {
             /* MOVE.L Dn, (An): source Dn (mode 0), dest (An) (mode 2). 0x0E00 extracts mode; mode 2 gives 0x0400 */
             op_move_l_dn_an(op);
+            return;
+        }
+    }
+    /* MOVE.W: 0x3xxx. Check mode bits: 0x0E00=dest mode, 0x0038=source mode */
+    if ((op & 0xF000) == 0x3000) {
+        if ((op & 0x0E38) == 0) {
+            /* MOVE.W Dn, Dn: both mode 0 */
+            op_move_w_dn_dn(op);
+            return;
+        }
+        if ((op & 0x0E00) == 0 && (op & 0x0038) == 0x10) {
+            /* MOVE.W (An), Dn: dest Dn (mode 0), source (An) (mode 2) */
+            op_move_w_an_dn(op);
+            return;
+        }
+        if ((op & 0x0E00) == 0x0400 && (op & 0x0038) == 0) {
+            /* MOVE.W Dn, (An): source Dn (mode 0), dest (An) (mode 2) */
+            op_move_w_dn_an(op);
             return;
         }
     }
