@@ -21,6 +21,16 @@ static int alu_dn_reg(uint16_t op, uint8_t base)
     return ((op >> 8) - base) >> 3;
 }
 
+/* 68000: byte ops cannot use An (Address Register Direct) - illegal instruction. Returns 1 if invalid. */
+static int alu_reject_byte_an(uint16_t op, int ea_mode, int size)
+{
+    if (ea_mode == 1 && size == 1) {
+        op_unimplemented(op);
+        return 1;
+    }
+    return 0;
+}
+
 static void op_add_generic(uint16_t op, int size)
 {
     /* ADD base 0xD0: 0xD0=D0, 0xD8=D1, 0xE0=D2, 0xE8=D3, 0xF0=D4, etc. */
@@ -28,6 +38,9 @@ static void op_add_generic(uint16_t op, int size)
     int ea_mode = (op >> 3) & 7;
     int ea_reg = op & 7;
     int dir = (op >> 9) & 1;  /* 0 = <ea> to Dn, 1 = Dn to <ea> */
+
+    if (alu_reject_byte_an(op, ea_mode, size))
+        return;
 
     if (dir == 0) {
         /* ADD <ea>, Dn */
@@ -75,6 +88,9 @@ static void op_sub_generic(uint16_t op, int size)
     int ea_reg = op & 7;
     int dir = (op >> 9) & 1;
 
+    if (alu_reject_byte_an(op, ea_mode, size))
+        return;
+
     if (dir == 0) {
         /* SUB <ea>, Dn */
         uint32_t src = ea_fetch_value(ea_mode, ea_reg, size);
@@ -120,6 +136,9 @@ static void op_cmp_generic(uint16_t op, int size)
     int dn_reg = alu_dn_reg(op, 0xB0);
     int ea_mode = (op >> 3) & 7;
     int ea_reg = op & 7;
+
+    if (alu_reject_byte_an(op, ea_mode, size))
+        return;
 
     uint32_t dest_val = cpu.d[dn_reg];
     uint32_t src = ea_fetch_value(ea_mode, ea_reg, size);
