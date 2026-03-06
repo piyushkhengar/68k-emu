@@ -279,6 +279,193 @@ static const uint8_t add_test[] = {
     0x60, 0xFC,               /* 0x18: BRA.S -4 (loop) */
 };
 
+/* --- Untested MOVE variants (22 tests) --- */
+
+/* MOVE.B #0xAB, D0 */
+static const uint8_t move_b_imm_dn_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x10, 0x3C, 0x00, 0xAB,   /* MOVE.B #0xAB, D0 */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* MOVE.W #0x1234, D0 */
+static const uint8_t move_w_imm_dn_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x30, 0x3C, 0x12, 0x34,   /* MOVE.W #0x1234, D0 */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* MOVE.B #0xAB, (A7); MOVE.B (A7), D1 to verify */
+static const uint8_t move_b_imm_an_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x15, 0xFC, 0x00, 0xAB,   /* MOVE.B #0xAB, (A7) */
+    0x10, 0x57,               /* MOVE.B (A7), D1 - verify */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* MOVE.W #0x1234, (A7); MOVE.W (A7), D1 to verify */
+static const uint8_t move_w_imm_an_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x35, 0xFC, 0x12, 0x34,   /* MOVE.W #0x1234, (A7) */
+    0x30, 0x57,               /* MOVE.W (A7), D1 */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* MOVE.L #0x12345678, 4(A7); MOVE.L 4(A7), D1 to verify */
+static const uint8_t move_l_imm_disp_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x2B, 0xFC, 0x00, 0x04, 0x12, 0x34, 0x56, 0x78,   /* MOVE.L #0x12345678, 4(A7) */
+    0x20, 0x6F, 0x00, 0x04,   /* MOVE.L 4(A7), D1 */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* MOVE.L -(A7), D1: store at -4(A7) first, then load via -(A7) */
+static const uint8_t move_l_pdec_dn_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x2B, 0xFC, 0xFF, 0xFC, 0x12, 0x34, 0x56, 0x78,   /* MOVE.L #0x12345678, -4(A7) -> 0xFFC */
+    0x20, 0x67,               /* MOVE.L -(A7), D1 - A7-=4, load from 0xFFC */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* MOVE.L D0, (A7)+: store 0x12345678 at (A7), A7+=4 */
+static const uint8_t move_l_dn_anp_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x20, 0x3C, 0x12, 0x34, 0x56, 0x78,   /* MOVE.L #0x12345678, D0 */
+    0x27, 0xC0,               /* MOVE.L D0, (A7)+ */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* MOVE.L D0, -(A7): A7-=4, store at new A7; verify with (A7)+ load */
+static const uint8_t move_l_dn_pdec_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x20, 0x3C, 0x12, 0x34, 0x56, 0x78,   /* MOVE.L #0x12345678, D0 */
+    0x29, 0xC0,               /* MOVE.L D0, -(A7) - store at 0xFFC */
+    0x20, 0x5F,               /* MOVE.L (A7)+, D1 - load from 0xFFC, A7->0x1000 */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* MOVE.W (A7)+, D1: store 0x1234 at (A7), then (A7)+ loads, A7+=2 */
+static const uint8_t move_w_anp_dn_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x35, 0xFC, 0x12, 0x34,   /* MOVE.W #0x1234, (A7) */
+    0x30, 0x5F,               /* MOVE.W (A7)+, D1 */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* MOVE.W -(A7), D1: store 0x1234 at -4(A7) so 0xFFE has it; -(A7) loads from 0xFFE */
+static const uint8_t move_w_pdec_dn_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x2B, 0xFC, 0xFF, 0xFC, 0x12, 0x34, 0x12, 0x34,   /* MOVE.L #0x12341234, -4(A7) - 0x1234 at 0xFFE */
+    0x30, 0x67,               /* MOVE.W -(A7), D1 - A7-=2 to 0xFFE, load 0x1234 */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* MOVE.W D0, (A7)+: store at 0x1000, A7->0x1002; verify with -2(A7) */
+static const uint8_t move_w_dn_anp_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x30, 0x3C, 0x12, 0x34,   /* MOVE.W #0x1234, D0 */
+    0x37, 0xC0,               /* MOVE.W D0, (A7)+ - store at 0x1000 */
+    0x30, 0x6F, 0xFF, 0xFE,   /* MOVE.W -2(A7), D1 - verify from 0x1000 */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* MOVE.W D0, -(A7): store at 0xFFE, A7=0xFFE; verify with 0(A7) */
+static const uint8_t move_w_dn_pdec_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x30, 0x3C, 0x12, 0x34,   /* MOVE.W #0x1234, D0 */
+    0x39, 0xC0,               /* MOVE.W D0, -(A7) - store at 0xFFE */
+    0x30, 0x6F, 0x00, 0x00,   /* MOVE.W 0(A7), D1 - verify from 0xFFE */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* MOVE.B (A7)+, D1 */
+static const uint8_t move_b_anp_dn_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x15, 0xFC, 0x00, 0xAB,   /* MOVE.B #0xAB, (A7) */
+    0x10, 0x5F,               /* MOVE.B (A7)+, D1 - A7 increments by 2 (word align) */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* MOVE.B -(A7), D1: store 0xAB at 0xFFE via MOVE.L; -(A7) loads from 0xFFE */
+static const uint8_t move_b_pdec_dn_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x2B, 0xFC, 0xFF, 0xFC, 0x12, 0x34, 0xAB, 0x78,   /* MOVE.L #0x1234AB78, -4(A7) - 0xAB at 0xFFE */
+    0x10, 0x67,               /* MOVE.B -(A7), D1 - A7-=2 to 0xFFE, load 0xAB */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* MOVE.B D0, (A7)+: store at 0x1000, A7->0x1002; verify with -2(A7) */
+static const uint8_t move_b_dn_anp_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x70, 0xAB,               /* MOVEQ #0xAB, D0 */
+    0x17, 0xC0,               /* MOVE.B D0, (A7)+ - store at 0x1000 */
+    0x10, 0x6F, 0xFF, 0xFE,   /* MOVE.B -2(A7), D1 - verify */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* MOVE.B D0, -(A7): store at 0xFFE, A7=0xFFE; verify with 0(A7) */
+static const uint8_t move_b_dn_pdec_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x70, 0xAB,               /* MOVEQ #0xAB, D0 */
+    0x19, 0xC0,               /* MOVE.B D0, -(A7) - store at 0xFFE */
+    0x10, 0x6F, 0x00, 0x00,   /* MOVE.B 0(A7), D1 - verify */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* MOVE.W d(An), D1: load from 4(A7) - high word of long at 0x1004 */
+static const uint8_t move_w_disp_dn_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x2B, 0xFC, 0x00, 0x04, 0x12, 0x34, 0x56, 0x78,   /* MOVE.L #0x12345678, 4(A7) */
+    0x30, 0x6F, 0x00, 0x04,   /* MOVE.W 4(A7), D1 - load 0x1234 */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* MOVE.W D0, d(An) */
+static const uint8_t move_w_dn_disp_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x30, 0x3C, 0x12, 0x34,   /* MOVE.W #0x1234, D0 */
+    0x3B, 0xC0, 0x00, 0x04,   /* MOVE.W D0, 4(A7) */
+    0x30, 0x6F, 0x00, 0x04,   /* MOVE.W 4(A7), D1 - verify */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* MOVE.B d(An), D1: store 0xAB at 4(A7) via MOVE.L */
+static const uint8_t move_b_disp_dn_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x2B, 0xFC, 0x00, 0x04, 0xAB, 0x12, 0x34, 0x56,   /* MOVE.L #0xAB123456, 4(A7) - 0xAB at 0x1004 */
+    0x10, 0x6F, 0x00, 0x04,   /* MOVE.B 4(A7), D1 */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* MOVE.B D0, d(An) */
+static const uint8_t move_b_dn_disp_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x70, 0xAB,               /* MOVEQ #0xAB, D0 */
+    0x1B, 0xC0, 0x00, 0x04,   /* MOVE.B D0, 4(A7) */
+    0x10, 0x6F, 0x00, 0x04,   /* MOVE.B 4(A7), D1 */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
 int main(int argc, char *argv[])
 {
     mem_init();
@@ -314,6 +501,66 @@ int main(int argc, char *argv[])
     } else if (argc >= 2 && strcmp(argv[1], "move_disp") == 0) {
         mem_load_rom(move_disp_test, sizeof(move_disp_test));
         printf("Running MOVE.L d(An) test\n");
+    } else if (argc >= 2 && strcmp(argv[1], "move_b_imm_dn") == 0) {
+        mem_load_rom(move_b_imm_dn_test, sizeof(move_b_imm_dn_test));
+        printf("Running MOVE.B #imm, Dn test\n");
+    } else if (argc >= 2 && strcmp(argv[1], "move_w_imm_dn") == 0) {
+        mem_load_rom(move_w_imm_dn_test, sizeof(move_w_imm_dn_test));
+        printf("Running MOVE.W #imm, Dn test\n");
+    } else if (argc >= 2 && strcmp(argv[1], "move_b_imm_an") == 0) {
+        mem_load_rom(move_b_imm_an_test, sizeof(move_b_imm_an_test));
+        printf("Running MOVE.B #imm, (An) test\n");
+    } else if (argc >= 2 && strcmp(argv[1], "move_w_imm_an") == 0) {
+        mem_load_rom(move_w_imm_an_test, sizeof(move_w_imm_an_test));
+        printf("Running MOVE.W #imm, (An) test\n");
+    } else if (argc >= 2 && strcmp(argv[1], "move_l_imm_disp") == 0) {
+        mem_load_rom(move_l_imm_disp_test, sizeof(move_l_imm_disp_test));
+        printf("Running MOVE.L #imm, d(An) test\n");
+    } else if (argc >= 2 && strcmp(argv[1], "move_l_pdec_dn") == 0) {
+        mem_load_rom(move_l_pdec_dn_test, sizeof(move_l_pdec_dn_test));
+        printf("Running MOVE.L -(An), Dn test\n");
+    } else if (argc >= 2 && strcmp(argv[1], "move_l_dn_anp") == 0) {
+        mem_load_rom(move_l_dn_anp_test, sizeof(move_l_dn_anp_test));
+        printf("Running MOVE.L Dn, (An)+ test\n");
+    } else if (argc >= 2 && strcmp(argv[1], "move_l_dn_pdec") == 0) {
+        mem_load_rom(move_l_dn_pdec_test, sizeof(move_l_dn_pdec_test));
+        printf("Running MOVE.L Dn, -(An) test\n");
+    } else if (argc >= 2 && strcmp(argv[1], "move_w_anp_dn") == 0) {
+        mem_load_rom(move_w_anp_dn_test, sizeof(move_w_anp_dn_test));
+        printf("Running MOVE.W (An)+, Dn test\n");
+    } else if (argc >= 2 && strcmp(argv[1], "move_w_pdec_dn") == 0) {
+        mem_load_rom(move_w_pdec_dn_test, sizeof(move_w_pdec_dn_test));
+        printf("Running MOVE.W -(An), Dn test\n");
+    } else if (argc >= 2 && strcmp(argv[1], "move_w_dn_anp") == 0) {
+        mem_load_rom(move_w_dn_anp_test, sizeof(move_w_dn_anp_test));
+        printf("Running MOVE.W Dn, (An)+ test\n");
+    } else if (argc >= 2 && strcmp(argv[1], "move_w_dn_pdec") == 0) {
+        mem_load_rom(move_w_dn_pdec_test, sizeof(move_w_dn_pdec_test));
+        printf("Running MOVE.W Dn, -(An) test\n");
+    } else if (argc >= 2 && strcmp(argv[1], "move_b_anp_dn") == 0) {
+        mem_load_rom(move_b_anp_dn_test, sizeof(move_b_anp_dn_test));
+        printf("Running MOVE.B (An)+, Dn test\n");
+    } else if (argc >= 2 && strcmp(argv[1], "move_b_pdec_dn") == 0) {
+        mem_load_rom(move_b_pdec_dn_test, sizeof(move_b_pdec_dn_test));
+        printf("Running MOVE.B -(An), Dn test\n");
+    } else if (argc >= 2 && strcmp(argv[1], "move_b_dn_anp") == 0) {
+        mem_load_rom(move_b_dn_anp_test, sizeof(move_b_dn_anp_test));
+        printf("Running MOVE.B Dn, (An)+ test\n");
+    } else if (argc >= 2 && strcmp(argv[1], "move_b_dn_pdec") == 0) {
+        mem_load_rom(move_b_dn_pdec_test, sizeof(move_b_dn_pdec_test));
+        printf("Running MOVE.B Dn, -(An) test\n");
+    } else if (argc >= 2 && strcmp(argv[1], "move_w_disp_dn") == 0) {
+        mem_load_rom(move_w_disp_dn_test, sizeof(move_w_disp_dn_test));
+        printf("Running MOVE.W d(An), Dn test\n");
+    } else if (argc >= 2 && strcmp(argv[1], "move_w_dn_disp") == 0) {
+        mem_load_rom(move_w_dn_disp_test, sizeof(move_w_dn_disp_test));
+        printf("Running MOVE.W Dn, d(An) test\n");
+    } else if (argc >= 2 && strcmp(argv[1], "move_b_disp_dn") == 0) {
+        mem_load_rom(move_b_disp_dn_test, sizeof(move_b_disp_dn_test));
+        printf("Running MOVE.B d(An), Dn test\n");
+    } else if (argc >= 2 && strcmp(argv[1], "move_b_dn_disp") == 0) {
+        mem_load_rom(move_b_dn_disp_test, sizeof(move_b_dn_disp_test));
+        printf("Running MOVE.B Dn, d(An) test\n");
     } else if (argc >= 2 && strcmp(argv[1], "moveq") == 0) {
         mem_load_rom(moveq_test, sizeof(moveq_test));
         printf("Running MOVEQ test\n");
@@ -426,6 +673,52 @@ int main(int argc, char *argv[])
     if (argc >= 2 && strcmp(argv[1], "bsr_rts") == 0)
         printf("D2=0x%08X SP=0x%08X (expected: D2=42, BSR/RTS worked) SR=0x%04X\n",
                cpu.d[2], cpu.a[7], cpu.sr);
+    if (argc >= 2 && strcmp(argv[1], "move_b_imm_dn") == 0)
+        printf("D0=0x%08X (expected: low byte 0xAB) SR=0x%04X\n", cpu.d[0], cpu.sr);
+    if (argc >= 2 && strcmp(argv[1], "move_w_imm_dn") == 0)
+        printf("D0=0x%08X (expected: low word 0x1234) SR=0x%04X\n", cpu.d[0], cpu.sr);
+    if (argc >= 2 && strcmp(argv[1], "move_b_imm_an") == 0)
+        printf("D1=0x%08X (expected: low byte 0xAB) SR=0x%04X\n", cpu.d[1], cpu.sr);
+    if (argc >= 2 && strcmp(argv[1], "move_w_imm_an") == 0)
+        printf("D1=0x%08X (expected: low word 0x1234) SR=0x%04X\n", cpu.d[1], cpu.sr);
+    if (argc >= 2 && strcmp(argv[1], "move_l_imm_disp") == 0)
+        printf("D1=0x%08X (expected: 0x12345678) SR=0x%04X\n", cpu.d[1], cpu.sr);
+    if (argc >= 2 && strcmp(argv[1], "move_l_pdec_dn") == 0)
+        printf("D1=0x%08X A7=0x%08X (expected: D1=0x12345678, A7=0xFFC) SR=0x%04X\n",
+               cpu.d[1], cpu.a[7], cpu.sr);
+    if (argc >= 2 && strcmp(argv[1], "move_l_dn_anp") == 0)
+        printf("A7=0x%08X (expected: 0x1004) SR=0x%04X\n", cpu.a[7], cpu.sr);
+    if (argc >= 2 && strcmp(argv[1], "move_l_dn_pdec") == 0)
+        printf("D1=0x%08X A7=0x%08X (expected: D1=0x12345678, A7=0x1000) SR=0x%04X\n",
+               cpu.d[1], cpu.a[7], cpu.sr);
+    if (argc >= 2 && strcmp(argv[1], "move_w_anp_dn") == 0)
+        printf("D1=0x%08X A7=0x%08X (expected: D1 low word 0x1234, A7=0x1002) SR=0x%04X\n",
+               cpu.d[1], cpu.a[7], cpu.sr);
+    if (argc >= 2 && strcmp(argv[1], "move_w_pdec_dn") == 0)
+        printf("D1=0x%08X A7=0x%08X (expected: D1 low word 0x1234, A7=0xFFE) SR=0x%04X\n",
+               cpu.d[1], cpu.a[7], cpu.sr);
+    if (argc >= 2 && strcmp(argv[1], "move_w_dn_anp") == 0)
+        printf("D1=0x%08X (expected: low word 0x1234) SR=0x%04X\n", cpu.d[1], cpu.sr);
+    if (argc >= 2 && strcmp(argv[1], "move_w_dn_pdec") == 0)
+        printf("D1=0x%08X (expected: low word 0x1234) SR=0x%04X\n", cpu.d[1], cpu.sr);
+    if (argc >= 2 && strcmp(argv[1], "move_b_anp_dn") == 0)
+        printf("D1=0x%08X A7=0x%08X (expected: D1 low byte 0xAB, A7=0x1002) SR=0x%04X\n",
+               cpu.d[1], cpu.a[7], cpu.sr);
+    if (argc >= 2 && strcmp(argv[1], "move_b_pdec_dn") == 0)
+        printf("D1=0x%08X A7=0x%08X (expected: D1 low byte 0xAB, A7=0xFFE) SR=0x%04X\n",
+               cpu.d[1], cpu.a[7], cpu.sr);
+    if (argc >= 2 && strcmp(argv[1], "move_b_dn_anp") == 0)
+        printf("D1=0x%08X (expected: low byte 0xAB) SR=0x%04X\n", cpu.d[1], cpu.sr);
+    if (argc >= 2 && strcmp(argv[1], "move_b_dn_pdec") == 0)
+        printf("D1=0x%08X (expected: low byte 0xAB) SR=0x%04X\n", cpu.d[1], cpu.sr);
+    if (argc >= 2 && strcmp(argv[1], "move_w_disp_dn") == 0)
+        printf("D1=0x%08X (expected: low word 0x1234) SR=0x%04X\n", cpu.d[1], cpu.sr);
+    if (argc >= 2 && strcmp(argv[1], "move_w_dn_disp") == 0)
+        printf("D1=0x%08X (expected: low word 0x1234) SR=0x%04X\n", cpu.d[1], cpu.sr);
+    if (argc >= 2 && strcmp(argv[1], "move_b_disp_dn") == 0)
+        printf("D1=0x%08X (expected: low byte 0xAB) SR=0x%04X\n", cpu.d[1], cpu.sr);
+    if (argc >= 2 && strcmp(argv[1], "move_b_dn_disp") == 0)
+        printf("D1=0x%08X (expected: low byte 0xAB) SR=0x%04X\n", cpu.d[1], cpu.sr);
 
     return 0;
 }
