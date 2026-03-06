@@ -87,13 +87,15 @@ static void set_nzvc_sub(uint32_t result, uint32_t dest_val, uint32_t source_val
 
 /* --- Instruction handlers --- */
 
-static void op_nop(void)
+static void op_nop(uint16_t op)
 {
+    (void)op;
     /* NOP: 0x4E71 - do nothing */
 }
 
-static void op_rts(void)
+static void op_rts(uint16_t op)
 {
+    (void)op;
     /* RTS: 0x4E75 - pop return address from stack, jump to it */
     cpu.pc = mem_read32(cpu.a[7]);
     cpu.a[7] += 4;
@@ -648,148 +650,131 @@ static void op_unimplemented(uint16_t op)
     cpu.halted = 1;
 }
 
-/* Dispatch table placeholder - you'll expand this as you add instructions */
+/* Family dispatchers: secondary dispatch for opcode ranges that need it. */
+
+static void dispatch_move_b(uint16_t op)
+{
+    if ((op & 0x003F) == 0x3C) {
+        if ((op & 0x0E00) == 0) { op_move_b_imm_dn(op); return; }
+        if ((op & 0x0E00) == 0x0400) { op_move_b_imm_an(op); return; }
+    }
+    if ((op & 0x0E00) == 0 && (op & 0x0038) == 0x18) { op_move_b_anp_dn(op); return; }
+    if ((op & 0x0E00) == 0 && (op & 0x0038) == 0x20) { op_move_b_pdec_an_dn(op); return; }
+    if ((op & 0x0E00) == 0 && (op & 0x0038) == 0x28) { op_move_b_disp_an_dn(op); return; }
+    if ((op & 0x0E00) == 0x0400 && (op & 0x0038) == 0x18) { op_move_b_dn_anp(op); return; }
+    if ((op & 0x0E00) == 0x0400 && (op & 0x0038) == 0x20) { op_move_b_dn_pdec_an(op); return; }
+    if ((op & 0x0E00) == 0x0400 && (op & 0x0038) == 0x28) { op_move_b_dn_disp_an(op); return; }
+    if ((op & 0x0E38) == 0) { op_move_b_dn_dn(op); return; }
+    if ((op & 0x0E00) == 0 && (op & 0x0038) == 0x10) { op_move_b_an_dn(op); return; }
+    if ((op & 0x0E00) == 0x0400 && (op & 0x0038) == 0) { op_move_b_dn_an(op); return; }
+    op_unimplemented(op);
+}
+
+static void dispatch_move_l(uint16_t op)
+{
+    if ((op & 0x003F) == 0x3C) {
+        if ((op & 0x0E00) == 0) { op_move_l_imm_dn(op); return; }
+        if ((op & 0x0E00) == 0x0400) { op_move_l_imm_an(op); return; }
+        if ((op & 0x0E00) == 0x0A00) { op_move_l_imm_disp_an(op); return; }
+    }
+    if ((op & 0x0E00) == 0 && (op & 0x0038) == 0x18) { op_move_l_anp_dn(op); return; }
+    if ((op & 0x0E00) == 0 && (op & 0x0038) == 0x20) { op_move_l_pdec_an_dn(op); return; }
+    if ((op & 0x0E00) == 0 && (op & 0x0038) == 0x28) { op_move_l_disp_an_dn(op); return; }
+    if ((op & 0x0E00) == 0x0400 && (op & 0x0038) == 0x18) { op_move_l_dn_anp(op); return; }
+    if ((op & 0x0E00) == 0x0400 && (op & 0x0038) == 0x20) { op_move_l_dn_pdec_an(op); return; }
+    if ((op & 0x0E00) == 0x0A00 && (op & 0x0038) == 0) { op_move_l_dn_disp_an(op); return; }
+    if ((op & 0x0E38) == 0) { op_move_l_dn_dn(op); return; }
+    if ((op & 0x0E00) == 0 && (op & 0x0038) == 0x10) { op_move_l_an_dn(op); return; }
+    if ((op & 0x0E00) == 0x0400 && (op & 0x0038) == 0) { op_move_l_dn_an(op); return; }
+    op_unimplemented(op);
+}
+
+static void dispatch_move_w(uint16_t op)
+{
+    if ((op & 0x003F) == 0x3C) {
+        if ((op & 0x0E00) == 0) { op_move_w_imm_dn(op); return; }
+        if ((op & 0x0E00) == 0x0400) { op_move_w_imm_an(op); return; }
+    }
+    if ((op & 0x0E00) == 0 && (op & 0x0038) == 0x18) { op_move_w_anp_dn(op); return; }
+    if ((op & 0x0E00) == 0 && (op & 0x0038) == 0x20) { op_move_w_pdec_an_dn(op); return; }
+    if ((op & 0x0E00) == 0 && (op & 0x0038) == 0x28) { op_move_w_disp_an_dn(op); return; }
+    if ((op & 0x0E00) == 0x0400 && (op & 0x0038) == 0x18) { op_move_w_dn_anp(op); return; }
+    if ((op & 0x0E00) == 0x0400 && (op & 0x0038) == 0x20) { op_move_w_dn_pdec_an(op); return; }
+    if ((op & 0x0E00) == 0x0400 && (op & 0x0038) == 0x28) { op_move_w_dn_disp_an(op); return; }
+    if ((op & 0x0E38) == 0) { op_move_w_dn_dn(op); return; }
+    if ((op & 0x0E00) == 0 && (op & 0x0038) == 0x10) { op_move_w_an_dn(op); return; }
+    if ((op & 0x0E00) == 0x0400 && (op & 0x0038) == 0) { op_move_w_dn_an(op); return; }
+    op_unimplemented(op);
+}
+
+/* 0x4xxx: NOP, RTS, and future (JSR, TRAP, etc.) */
+static void dispatch_4xxx(uint16_t op)
+{
+    if (op == 0x4E71) { op_nop(op); return; }
+    if (op == 0x4E75) { op_rts(op); return; }
+    op_unimplemented(op);
+}
+
+/* 0x9xxx: SUB.L Dn, Dn */
+static void dispatch_9xxx(uint16_t op)
+{
+    if ((op & 0xF0F8) == 0x9080) { op_sub_l_dn_dn(op); return; }
+    op_unimplemented(op);
+}
+
+/* 0xBxxx: CMP.L Dn, Dn */
+static void dispatch_Bxxx(uint16_t op)
+{
+    if ((op & 0xF0F8) == 0xB080) { op_cmp_l_dn_dn(op); return; }
+    op_unimplemented(op);
+}
+
+/* 0xDxxx: ADD.L Dn, Dn */
+static void dispatch_Dxxx(uint16_t op)
+{
+    if ((op & 0xF0F8) == 0xD080) { op_add_l_dn_dn(op); return; }
+    op_unimplemented(op);
+}
+
+/* 0xExxx: ADD.L Dn, Dn */
+static void dispatch_Exxx(uint16_t op)
+{
+    if ((op & 0xF0F8) == 0xE080) { op_add_l_dn_dn(op); return; }
+    op_unimplemented(op);
+}
+
+/* 0xFxxx: ADD.L Dn, Dn */
+static void dispatch_Fxxx(uint16_t op)
+{
+    if ((op & 0xF0F8) == 0xF080) { op_add_l_dn_dn(op); return; }
+    op_unimplemented(op);
+}
+
+/* Top-nibble dispatch table. Index = op >> 12. */
+typedef void (*op_handler_fn)(uint16_t op);
+
+static const op_handler_fn dispatch_top[16] = {
+    [0x0] = op_unimplemented,
+    [0x1] = dispatch_move_b,
+    [0x2] = dispatch_move_l,
+    [0x3] = dispatch_move_w,
+    [0x4] = dispatch_4xxx,
+    [0x5] = op_unimplemented,
+    [0x6] = op_bcc,
+    [0x7] = op_moveq,
+    [0x8] = op_unimplemented,
+    [0x9] = dispatch_9xxx,
+    [0xA] = op_unimplemented,
+    [0xB] = dispatch_Bxxx,
+    [0xC] = op_unimplemented,
+    [0xD] = dispatch_Dxxx,
+    [0xE] = dispatch_Exxx,
+    [0xF] = dispatch_Fxxx,
+};
+
 static void execute(uint16_t op)
 {
-    /* Bcc: 0x6Cxx - conditional branch (BRA, BEQ, BNE, etc.) */
-    if ((op & 0xF000) == 0x6000) {
-        op_bcc(op);
-        return;
-    }
-
-    /* MOVE.B: 0x1xxx. Check mode bits: 0x0E00=dest mode, 0x0038=source mode */
-    if ((op & 0xF000) == 0x1000) {
-        if ((op & 0x003F) == 0x3C) {
-            if ((op & 0x0E00) == 0) { op_move_b_imm_dn(op); return; }
-            if ((op & 0x0E00) == 0x0400) { op_move_b_imm_an(op); return; }
-        }
-        if ((op & 0x0E00) == 0 && (op & 0x0038) == 0x18) { op_move_b_anp_dn(op); return; }
-        if ((op & 0x0E00) == 0 && (op & 0x0038) == 0x20) { op_move_b_pdec_an_dn(op); return; }
-        if ((op & 0x0E00) == 0 && (op & 0x0038) == 0x28) { op_move_b_disp_an_dn(op); return; }
-        if ((op & 0x0E00) == 0x0400 && (op & 0x0038) == 0x18) { op_move_b_dn_anp(op); return; }
-        if ((op & 0x0E00) == 0x0400 && (op & 0x0038) == 0x20) { op_move_b_dn_pdec_an(op); return; }
-        if ((op & 0x0E00) == 0x0400 && (op & 0x0038) == 0x28) { op_move_b_dn_disp_an(op); return; }
-        if ((op & 0x0E38) == 0) { op_move_b_dn_dn(op); return; }
-        if ((op & 0x0E00) == 0 && (op & 0x0038) == 0x10) { op_move_b_an_dn(op); return; }
-        if ((op & 0x0E00) == 0x0400 && (op & 0x0038) == 0) { op_move_b_dn_an(op); return; }
-    }
-    /* MOVE.L: 0x2xxx. Check mode bits: 0x0E00=dest mode, 0x0038=source mode */
-    if ((op & 0xF000) == 0x2000) {
-        if ((op & 0x003F) == 0x3C) {
-            /* MOVE.L #imm: source immediate */
-            if ((op & 0x0E00) == 0) {
-                op_move_l_imm_dn(op);
-                return;
-            }
-            if ((op & 0x0E00) == 0x0400) {
-                op_move_l_imm_an(op);
-                return;
-            }
-            if ((op & 0x0E00) == 0x0A00) {
-                /* MOVE.L #imm, d(An): dest d(An) (mode 5) */
-                op_move_l_imm_disp_an(op);
-                return;
-            }
-        }
-        if ((op & 0x0E00) == 0 && (op & 0x0038) == 0x18) {
-            /* MOVE.L (An)+, Dn: source (An)+ (mode 3) */
-            op_move_l_anp_dn(op);
-            return;
-        }
-        if ((op & 0x0E00) == 0 && (op & 0x0038) == 0x20) {
-            /* MOVE.L -(An), Dn: source -(An) (mode 4) */
-            op_move_l_pdec_an_dn(op);
-            return;
-        }
-        if ((op & 0x0E00) == 0 && (op & 0x0038) == 0x28) {
-            /* MOVE.L d(An), Dn: source d(An) (mode 5) */
-            op_move_l_disp_an_dn(op);
-            return;
-        }
-        if ((op & 0x0E00) == 0x0400 && (op & 0x0038) == 0x18) {
-            /* MOVE.L Dn, (An)+: dest (An)+ */
-            op_move_l_dn_anp(op);
-            return;
-        }
-        if ((op & 0x0E00) == 0x0400 && (op & 0x0038) == 0x20) {
-            /* MOVE.L Dn, -(An): dest -(An) */
-            op_move_l_dn_pdec_an(op);
-            return;
-        }
-        if ((op & 0x0E00) == 0x0A00 && (op & 0x0038) == 0) {
-            /* MOVE.L Dn, d(An): dest d(An) (mode 5), source Dn (mode 0) */
-            op_move_l_dn_disp_an(op);
-            return;
-        }
-        if ((op & 0x0E38) == 0) {
-            /* MOVE.L Dn, Dn: both mode 0 */
-            op_move_l_dn_dn(op);
-            return;
-        }
-        if ((op & 0x0E00) == 0 && (op & 0x0038) == 0x10) {
-            /* MOVE.L (An), Dn: dest Dn (mode 0), source (An) (mode 2) */
-            op_move_l_an_dn(op);
-            return;
-        }
-        if ((op & 0x0E00) == 0x0400 && (op & 0x0038) == 0) {
-            /* MOVE.L Dn, (An): source Dn (mode 0), dest (An) (mode 2). 0x0E00 extracts mode; mode 2 gives 0x0400 */
-            op_move_l_dn_an(op);
-            return;
-        }
-    }
-    /* MOVE.W: 0x3xxx. Check mode bits: 0x0E00=dest mode, 0x0038=source mode */
-    if ((op & 0xF000) == 0x3000) {
-        if ((op & 0x003F) == 0x3C) {
-            if ((op & 0x0E00) == 0) { op_move_w_imm_dn(op); return; }
-            if ((op & 0x0E00) == 0x0400) { op_move_w_imm_an(op); return; }
-        }
-        if ((op & 0x0E00) == 0 && (op & 0x0038) == 0x18) { op_move_w_anp_dn(op); return; }
-        if ((op & 0x0E00) == 0 && (op & 0x0038) == 0x20) { op_move_w_pdec_an_dn(op); return; }
-        if ((op & 0x0E00) == 0 && (op & 0x0038) == 0x28) { op_move_w_disp_an_dn(op); return; }
-        if ((op & 0x0E00) == 0x0400 && (op & 0x0038) == 0x18) { op_move_w_dn_anp(op); return; }
-        if ((op & 0x0E00) == 0x0400 && (op & 0x0038) == 0x20) { op_move_w_dn_pdec_an(op); return; }
-        if ((op & 0x0E00) == 0x0400 && (op & 0x0038) == 0x28) { op_move_w_dn_disp_an(op); return; }
-        if ((op & 0x0E38) == 0) { op_move_w_dn_dn(op); return; }
-        if ((op & 0x0E00) == 0 && (op & 0x0038) == 0x10) { op_move_w_an_dn(op); return; }
-        if ((op & 0x0E00) == 0x0400 && (op & 0x0038) == 0) { op_move_w_dn_an(op); return; }
-    }
-
-    /* MOVEQ #imm, Dn: 0x7xxx */
-    if ((op & 0xF000) == 0x7000) {
-        op_moveq(op);
-        return;
-    }
-
-    /* ADD.L Dn, Dn: high byte 0xD0+8*dest, low byte 0x80+source (dest 0-7) */
-    if (((op & 0xF0F8) == 0xD080) || ((op & 0xF0F8) == 0xE080) ||
-        ((op & 0xF0F8) == 0xF080)) {
-        op_add_l_dn_dn(op);
-        return;
-    }
-
-    /* SUB.L Dn, Dn: high byte 0x90+8*dest, low byte 0x80+source */
-    if ((op & 0xF0F8) == 0x9080) {
-        op_sub_l_dn_dn(op);
-        return;
-    }
-
-    /* CMP.L Dn, Dn: high byte 0xB0+8*dest, low byte 0x80+source */
-    if ((op & 0xF0F8) == 0xB080) {
-        op_cmp_l_dn_dn(op);
-        return;
-    }
-
-    switch (op) {
-        case 0x4E71: /* NOP */
-            op_nop();
-            break;
-        case 0x4E75: /* RTS */
-            op_rts();
-            break;
-        default:
-            op_unimplemented(op);
-            break;
-    }
+    dispatch_top[op >> 12](op);
 }
 
 int cpu_step(void)
