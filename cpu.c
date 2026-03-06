@@ -32,12 +32,57 @@ static inline uint16_t fetch16(void)
     return w;
 }
 
-__attribute__((unused))
 static inline uint32_t fetch32(void)
 {
     uint32_t w = mem_read32(cpu.pc);
     cpu.pc += 4;
     return w;
+}
+
+/* Helper: set N,Z and clear V,C from value (size in bytes: 1,2,4) */
+static void set_nz_from_val(uint32_t val, int size)
+{
+    cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);
+    if (val == 0)
+        cpu.sr |= SR_Z;
+    if (size == 1 && (val & 0x80))
+        cpu.sr |= SR_N;
+    else if (size == 2 && (val & 0x8000))
+        cpu.sr |= SR_N;
+    else if (size == 4 && (val & 0x80000000))
+        cpu.sr |= SR_N;
+}
+
+/* Helper: set N,Z,V,C from ADD result (dest + source = result) */
+static void set_nzvc_add(uint32_t result, uint32_t dest_val, uint32_t source_val)
+{
+    int32_t a = (int32_t)dest_val, b = (int32_t)source_val, r = (int32_t)result;
+
+    cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);
+    if (result == 0)
+        cpu.sr |= SR_Z;
+    if (result & 0x80000000)
+        cpu.sr |= SR_N;
+    if (result < dest_val)  /* Carry out (unsigned overflow) */
+        cpu.sr |= SR_C;
+    if ((a > 0 && b > 0 && r < 0) || (a < 0 && b < 0 && r > 0))  /* Signed overflow */
+        cpu.sr |= SR_V;
+}
+
+/* Helper: set N,Z,V,C from SUB/CMP result (dest - source = result) */
+static void set_nzvc_sub(uint32_t result, uint32_t dest_val, uint32_t source_val)
+{
+    int32_t a = (int32_t)dest_val, b = (int32_t)source_val, r = (int32_t)result;
+
+    cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);
+    if (result == 0)
+        cpu.sr |= SR_Z;
+    if (result & 0x80000000)
+        cpu.sr |= SR_N;
+    if (dest_val < source_val)  /* Borrow (unsigned underflow) */
+        cpu.sr |= SR_C;
+    if ((a >= 0 && b < 0 && r < 0) || (a < 0 && b >= 0 && r > 0))  /* Signed overflow */
+        cpu.sr |= SR_V;
 }
 
 /* --- Instruction handlers --- */
@@ -64,6 +109,7 @@ static void op_move_l_dn_dn(uint16_t op)
     int dest_reg = (x >> 3) & 7;
     int source_reg = x & 7;
     cpu.d[dest_reg] = cpu.d[source_reg];
+    set_nz_from_val(cpu.d[dest_reg], 4);
 }
 
 /* MOVE.W Ds, Dd: 0x3xxx, standard EA format - dest in bits 11-6, source in 5-0. Upper 16 bits of Dd unchanged. */
@@ -73,12 +119,7 @@ static void op_move_w_dn_dn(uint16_t op)
     int source_reg = op & 7;
     uint32_t val = cpu.d[source_reg] & 0xFFFF;
     cpu.d[dest_reg] = (cpu.d[dest_reg] & 0xFFFF0000) | val;
-
-    cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);
-    if (val == 0)
-        cpu.sr |= SR_Z;
-    if (val & 0x8000)
-        cpu.sr |= SR_N;
+    set_nz_from_val(val, 2);
 }
 
 /* MOVE.B Ds, Dd: 0x1xxx, standard EA format. Upper 24 bits of Dd unchanged. */
@@ -88,12 +129,7 @@ static void op_move_b_dn_dn(uint16_t op)
     int source_reg = op & 7;
     uint32_t val = cpu.d[source_reg] & 0xFF;
     cpu.d[dest_reg] = (cpu.d[dest_reg] & 0xFFFFFF00) | val;
-
-    cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);
-    if (val == 0)
-        cpu.sr |= SR_Z;
-    if (val & 0x80)
-        cpu.sr |= SR_N;
+    set_nz_from_val(val, 1);
 }
 
 /* MOVE.W (An), Dn */
@@ -105,12 +141,7 @@ static void op_move_w_an_dn(uint16_t op)
     uint32_t val = mem_read16(addr) & 0xFFFF;
 
     cpu.d[dest_reg] = (cpu.d[dest_reg] & 0xFFFF0000) | val;
-
-    cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);
-    if (val == 0)
-        cpu.sr |= SR_Z;
-    if (val & 0x8000)
-        cpu.sr |= SR_N;
+    set_nz_from_val(val, 2);
 }
 
 /* MOVE.B (An), Dn */
@@ -122,12 +153,7 @@ static void op_move_b_an_dn(uint16_t op)
     uint32_t val = mem_read8(addr) & 0xFF;
 
     cpu.d[dest_reg] = (cpu.d[dest_reg] & 0xFFFFFF00) | val;
-
-    cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);
-    if (val == 0)
-        cpu.sr |= SR_Z;
-    if (val & 0x80)
-        cpu.sr |= SR_N;
+    set_nz_from_val(val, 1);
 }
 
 /* MOVE.W Dn, (An) */
@@ -139,12 +165,7 @@ static void op_move_w_dn_an(uint16_t op)
     uint32_t val = cpu.d[source_reg] & 0xFFFF;
 
     mem_write16(addr, (uint16_t)val);
-
-    cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);
-    if (val == 0)
-        cpu.sr |= SR_Z;
-    if (val & 0x8000)
-        cpu.sr |= SR_N;
+    set_nz_from_val(val, 2);
 }
 
 /* MOVE.B Dn, (An) */
@@ -156,12 +177,323 @@ static void op_move_b_dn_an(uint16_t op)
     uint32_t val = cpu.d[source_reg] & 0xFF;
 
     mem_write8(addr, (uint8_t)val);
+    set_nz_from_val(val, 1);
+}
 
-    cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);
-    if (val == 0)
-        cpu.sr |= SR_Z;
-    if (val & 0x80)
-        cpu.sr |= SR_N;
+/* MOVE.B #imm, Dn: source EA 0x3C (mode 7 reg 4). Fetch 1 word, use low byte. */
+static void op_move_b_imm_dn(uint16_t op)
+{
+    int dest_reg = (op >> 6) & 7;
+    uint32_t val = fetch16() & 0xFF;
+
+    cpu.d[dest_reg] = (cpu.d[dest_reg] & 0xFFFFFF00) | val;
+    set_nz_from_val(val, 1);
+}
+
+/* MOVE.W #imm, Dn: fetch 1 word. */
+static void op_move_w_imm_dn(uint16_t op)
+{
+    int dest_reg = (op >> 6) & 7;
+    uint32_t val = fetch16() & 0xFFFF;
+
+    cpu.d[dest_reg] = (cpu.d[dest_reg] & 0xFFFF0000) | val;
+    set_nz_from_val(val, 2);
+}
+
+/* MOVE.L #imm, Dn: fetch 32-bit immediate. */
+static void op_move_l_imm_dn(uint16_t op)
+{
+    int dest_reg = (op >> 6) & 7;
+    uint32_t val = fetch32();
+
+    cpu.d[dest_reg] = val;
+    set_nz_from_val(val, 4);
+}
+
+/* MOVE.B #imm, (An): dest (An) in bits 11-6. */
+static void op_move_b_imm_an(uint16_t op)
+{
+    int addr_reg = (op >> 6) & 7;
+    uint32_t addr = cpu.a[addr_reg];
+    uint32_t val = fetch16() & 0xFF;
+
+    mem_write8(addr, (uint8_t)val);
+    set_nz_from_val(val, 1);
+}
+
+/* MOVE.W #imm, (An) */
+static void op_move_w_imm_an(uint16_t op)
+{
+    int addr_reg = (op >> 6) & 7;
+    uint32_t addr = cpu.a[addr_reg];
+    uint32_t val = fetch16() & 0xFFFF;
+
+    mem_write16(addr, (uint16_t)val);
+    set_nz_from_val(val, 2);
+}
+
+/* MOVE.L #imm, (An) */
+static void op_move_l_imm_an(uint16_t op)
+{
+    int addr_reg = (op >> 6) & 7;
+    uint32_t addr = cpu.a[addr_reg];
+    uint32_t val = fetch32();
+
+    mem_write32(addr, val);
+    set_nz_from_val(val, 4);
+}
+
+/* MOVE.L #imm, d(An): dest d(An) needs displacement fetch before immediate */
+static void op_move_l_imm_disp_an(uint16_t op)
+{
+    int addr_reg = (op >> 6) & 7;
+    int32_t disp = (int16_t)fetch16();
+    uint32_t addr = cpu.a[addr_reg] + disp;
+    uint32_t val = fetch32();
+
+    mem_write32(addr, val);
+    set_nz_from_val(val, 4);
+}
+
+/* MOVE.L (An)+, Dn: mode 3. Load then increment An. */
+static void op_move_l_anp_dn(uint16_t op)
+{
+    int dest_reg = (op >> 6) & 7;
+    int addr_reg = op & 7;
+    uint32_t addr = cpu.a[addr_reg];
+    uint32_t val = mem_read32(addr);
+
+    cpu.d[dest_reg] = val;
+    cpu.a[addr_reg] += 4;
+
+    set_nz_from_val(val, 4);
+}
+
+/* MOVE.L -(An), Dn: mode 4. Decrement An then load. */
+static void op_move_l_pdec_an_dn(uint16_t op)
+{
+    int dest_reg = (op >> 6) & 7;
+    int addr_reg = op & 7;
+    cpu.a[addr_reg] -= 4;
+    uint32_t addr = cpu.a[addr_reg];
+    uint32_t val = mem_read32(addr);
+
+    cpu.d[dest_reg] = val;
+    set_nz_from_val(val, 4);
+}
+
+/* MOVE.L Dn, (An)+: store then increment. */
+static void op_move_l_dn_anp(uint16_t op)
+{
+    int source_reg = op & 7;
+    int addr_reg = (op >> 6) & 7;
+    uint32_t addr = cpu.a[addr_reg];
+    uint32_t val = cpu.d[source_reg];
+
+    mem_write32(addr, val);
+    cpu.a[addr_reg] += 4;
+
+    set_nz_from_val(val, 4);
+}
+
+/* MOVE.L Dn, -(An): decrement then store. */
+static void op_move_l_dn_pdec_an(uint16_t op)
+{
+    int source_reg = op & 7;
+    int addr_reg = (op >> 6) & 7;
+    uint32_t val = cpu.d[source_reg];
+
+    cpu.a[addr_reg] -= 4;
+    uint32_t addr = cpu.a[addr_reg];
+    mem_write32(addr, val);
+
+    set_nz_from_val(val, 4);
+}
+
+/* MOVE.W (An)+, Dn */
+static void op_move_w_anp_dn(uint16_t op)
+{
+    int dest_reg = (op >> 6) & 7;
+    int addr_reg = op & 7;
+    uint32_t addr = cpu.a[addr_reg];
+    uint32_t val = mem_read16(addr) & 0xFFFF;
+
+    cpu.d[dest_reg] = (cpu.d[dest_reg] & 0xFFFF0000) | val;
+    cpu.a[addr_reg] += 2;
+
+    set_nz_from_val(val, 2);
+}
+
+/* MOVE.W -(An), Dn */
+static void op_move_w_pdec_an_dn(uint16_t op)
+{
+    int dest_reg = (op >> 6) & 7;
+    int addr_reg = op & 7;
+    cpu.a[addr_reg] -= 2;
+    uint32_t addr = cpu.a[addr_reg];
+    uint32_t val = mem_read16(addr) & 0xFFFF;
+
+    cpu.d[dest_reg] = (cpu.d[dest_reg] & 0xFFFF0000) | val;
+    set_nz_from_val(val, 2);
+}
+
+/* MOVE.W d(An), Dn */
+static void op_move_w_disp_an_dn(uint16_t op)
+{
+    int dest_reg = (op >> 6) & 7;
+    int addr_reg = op & 7;
+    int32_t disp = (int16_t)fetch16();
+    uint32_t addr = cpu.a[addr_reg] + disp;
+    uint32_t val = mem_read16(addr) & 0xFFFF;
+
+    cpu.d[dest_reg] = (cpu.d[dest_reg] & 0xFFFF0000) | val;
+    set_nz_from_val(val, 2);
+}
+
+/* MOVE.W Dn, (An)+ */
+static void op_move_w_dn_anp(uint16_t op)
+{
+    int source_reg = op & 7;
+    int addr_reg = (op >> 6) & 7;
+    uint32_t addr = cpu.a[addr_reg];
+    uint32_t val = cpu.d[source_reg] & 0xFFFF;
+
+    mem_write16(addr, (uint16_t)val);
+    cpu.a[addr_reg] += 2;
+    set_nz_from_val(val, 2);
+}
+
+/* MOVE.W Dn, -(An) */
+static void op_move_w_dn_pdec_an(uint16_t op)
+{
+    int source_reg = op & 7;
+    int addr_reg = (op >> 6) & 7;
+    uint32_t val = cpu.d[source_reg] & 0xFFFF;
+
+    cpu.a[addr_reg] -= 2;
+    uint32_t addr = cpu.a[addr_reg];
+    mem_write16(addr, (uint16_t)val);
+    set_nz_from_val(val, 2);
+}
+
+/* MOVE.W Dn, d(An) */
+static void op_move_w_dn_disp_an(uint16_t op)
+{
+    int source_reg = op & 7;
+    int addr_reg = (op >> 6) & 7;
+    int32_t disp = (int16_t)fetch16();
+    uint32_t addr = cpu.a[addr_reg] + disp;
+    uint32_t val = cpu.d[source_reg] & 0xFFFF;
+
+    mem_write16(addr, (uint16_t)val);
+    set_nz_from_val(val, 2);
+}
+
+/* MOVE.B (An)+, Dn - A7 increments by 2 bytes for word alignment */
+static void op_move_b_anp_dn(uint16_t op)
+{
+    int dest_reg = (op >> 6) & 7;
+    int addr_reg = op & 7;
+    uint32_t addr = cpu.a[addr_reg];
+    uint32_t val = mem_read8(addr) & 0xFF;
+
+    cpu.d[dest_reg] = (cpu.d[dest_reg] & 0xFFFFFF00) | val;
+    cpu.a[addr_reg] += (addr_reg == 7) ? 2 : 1;
+
+    set_nz_from_val(val, 1);
+}
+
+/* MOVE.B -(An), Dn - A7 decrements by 2 bytes for word alignment */
+static void op_move_b_pdec_an_dn(uint16_t op)
+{
+    int dest_reg = (op >> 6) & 7;
+    int addr_reg = op & 7;
+    int dec = (addr_reg == 7) ? 2 : 1;
+    cpu.a[addr_reg] -= dec;
+    uint32_t addr = cpu.a[addr_reg];
+    uint32_t val = mem_read8(addr) & 0xFF;
+
+    cpu.d[dest_reg] = (cpu.d[dest_reg] & 0xFFFFFF00) | val;
+    set_nz_from_val(val, 1);
+}
+
+/* MOVE.B d(An), Dn */
+static void op_move_b_disp_an_dn(uint16_t op)
+{
+    int dest_reg = (op >> 6) & 7;
+    int addr_reg = op & 7;
+    int32_t disp = (int16_t)fetch16();
+    uint32_t addr = cpu.a[addr_reg] + disp;
+    uint32_t val = mem_read8(addr) & 0xFF;
+
+    cpu.d[dest_reg] = (cpu.d[dest_reg] & 0xFFFFFF00) | val;
+    set_nz_from_val(val, 1);
+}
+
+/* MOVE.B Dn, (An)+ - A7 increments by 2 bytes for word alignment */
+static void op_move_b_dn_anp(uint16_t op)
+{
+    int source_reg = op & 7;
+    int addr_reg = (op >> 6) & 7;
+    uint32_t addr = cpu.a[addr_reg];
+    uint32_t val = cpu.d[source_reg] & 0xFF;
+
+    mem_write8(addr, (uint8_t)val);
+    cpu.a[addr_reg] += (addr_reg == 7) ? 2 : 1;
+    set_nz_from_val(val, 1);
+}
+
+/* MOVE.B Dn, -(An) - A7 decrements by 2 bytes for word alignment */
+static void op_move_b_dn_pdec_an(uint16_t op)
+{
+    int source_reg = op & 7;
+    int addr_reg = (op >> 6) & 7;
+    uint32_t val = cpu.d[source_reg] & 0xFF;
+    int dec = (addr_reg == 7) ? 2 : 1;
+
+    cpu.a[addr_reg] -= dec;
+    uint32_t addr = cpu.a[addr_reg];
+    mem_write8(addr, (uint8_t)val);
+    set_nz_from_val(val, 1);
+}
+
+/* MOVE.B Dn, d(An) */
+static void op_move_b_dn_disp_an(uint16_t op)
+{
+    int source_reg = op & 7;
+    int addr_reg = (op >> 6) & 7;
+    int32_t disp = (int16_t)fetch16();
+    uint32_t addr = cpu.a[addr_reg] + disp;
+    uint32_t val = cpu.d[source_reg] & 0xFF;
+
+    mem_write8(addr, (uint8_t)val);
+    set_nz_from_val(val, 1);
+}
+
+/* MOVE.L d(An), Dn: mode 5. Fetch 16-bit displacement, addr = An + disp. */
+static void op_move_l_disp_an_dn(uint16_t op)
+{
+    int dest_reg = (op >> 6) & 7;
+    int addr_reg = op & 7;
+    int32_t disp = (int16_t)fetch16();
+    uint32_t addr = cpu.a[addr_reg] + disp;
+    uint32_t val = mem_read32(addr);
+
+    cpu.d[dest_reg] = val;
+    set_nz_from_val(val, 4);
+}
+
+/* MOVE.L Dn, d(An): store to An + displacement. */
+static void op_move_l_dn_disp_an(uint16_t op)
+{
+    int source_reg = op & 7;
+    int addr_reg = (op >> 6) & 7;
+    int32_t disp = (int16_t)fetch16();
+    uint32_t addr = cpu.a[addr_reg] + disp;
+    uint32_t val = cpu.d[source_reg];
+
+    mem_write32(addr, val);
+    set_nz_from_val(val, 4);
 }
 
 /* MOVE.L (An), Dn: load from memory at address in An. EA: dest=Dn (mode 0) in bits 11-6, source=(An) (mode 2) in bits 5-0.
@@ -174,12 +506,7 @@ static void op_move_l_an_dn(uint16_t op)
     uint32_t val = mem_read32(addr);
 
     cpu.d[dest_reg] = val;
-
-    cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);
-    if (val == 0)
-        cpu.sr |= SR_Z;
-    if (val & 0x80000000)
-        cpu.sr |= SR_N;
+    set_nz_from_val(val, 4);
 }
 
 /* MOVE.L Dn, (An): store to memory at address in An. EA: source=Dn (mode 0), dest=(An) (mode 2).
@@ -192,12 +519,7 @@ static void op_move_l_dn_an(uint16_t op)
     uint32_t val = cpu.d[source_reg];
 
     mem_write32(addr, val);
-
-    cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);
-    if (val == 0)
-        cpu.sr |= SR_Z;
-    if (val & 0x80000000)
-        cpu.sr |= SR_N;
+    set_nz_from_val(val, 4);
 }
 
 static void op_moveq(uint16_t op)
@@ -212,13 +534,7 @@ static void op_moveq(uint16_t op)
     uint32_t result = (uint32_t)imm;
 
     cpu.d[dest_reg] = result;
-
-    /* Update CCR: N, Z from result; clear V, C */
-    cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);
-    if (result == 0)
-        cpu.sr |= SR_Z;
-    if (result & 0x80000000)
-        cpu.sr |= SR_N;
+    set_nz_from_val(result, 4);
 }
 
 static void op_add_l_dn_dn(uint16_t op)
@@ -237,21 +553,7 @@ static void op_add_l_dn_dn(uint16_t op)
     uint32_t result = dest_val + source_val;
 
     cpu.d[dest_reg] = result;
-
-    /* Update CCR */
-    cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);
-    if (result == 0)
-        cpu.sr |= SR_Z;
-    if (result & 0x80000000)
-        cpu.sr |= SR_N;
-    if (result < dest_val)  /* Carry out (unsigned overflow) */
-        cpu.sr |= SR_C;
-    /* Signed overflow: both same sign, result different sign */
-    {
-        int32_t a = (int32_t)dest_val, b = (int32_t)source_val, r = (int32_t)result;
-        if ((a > 0 && b > 0 && r < 0) || (a < 0 && b < 0 && r > 0))
-            cpu.sr |= SR_V;
-    }
+    set_nzvc_add(result, dest_val, source_val);
 }
 
 static void op_sub_l_dn_dn(uint16_t op)
@@ -268,21 +570,7 @@ static void op_sub_l_dn_dn(uint16_t op)
     uint32_t result = dest_val - source_val;
 
     cpu.d[dest_reg] = result;
-
-    /* Update CCR */
-    cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);
-    if (result == 0)
-        cpu.sr |= SR_Z;
-    if (result & 0x80000000)
-        cpu.sr |= SR_N;
-    if (dest_val < source_val)  /* Borrow (unsigned underflow) */
-        cpu.sr |= SR_C;
-    /* Signed overflow: operands different sign, result different sign from dest */
-    {
-        int32_t a = (int32_t)dest_val, b = (int32_t)source_val, r = (int32_t)result;
-        if ((a >= 0 && b < 0 && r < 0) || (a < 0 && b >= 0 && r > 0))
-            cpu.sr |= SR_V;
-    }
+    set_nzvc_sub(result, dest_val, source_val);
 }
 
 static void op_cmp_l_dn_dn(uint16_t op)
@@ -298,20 +586,7 @@ static void op_cmp_l_dn_dn(uint16_t op)
     uint32_t result = dest_val - source_val;
 
     /* No store - only set flags */
-
-    /* Update CCR */
-    cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);
-    if (result == 0)
-        cpu.sr |= SR_Z;
-    if (result & 0x80000000)
-        cpu.sr |= SR_N;
-    if (dest_val < source_val)
-        cpu.sr |= SR_C;
-    {
-        int32_t a = (int32_t)dest_val, b = (int32_t)source_val, r = (int32_t)result;
-        if ((a >= 0 && b < 0 && r < 0) || (a < 0 && b >= 0 && r > 0))
-            cpu.sr |= SR_V;
-    }
+    set_nzvc_sub(result, dest_val, source_val);
 }
 
 /* Bcc: Branch on condition. 0x6Cxx where C=condition (bits 11-8), xx=8-bit disp.
@@ -384,24 +659,68 @@ static void execute(uint16_t op)
 
     /* MOVE.B: 0x1xxx. Check mode bits: 0x0E00=dest mode, 0x0038=source mode */
     if ((op & 0xF000) == 0x1000) {
-        if ((op & 0x0E38) == 0) {
-            /* MOVE.B Dn, Dn: both mode 0 */
-            op_move_b_dn_dn(op);
-            return;
+        if ((op & 0x003F) == 0x3C) {
+            if ((op & 0x0E00) == 0) { op_move_b_imm_dn(op); return; }
+            if ((op & 0x0E00) == 0x0400) { op_move_b_imm_an(op); return; }
         }
-        if ((op & 0x0E00) == 0 && (op & 0x0038) == 0x10) {
-            /* MOVE.B (An), Dn: dest Dn (mode 0), source (An) (mode 2) */
-            op_move_b_an_dn(op);
-            return;
-        }
-        if ((op & 0x0E00) == 0x0400 && (op & 0x0038) == 0) {
-            /* MOVE.B Dn, (An): source Dn (mode 0), dest (An) (mode 2) */
-            op_move_b_dn_an(op);
-            return;
-        }
+        if ((op & 0x0E00) == 0 && (op & 0x0038) == 0x18) { op_move_b_anp_dn(op); return; }
+        if ((op & 0x0E00) == 0 && (op & 0x0038) == 0x20) { op_move_b_pdec_an_dn(op); return; }
+        if ((op & 0x0E00) == 0 && (op & 0x0038) == 0x28) { op_move_b_disp_an_dn(op); return; }
+        if ((op & 0x0E00) == 0x0400 && (op & 0x0038) == 0x18) { op_move_b_dn_anp(op); return; }
+        if ((op & 0x0E00) == 0x0400 && (op & 0x0038) == 0x20) { op_move_b_dn_pdec_an(op); return; }
+        if ((op & 0x0E00) == 0x0400 && (op & 0x0038) == 0x28) { op_move_b_dn_disp_an(op); return; }
+        if ((op & 0x0E38) == 0) { op_move_b_dn_dn(op); return; }
+        if ((op & 0x0E00) == 0 && (op & 0x0038) == 0x10) { op_move_b_an_dn(op); return; }
+        if ((op & 0x0E00) == 0x0400 && (op & 0x0038) == 0) { op_move_b_dn_an(op); return; }
     }
     /* MOVE.L: 0x2xxx. Check mode bits: 0x0E00=dest mode, 0x0038=source mode */
     if ((op & 0xF000) == 0x2000) {
+        if ((op & 0x003F) == 0x3C) {
+            /* MOVE.L #imm: source immediate */
+            if ((op & 0x0E00) == 0) {
+                op_move_l_imm_dn(op);
+                return;
+            }
+            if ((op & 0x0E00) == 0x0400) {
+                op_move_l_imm_an(op);
+                return;
+            }
+            if ((op & 0x0E00) == 0x0A00) {
+                /* MOVE.L #imm, d(An): dest d(An) (mode 5) */
+                op_move_l_imm_disp_an(op);
+                return;
+            }
+        }
+        if ((op & 0x0E00) == 0 && (op & 0x0038) == 0x18) {
+            /* MOVE.L (An)+, Dn: source (An)+ (mode 3) */
+            op_move_l_anp_dn(op);
+            return;
+        }
+        if ((op & 0x0E00) == 0 && (op & 0x0038) == 0x20) {
+            /* MOVE.L -(An), Dn: source -(An) (mode 4) */
+            op_move_l_pdec_an_dn(op);
+            return;
+        }
+        if ((op & 0x0E00) == 0 && (op & 0x0038) == 0x28) {
+            /* MOVE.L d(An), Dn: source d(An) (mode 5) */
+            op_move_l_disp_an_dn(op);
+            return;
+        }
+        if ((op & 0x0E00) == 0x0400 && (op & 0x0038) == 0x18) {
+            /* MOVE.L Dn, (An)+: dest (An)+ */
+            op_move_l_dn_anp(op);
+            return;
+        }
+        if ((op & 0x0E00) == 0x0400 && (op & 0x0038) == 0x20) {
+            /* MOVE.L Dn, -(An): dest -(An) */
+            op_move_l_dn_pdec_an(op);
+            return;
+        }
+        if ((op & 0x0E00) == 0x0A00 && (op & 0x0038) == 0) {
+            /* MOVE.L Dn, d(An): dest d(An) (mode 5), source Dn (mode 0) */
+            op_move_l_dn_disp_an(op);
+            return;
+        }
         if ((op & 0x0E38) == 0) {
             /* MOVE.L Dn, Dn: both mode 0 */
             op_move_l_dn_dn(op);
@@ -420,21 +739,19 @@ static void execute(uint16_t op)
     }
     /* MOVE.W: 0x3xxx. Check mode bits: 0x0E00=dest mode, 0x0038=source mode */
     if ((op & 0xF000) == 0x3000) {
-        if ((op & 0x0E38) == 0) {
-            /* MOVE.W Dn, Dn: both mode 0 */
-            op_move_w_dn_dn(op);
-            return;
+        if ((op & 0x003F) == 0x3C) {
+            if ((op & 0x0E00) == 0) { op_move_w_imm_dn(op); return; }
+            if ((op & 0x0E00) == 0x0400) { op_move_w_imm_an(op); return; }
         }
-        if ((op & 0x0E00) == 0 && (op & 0x0038) == 0x10) {
-            /* MOVE.W (An), Dn: dest Dn (mode 0), source (An) (mode 2) */
-            op_move_w_an_dn(op);
-            return;
-        }
-        if ((op & 0x0E00) == 0x0400 && (op & 0x0038) == 0) {
-            /* MOVE.W Dn, (An): source Dn (mode 0), dest (An) (mode 2) */
-            op_move_w_dn_an(op);
-            return;
-        }
+        if ((op & 0x0E00) == 0 && (op & 0x0038) == 0x18) { op_move_w_anp_dn(op); return; }
+        if ((op & 0x0E00) == 0 && (op & 0x0038) == 0x20) { op_move_w_pdec_an_dn(op); return; }
+        if ((op & 0x0E00) == 0 && (op & 0x0038) == 0x28) { op_move_w_disp_an_dn(op); return; }
+        if ((op & 0x0E00) == 0x0400 && (op & 0x0038) == 0x18) { op_move_w_dn_anp(op); return; }
+        if ((op & 0x0E00) == 0x0400 && (op & 0x0038) == 0x20) { op_move_w_dn_pdec_an(op); return; }
+        if ((op & 0x0E00) == 0x0400 && (op & 0x0038) == 0x28) { op_move_w_dn_disp_an(op); return; }
+        if ((op & 0x0E38) == 0) { op_move_w_dn_dn(op); return; }
+        if ((op & 0x0E00) == 0 && (op & 0x0038) == 0x10) { op_move_w_an_dn(op); return; }
+        if ((op & 0x0E00) == 0x0400 && (op & 0x0038) == 0) { op_move_w_dn_an(op); return; }
     }
 
     /* MOVEQ #imm, Dn: 0x7xxx */

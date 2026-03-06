@@ -10,7 +10,7 @@ make
 
 ## Testing
 
-Run all regression tests (verifies nop, move, move_mem, move_w, move_b, move_w_mem, move_b_mem, moveq, add, sub, cmp, bcc, bcc_all, bsr_rts):
+Run all regression tests (verifies nop, move, move_mem, move_w, move_b, move_w_mem, move_b_mem, move_imm, move_imm_mem, move_anp, move_disp, moveq, add, sub, cmp, bcc, bcc_all, bsr_rts):
 
 ```bash
 make test
@@ -39,6 +39,14 @@ make test
 # Run MOVE.W / MOVE.B memory tests (store/load via (A7))
 ./68k-emu move_w_mem
 ./68k-emu move_b_mem
+
+# Run MOVE immediate tests
+./68k-emu move_imm
+./68k-emu move_imm_mem
+
+# Run MOVE (An)+ and d(An) tests
+./68k-emu move_anp
+./68k-emu move_disp
 
 # Run MOVEQ test (exercises MOVEQ #imm, Dn)
 ./68k-emu moveq
@@ -86,6 +94,8 @@ make test
 - [x] MOVE.L Dn, Dn (first data-moving instruction)
 - [x] MOVE.L (An), Dn and MOVE.L Dn, (An) (memory load/store)
 - [x] MOVE.W, MOVE.B (Dn,Dn; (An),Dn; Dn,(An))
+- [x] MOVE #imm (to Dn, (An), d(An))
+- [x] MOVE (An)+, -(An), d(An) addressing modes
 - [x] MOVEQ #imm, Dn (load constants, updates N/Z flags)
 - [x] ADD.L Dn, Dn (updates N, Z, V, C flags)
 - [x] SUB.L Dn, Dn (updates N, Z, V, C flags)
@@ -94,7 +104,6 @@ make test
 - [x] BSR (branch to subroutine), RTS (return from subroutine)
 
 ### Phase 2: Core Instructions
-- [ ] MOVE immediate (full), MOVE to/from memory (more addressing modes)
 - [ ] CMP variants (other sizes, addressing modes)
 - [ ] ADD/SUB variants (other sizes, addressing modes)
 - [ ] AND, OR, EOR, NOT

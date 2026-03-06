@@ -29,6 +29,10 @@ test: $(TARGET)
 	output=$$(./$(TARGET) move_b 2>&1); echo "$$output" | grep -q "D1=0x0000002A" && echo "  move_b:   PASS" || { echo "  move_b:   FAIL"; failed=1; }; \
 	output=$$(./$(TARGET) move_w_mem 2>&1); echo "$$output" | grep -q "D1=0x0000FFFF" && echo "  move_w_mem: PASS" || { echo "  move_w_mem: FAIL"; failed=1; }; \
 	output=$$(./$(TARGET) move_b_mem 2>&1); echo "$$output" | grep -q "D1=0x000000AB" && echo "  move_b_mem: PASS" || { echo "  move_b_mem: FAIL"; failed=1; }; \
+	output=$$(./$(TARGET) move_imm 2>&1); echo "$$output" | grep -q "D0=0x12345678" && echo "  move_imm: PASS" || { echo "  move_imm: FAIL"; failed=1; }; \
+	output=$$(./$(TARGET) move_imm_mem 2>&1); echo "$$output" | grep -q "D1=0xDEADBEEF" && echo "  move_imm_mem: PASS" || { echo "  move_imm_mem: FAIL"; failed=1; }; \
+	output=$$(./$(TARGET) move_anp 2>&1); echo "$$output" | grep -q "D1=0x12345678" && echo "$$output" | grep -q "A7=0x00001004" && echo "  move_anp: PASS" || { echo "  move_anp: FAIL"; failed=1; }; \
+	output=$$(./$(TARGET) move_disp 2>&1); echo "$$output" | grep -q "D1=0x12345678" && echo "  move_disp: PASS" || { echo "  move_disp: FAIL"; failed=1; }; \
 	output=$$(./$(TARGET) moveq 2>&1); echo "$$output" | grep -q "D0=0x0000002A" && echo "$$output" | grep -q "D1=0xFFFFFFFF" && echo "  moveq:  PASS" || { echo "  moveq:  FAIL"; failed=1; }; \
 	output=$$(./$(TARGET) add 2>&1); echo "$$output" | grep -q "D1=0x0000002A" && echo "  add:    PASS" || { echo "  add:    FAIL"; failed=1; }; \
 	output=$$(./$(TARGET) sub 2>&1); echo "$$output" | grep -q "D1=0x0000002A" && echo "  sub:    PASS" || { echo "  sub:    FAIL"; failed=1; }; \
