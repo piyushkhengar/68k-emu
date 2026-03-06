@@ -43,6 +43,11 @@ void dispatch_move_b(uint16_t op)
     op_move_generic(op, 1);
 }
 
+void dispatch_move_w(uint16_t op)
+{
+    op_move_generic(op, 2);
+}
+
 void dispatch_move_l(uint16_t op)
 {
     if ((op & 0x003F) == 0x3C && (op & 0x0E00) == 0x0A00) {
@@ -50,9 +55,4 @@ void dispatch_move_l(uint16_t op)
         return;
     }
     op_move_generic(op, 4);
-}
-
-void dispatch_move_w(uint16_t op)
-{
-    op_move_generic(op, 2);
 }

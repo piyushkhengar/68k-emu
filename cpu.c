@@ -100,8 +100,8 @@ typedef void (*op_handler_fn)(uint16_t op);
 static const op_handler_fn dispatch_top[16] = {
     [0x0] = op_unimplemented,
     [0x1] = dispatch_move_b,
-    [0x2] = dispatch_move_l,
     [0x3] = dispatch_move_w,
+    [0x2] = dispatch_move_l,
     [0x4] = dispatch_4xxx,
     [0x5] = op_unimplemented,
     [0x6] = op_bcc,
