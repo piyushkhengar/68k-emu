@@ -2,7 +2,7 @@ CC = gcc
 CFLAGS = -Wall -Wextra -g -std=c11
 TARGET = 68k-emu
 
-SRCS = main.c cpu.c memory.c
+SRCS = main.c cpu.c memory.c move.c alu.c branch.c control.c
 OBJS = $(SRCS:.c=.o)
 
 .PHONY: all clean test

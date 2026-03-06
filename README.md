@@ -77,9 +77,14 @@ make test
 
 ```
 68k-emu/
-├── main.c      - Entry point, load ROM, run loop
-├── cpu.c/h     - CPU state and instruction execution
-├── memory.c/h  - Bus/memory interface (RAM, read/write)
+├── main.c           - Entry point, load ROM, run loop
+├── cpu.c/h          - CPU state, fetch, flags, dispatch table
+├── cpu_internal.h   - Shared declarations for instruction modules
+├── move.c/h          - MOVE.B, MOVE.W, MOVE.L handlers
+├── alu.c/h          - MOVEQ, ADD, SUB, CMP handlers
+├── branch.c/h       - Bcc (branch on condition) handlers
+├── control.c/h      - NOP, RTS handlers
+├── memory.c/h       - Bus/memory interface (RAM, read/write)
 ├── Makefile
 └── README.md
 ```
