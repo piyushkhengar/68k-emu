@@ -466,122 +466,86 @@ static const uint8_t move_b_dn_disp_test[] = {
     0x4E, 0x71, 0x60, 0xFC,
 };
 
+/* --- Data-driven built-in test table --- */
+
+typedef struct {
+    const char *name;
+    const uint8_t *rom;
+    size_t size;
+    const char *description;
+    int max_steps;  /* 0 = default 100 */
+} builtin_test_t;
+
+static const builtin_test_t builtin_tests[] = {
+    { "move",    move_test, sizeof(move_test), "Running MOVE.L test", 0 },
+    { "test",    move_test, sizeof(move_test), "Running MOVE.L test", 0 },
+    { "move_mem", move_mem_test, sizeof(move_mem_test), "Running MOVE.L (An)/Dn memory test", 0 },
+    { "move_w",  move_w_test, sizeof(move_w_test), "Running MOVE.W test", 0 },
+    { "move_b",  move_b_test, sizeof(move_b_test), "Running MOVE.B test", 0 },
+    { "move_w_mem", move_w_mem_test, sizeof(move_w_mem_test), "Running MOVE.W memory test", 0 },
+    { "move_b_mem", move_b_mem_test, sizeof(move_b_mem_test), "Running MOVE.B memory test", 0 },
+    { "move_imm", move_imm_test, sizeof(move_imm_test), "Running MOVE.L #imm, Dn test", 0 },
+    { "move_imm_mem", move_imm_mem_test, sizeof(move_imm_mem_test), "Running MOVE.L #imm, (An) test", 0 },
+    { "move_anp", move_anp_test, sizeof(move_anp_test), "Running MOVE.L (An)+ test", 0 },
+    { "move_disp", move_disp_test, sizeof(move_disp_test), "Running MOVE.L d(An) test", 0 },
+    { "move_b_imm_dn", move_b_imm_dn_test, sizeof(move_b_imm_dn_test), "Running MOVE.B #imm, Dn test", 0 },
+    { "move_w_imm_dn", move_w_imm_dn_test, sizeof(move_w_imm_dn_test), "Running MOVE.W #imm, Dn test", 0 },
+    { "move_b_imm_an", move_b_imm_an_test, sizeof(move_b_imm_an_test), "Running MOVE.B #imm, (An) test", 0 },
+    { "move_w_imm_an", move_w_imm_an_test, sizeof(move_w_imm_an_test), "Running MOVE.W #imm, (An) test", 0 },
+    { "move_l_imm_disp", move_l_imm_disp_test, sizeof(move_l_imm_disp_test), "Running MOVE.L #imm, d(An) test", 0 },
+    { "move_l_pdec_dn", move_l_pdec_dn_test, sizeof(move_l_pdec_dn_test), "Running MOVE.L -(An), Dn test", 0 },
+    { "move_l_dn_anp", move_l_dn_anp_test, sizeof(move_l_dn_anp_test), "Running MOVE.L Dn, (An)+ test", 0 },
+    { "move_l_dn_pdec", move_l_dn_pdec_test, sizeof(move_l_dn_pdec_test), "Running MOVE.L Dn, -(An) test", 0 },
+    { "move_w_anp_dn", move_w_anp_dn_test, sizeof(move_w_anp_dn_test), "Running MOVE.W (An)+, Dn test", 0 },
+    { "move_w_pdec_dn", move_w_pdec_dn_test, sizeof(move_w_pdec_dn_test), "Running MOVE.W -(An), Dn test", 0 },
+    { "move_w_dn_anp", move_w_dn_anp_test, sizeof(move_w_dn_anp_test), "Running MOVE.W Dn, (An)+ test", 0 },
+    { "move_w_dn_pdec", move_w_dn_pdec_test, sizeof(move_w_dn_pdec_test), "Running MOVE.W Dn, -(An) test", 0 },
+    { "move_b_anp_dn", move_b_anp_dn_test, sizeof(move_b_anp_dn_test), "Running MOVE.B (An)+, Dn test", 0 },
+    { "move_b_pdec_dn", move_b_pdec_dn_test, sizeof(move_b_pdec_dn_test), "Running MOVE.B -(An), Dn test", 0 },
+    { "move_b_dn_anp", move_b_dn_anp_test, sizeof(move_b_dn_anp_test), "Running MOVE.B Dn, (An)+ test", 0 },
+    { "move_b_dn_pdec", move_b_dn_pdec_test, sizeof(move_b_dn_pdec_test), "Running MOVE.B Dn, -(An) test", 0 },
+    { "move_w_disp_dn", move_w_disp_dn_test, sizeof(move_w_disp_dn_test), "Running MOVE.W d(An), Dn test", 0 },
+    { "move_w_dn_disp", move_w_dn_disp_test, sizeof(move_w_dn_disp_test), "Running MOVE.W Dn, d(An) test", 0 },
+    { "move_b_disp_dn", move_b_disp_dn_test, sizeof(move_b_disp_dn_test), "Running MOVE.B d(An), Dn test", 0 },
+    { "move_b_dn_disp", move_b_dn_disp_test, sizeof(move_b_dn_disp_test), "Running MOVE.B Dn, d(An) test", 0 },
+    { "moveq", moveq_test, sizeof(moveq_test), "Running MOVEQ test", 0 },
+    { "add", add_test, sizeof(add_test), "Running ADD.L test", 0 },
+    { "sub", sub_test, sizeof(sub_test), "Running SUB.L test", 0 },
+    { "cmp", cmp_test, sizeof(cmp_test), "Running CMP.L test", 0 },
+    { "bcc", bcc_test, sizeof(bcc_test), "Running Bcc (BEQ/BNE) test", 0 },
+    { "bcc_all", bcc_all_test, sizeof(bcc_all_test), "Running Bcc comprehensive test (all 15 conditions)", 500 },
+    { "bsr_rts", bsr_rts_test, sizeof(bsr_rts_test), "Running BSR/RTS test", 0 },
+};
+
+#define NUM_BUILTIN_TESTS (sizeof(builtin_tests) / sizeof(builtin_tests[0]))
+
+static const builtin_test_t *find_builtin_test(const char *name)
+{
+    for (size_t i = 0; i < NUM_BUILTIN_TESTS; i++) {
+        if (strcmp(builtin_tests[i].name, name) == 0)
+            return &builtin_tests[i];
+    }
+    return NULL;
+}
+
+static void print_cpu_state(void)
+{
+    printf("D0=0x%08X D1=0x%08X D2=0x%08X A7=0x%08X SR=0x%04X\n",
+           cpu.d[0], cpu.d[1], cpu.d[2], cpu.a[7], cpu.sr);
+}
+
 int main(int argc, char *argv[])
 {
     mem_init();
     cpu_init();
 
-    if (argc >= 2 && (strcmp(argv[1], "move") == 0 || strcmp(argv[1], "test") == 0)) {
-        mem_load_rom(move_test, sizeof(move_test));
-        printf("Running MOVE.L test\n");
-    } else if (argc >= 2 && strcmp(argv[1], "move_mem") == 0) {
-        mem_load_rom(move_mem_test, sizeof(move_mem_test));
-        printf("Running MOVE.L (An)/Dn memory test\n");
-    } else if (argc >= 2 && strcmp(argv[1], "move_w") == 0) {
-        mem_load_rom(move_w_test, sizeof(move_w_test));
-        printf("Running MOVE.W test\n");
-    } else if (argc >= 2 && strcmp(argv[1], "move_b") == 0) {
-        mem_load_rom(move_b_test, sizeof(move_b_test));
-        printf("Running MOVE.B test\n");
-    } else if (argc >= 2 && strcmp(argv[1], "move_w_mem") == 0) {
-        mem_load_rom(move_w_mem_test, sizeof(move_w_mem_test));
-        printf("Running MOVE.W memory test\n");
-    } else if (argc >= 2 && strcmp(argv[1], "move_b_mem") == 0) {
-        mem_load_rom(move_b_mem_test, sizeof(move_b_mem_test));
-        printf("Running MOVE.B memory test\n");
-    } else if (argc >= 2 && strcmp(argv[1], "move_imm") == 0) {
-        mem_load_rom(move_imm_test, sizeof(move_imm_test));
-        printf("Running MOVE.L #imm, Dn test\n");
-    } else if (argc >= 2 && strcmp(argv[1], "move_imm_mem") == 0) {
-        mem_load_rom(move_imm_mem_test, sizeof(move_imm_mem_test));
-        printf("Running MOVE.L #imm, (An) test\n");
-    } else if (argc >= 2 && strcmp(argv[1], "move_anp") == 0) {
-        mem_load_rom(move_anp_test, sizeof(move_anp_test));
-        printf("Running MOVE.L (An)+ test\n");
-    } else if (argc >= 2 && strcmp(argv[1], "move_disp") == 0) {
-        mem_load_rom(move_disp_test, sizeof(move_disp_test));
-        printf("Running MOVE.L d(An) test\n");
-    } else if (argc >= 2 && strcmp(argv[1], "move_b_imm_dn") == 0) {
-        mem_load_rom(move_b_imm_dn_test, sizeof(move_b_imm_dn_test));
-        printf("Running MOVE.B #imm, Dn test\n");
-    } else if (argc >= 2 && strcmp(argv[1], "move_w_imm_dn") == 0) {
-        mem_load_rom(move_w_imm_dn_test, sizeof(move_w_imm_dn_test));
-        printf("Running MOVE.W #imm, Dn test\n");
-    } else if (argc >= 2 && strcmp(argv[1], "move_b_imm_an") == 0) {
-        mem_load_rom(move_b_imm_an_test, sizeof(move_b_imm_an_test));
-        printf("Running MOVE.B #imm, (An) test\n");
-    } else if (argc >= 2 && strcmp(argv[1], "move_w_imm_an") == 0) {
-        mem_load_rom(move_w_imm_an_test, sizeof(move_w_imm_an_test));
-        printf("Running MOVE.W #imm, (An) test\n");
-    } else if (argc >= 2 && strcmp(argv[1], "move_l_imm_disp") == 0) {
-        mem_load_rom(move_l_imm_disp_test, sizeof(move_l_imm_disp_test));
-        printf("Running MOVE.L #imm, d(An) test\n");
-    } else if (argc >= 2 && strcmp(argv[1], "move_l_pdec_dn") == 0) {
-        mem_load_rom(move_l_pdec_dn_test, sizeof(move_l_pdec_dn_test));
-        printf("Running MOVE.L -(An), Dn test\n");
-    } else if (argc >= 2 && strcmp(argv[1], "move_l_dn_anp") == 0) {
-        mem_load_rom(move_l_dn_anp_test, sizeof(move_l_dn_anp_test));
-        printf("Running MOVE.L Dn, (An)+ test\n");
-    } else if (argc >= 2 && strcmp(argv[1], "move_l_dn_pdec") == 0) {
-        mem_load_rom(move_l_dn_pdec_test, sizeof(move_l_dn_pdec_test));
-        printf("Running MOVE.L Dn, -(An) test\n");
-    } else if (argc >= 2 && strcmp(argv[1], "move_w_anp_dn") == 0) {
-        mem_load_rom(move_w_anp_dn_test, sizeof(move_w_anp_dn_test));
-        printf("Running MOVE.W (An)+, Dn test\n");
-    } else if (argc >= 2 && strcmp(argv[1], "move_w_pdec_dn") == 0) {
-        mem_load_rom(move_w_pdec_dn_test, sizeof(move_w_pdec_dn_test));
-        printf("Running MOVE.W -(An), Dn test\n");
-    } else if (argc >= 2 && strcmp(argv[1], "move_w_dn_anp") == 0) {
-        mem_load_rom(move_w_dn_anp_test, sizeof(move_w_dn_anp_test));
-        printf("Running MOVE.W Dn, (An)+ test\n");
-    } else if (argc >= 2 && strcmp(argv[1], "move_w_dn_pdec") == 0) {
-        mem_load_rom(move_w_dn_pdec_test, sizeof(move_w_dn_pdec_test));
-        printf("Running MOVE.W Dn, -(An) test\n");
-    } else if (argc >= 2 && strcmp(argv[1], "move_b_anp_dn") == 0) {
-        mem_load_rom(move_b_anp_dn_test, sizeof(move_b_anp_dn_test));
-        printf("Running MOVE.B (An)+, Dn test\n");
-    } else if (argc >= 2 && strcmp(argv[1], "move_b_pdec_dn") == 0) {
-        mem_load_rom(move_b_pdec_dn_test, sizeof(move_b_pdec_dn_test));
-        printf("Running MOVE.B -(An), Dn test\n");
-    } else if (argc >= 2 && strcmp(argv[1], "move_b_dn_anp") == 0) {
-        mem_load_rom(move_b_dn_anp_test, sizeof(move_b_dn_anp_test));
-        printf("Running MOVE.B Dn, (An)+ test\n");
-    } else if (argc >= 2 && strcmp(argv[1], "move_b_dn_pdec") == 0) {
-        mem_load_rom(move_b_dn_pdec_test, sizeof(move_b_dn_pdec_test));
-        printf("Running MOVE.B Dn, -(An) test\n");
-    } else if (argc >= 2 && strcmp(argv[1], "move_w_disp_dn") == 0) {
-        mem_load_rom(move_w_disp_dn_test, sizeof(move_w_disp_dn_test));
-        printf("Running MOVE.W d(An), Dn test\n");
-    } else if (argc >= 2 && strcmp(argv[1], "move_w_dn_disp") == 0) {
-        mem_load_rom(move_w_dn_disp_test, sizeof(move_w_dn_disp_test));
-        printf("Running MOVE.W Dn, d(An) test\n");
-    } else if (argc >= 2 && strcmp(argv[1], "move_b_disp_dn") == 0) {
-        mem_load_rom(move_b_disp_dn_test, sizeof(move_b_disp_dn_test));
-        printf("Running MOVE.B d(An), Dn test\n");
-    } else if (argc >= 2 && strcmp(argv[1], "move_b_dn_disp") == 0) {
-        mem_load_rom(move_b_dn_disp_test, sizeof(move_b_dn_disp_test));
-        printf("Running MOVE.B Dn, d(An) test\n");
-    } else if (argc >= 2 && strcmp(argv[1], "moveq") == 0) {
-        mem_load_rom(moveq_test, sizeof(moveq_test));
-        printf("Running MOVEQ test\n");
-    } else if (argc >= 2 && strcmp(argv[1], "add") == 0) {
-        mem_load_rom(add_test, sizeof(add_test));
-        printf("Running ADD.L test\n");
-    } else if (argc >= 2 && strcmp(argv[1], "sub") == 0) {
-        mem_load_rom(sub_test, sizeof(sub_test));
-        printf("Running SUB.L test\n");
-    } else if (argc >= 2 && strcmp(argv[1], "cmp") == 0) {
-        mem_load_rom(cmp_test, sizeof(cmp_test));
-        printf("Running CMP.L test\n");
-    } else if (argc >= 2 && strcmp(argv[1], "bcc") == 0) {
-        mem_load_rom(bcc_test, sizeof(bcc_test));
-        printf("Running Bcc (BEQ/BNE) test\n");
-    } else if (argc >= 2 && strcmp(argv[1], "bcc_all") == 0) {
-        mem_load_rom(bcc_all_test, sizeof(bcc_all_test));
-        printf("Running Bcc comprehensive test (all 15 conditions)\n");
-    } else if (argc >= 2 && strcmp(argv[1], "bsr_rts") == 0) {
-        mem_load_rom(bsr_rts_test, sizeof(bsr_rts_test));
-        printf("Running BSR/RTS test\n");
+    const builtin_test_t *test = NULL;
+    if (argc >= 2)
+        test = find_builtin_test(argv[1]);
+
+    if (test) {
+        mem_load_rom(test->rom, test->size);
+        printf("%s\n", test->description);
     } else if (argc >= 2) {
         FILE *f = fopen(argv[1], "rb");
         if (!f) {
@@ -611,9 +575,7 @@ int main(int argc, char *argv[])
     printf("PC=0x%08X  SP=0x%08X\n", cpu.pc, cpu.a[7]);
 
     int steps = 0;
-    int max_steps = 100;
-    if (argc >= 2 && strcmp(argv[1], "bcc_all") == 0)
-        max_steps = 500;
+    int max_steps = test && test->max_steps ? test->max_steps : 100;
     while (steps < max_steps) {
         int c = cpu_step();
         if (c == 0)
@@ -623,102 +585,8 @@ int main(int argc, char *argv[])
 
     printf("Executed %d instructions. PC=0x%08X %s\n",
            steps, cpu.pc, cpu.halted ? "(halted)" : "");
-    if (argc >= 2 && (strcmp(argv[1], "move") == 0 || strcmp(argv[1], "test") == 0))
-        printf("D0=0x%08X D1=0x%08X D2=0x%08X\n", cpu.d[0], cpu.d[1], cpu.d[2]);
-    if (argc >= 2 && strcmp(argv[1], "move_mem") == 0)
-        printf("D0=0x%08X D1=0x%08X (expected: both 42, store/load via A7) SR=0x%04X\n",
-               cpu.d[0], cpu.d[1], cpu.sr);
-    if (argc >= 2 && strcmp(argv[1], "move_w") == 0)
-        printf("D0=0x%08X D1=0x%08X (expected: D0=42, D1 lower word=0x002A) SR=0x%04X\n",
-               cpu.d[0], cpu.d[1], cpu.sr);
-    if (argc >= 2 && strcmp(argv[1], "move_b") == 0)
-        printf("D0=0x%08X D1=0x%08X (expected: D0=42, D1 lower byte=0x2A) SR=0x%04X\n",
-               cpu.d[0], cpu.d[1], cpu.sr);
-    if (argc >= 2 && strcmp(argv[1], "move_w_mem") == 0)
-        printf("D0=0x%08X D1=0x%08X (expected: D1 lower word=0xFFFF) SR=0x%04X\n",
-               cpu.d[0], cpu.d[1], cpu.sr);
-    if (argc >= 2 && strcmp(argv[1], "move_b_mem") == 0)
-        printf("D0=0x%08X D1=0x%08X (expected: D1 lower byte=0xAB) SR=0x%04X\n",
-               cpu.d[0], cpu.d[1], cpu.sr);
-    if (argc >= 2 && strcmp(argv[1], "move_imm") == 0)
-        printf("D0=0x%08X (expected: 0x12345678) SR=0x%04X\n",
-               cpu.d[0], cpu.sr);
-    if (argc >= 2 && strcmp(argv[1], "move_imm_mem") == 0)
-        printf("D1=0x%08X (expected: 0xDEADBEEF) SR=0x%04X\n",
-               cpu.d[1], cpu.sr);
-    if (argc >= 2 && strcmp(argv[1], "move_anp") == 0)
-        printf("D1=0x%08X A7=0x%08X (expected: D1=0x12345678, A7=0x1004) SR=0x%04X\n",
-               cpu.d[1], cpu.a[7], cpu.sr);
-    if (argc >= 2 && strcmp(argv[1], "move_disp") == 0)
-        printf("D1=0x%08X (expected: 0x12345678) SR=0x%04X\n",
-               cpu.d[1], cpu.sr);
-    if (argc >= 2 && strcmp(argv[1], "moveq") == 0)
-        printf("D0=0x%08X D1=0x%08X (expected: D0=42, D1=0xFFFFFFFF) SR=0x%04X\n",
-               cpu.d[0], cpu.d[1], cpu.sr);
-    if (argc >= 2 && strcmp(argv[1], "add") == 0)
-        printf("D0=0x%08X D1=0x%08X (expected: D0=10, D1=42) SR=0x%04X\n",
-               cpu.d[0], cpu.d[1], cpu.sr);
-    if (argc >= 2 && strcmp(argv[1], "sub") == 0)
-        printf("D0=0x%08X D1=0x%08X (expected: D0=8, D1=42) SR=0x%04X\n",
-               cpu.d[0], cpu.d[1], cpu.sr);
-    if (argc >= 2 && strcmp(argv[1], "cmp") == 0)
-        printf("D0=0x%08X D1=0x%08X (expected: both 10, Z flag set) SR=0x%04X\n",
-               cpu.d[0], cpu.d[1], cpu.sr);
-    if (argc >= 2 && strcmp(argv[1], "bcc") == 0)
-        printf("D0=0x%08X D1=0x%08X D2=0x%08X (expected: D2=2, BEQ+BNE both branched) SR=0x%04X\n",
-               cpu.d[0], cpu.d[1], cpu.d[2], cpu.sr);
-    if (argc >= 2 && strcmp(argv[1], "bcc_all") == 0)
-        printf("D2=0x%08X (expected: 15 conditions branched) SR=0x%04X\n",
-               cpu.d[2], cpu.sr);
-    if (argc >= 2 && strcmp(argv[1], "bsr_rts") == 0)
-        printf("D2=0x%08X SP=0x%08X (expected: D2=42, BSR/RTS worked) SR=0x%04X\n",
-               cpu.d[2], cpu.a[7], cpu.sr);
-    if (argc >= 2 && strcmp(argv[1], "move_b_imm_dn") == 0)
-        printf("D0=0x%08X (expected: low byte 0xAB) SR=0x%04X\n", cpu.d[0], cpu.sr);
-    if (argc >= 2 && strcmp(argv[1], "move_w_imm_dn") == 0)
-        printf("D0=0x%08X (expected: low word 0x1234) SR=0x%04X\n", cpu.d[0], cpu.sr);
-    if (argc >= 2 && strcmp(argv[1], "move_b_imm_an") == 0)
-        printf("D1=0x%08X (expected: low byte 0xAB) SR=0x%04X\n", cpu.d[1], cpu.sr);
-    if (argc >= 2 && strcmp(argv[1], "move_w_imm_an") == 0)
-        printf("D1=0x%08X (expected: low word 0x1234) SR=0x%04X\n", cpu.d[1], cpu.sr);
-    if (argc >= 2 && strcmp(argv[1], "move_l_imm_disp") == 0)
-        printf("D1=0x%08X (expected: 0x12345678) SR=0x%04X\n", cpu.d[1], cpu.sr);
-    if (argc >= 2 && strcmp(argv[1], "move_l_pdec_dn") == 0)
-        printf("D1=0x%08X A7=0x%08X (expected: D1=0x12345678, A7=0xFFC) SR=0x%04X\n",
-               cpu.d[1], cpu.a[7], cpu.sr);
-    if (argc >= 2 && strcmp(argv[1], "move_l_dn_anp") == 0)
-        printf("A7=0x%08X (expected: 0x1004) SR=0x%04X\n", cpu.a[7], cpu.sr);
-    if (argc >= 2 && strcmp(argv[1], "move_l_dn_pdec") == 0)
-        printf("D1=0x%08X A7=0x%08X (expected: D1=0x12345678, A7=0x1000) SR=0x%04X\n",
-               cpu.d[1], cpu.a[7], cpu.sr);
-    if (argc >= 2 && strcmp(argv[1], "move_w_anp_dn") == 0)
-        printf("D1=0x%08X A7=0x%08X (expected: D1 low word 0x1234, A7=0x1002) SR=0x%04X\n",
-               cpu.d[1], cpu.a[7], cpu.sr);
-    if (argc >= 2 && strcmp(argv[1], "move_w_pdec_dn") == 0)
-        printf("D1=0x%08X A7=0x%08X (expected: D1 low word 0x1234, A7=0xFFE) SR=0x%04X\n",
-               cpu.d[1], cpu.a[7], cpu.sr);
-    if (argc >= 2 && strcmp(argv[1], "move_w_dn_anp") == 0)
-        printf("D1=0x%08X (expected: low word 0x1234) SR=0x%04X\n", cpu.d[1], cpu.sr);
-    if (argc >= 2 && strcmp(argv[1], "move_w_dn_pdec") == 0)
-        printf("D1=0x%08X (expected: low word 0x1234) SR=0x%04X\n", cpu.d[1], cpu.sr);
-    if (argc >= 2 && strcmp(argv[1], "move_b_anp_dn") == 0)
-        printf("D1=0x%08X A7=0x%08X (expected: D1 low byte 0xAB, A7=0x1002) SR=0x%04X\n",
-               cpu.d[1], cpu.a[7], cpu.sr);
-    if (argc >= 2 && strcmp(argv[1], "move_b_pdec_dn") == 0)
-        printf("D1=0x%08X A7=0x%08X (expected: D1 low byte 0xAB, A7=0xFFE) SR=0x%04X\n",
-               cpu.d[1], cpu.a[7], cpu.sr);
-    if (argc >= 2 && strcmp(argv[1], "move_b_dn_anp") == 0)
-        printf("D1=0x%08X (expected: low byte 0xAB) SR=0x%04X\n", cpu.d[1], cpu.sr);
-    if (argc >= 2 && strcmp(argv[1], "move_b_dn_pdec") == 0)
-        printf("D1=0x%08X (expected: low byte 0xAB) SR=0x%04X\n", cpu.d[1], cpu.sr);
-    if (argc >= 2 && strcmp(argv[1], "move_w_disp_dn") == 0)
-        printf("D1=0x%08X (expected: low word 0x1234) SR=0x%04X\n", cpu.d[1], cpu.sr);
-    if (argc >= 2 && strcmp(argv[1], "move_w_dn_disp") == 0)
-        printf("D1=0x%08X (expected: low word 0x1234) SR=0x%04X\n", cpu.d[1], cpu.sr);
-    if (argc >= 2 && strcmp(argv[1], "move_b_disp_dn") == 0)
-        printf("D1=0x%08X (expected: low byte 0xAB) SR=0x%04X\n", cpu.d[1], cpu.sr);
-    if (argc >= 2 && strcmp(argv[1], "move_b_dn_disp") == 0)
-        printf("D1=0x%08X (expected: low byte 0xAB) SR=0x%04X\n", cpu.d[1], cpu.sr);
+    if (test)
+        print_cpu_state();
 
     return 0;
 }
