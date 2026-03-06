@@ -221,16 +221,66 @@ static const uint8_t bsr_rts_test[] = {
     0x4E, 0x75,               /* 0x1A: RTS */
 };
 
-/* SUB.L test: 50 - 8 = 42 in D1 */
-static const uint8_t sub_test[] = {
-    0x00, 0x00, 0x00, 0x10,   /* Reset: PC = 0x00000010 */
-    0x00, 0x00, 0x10, 0x00,   /* Reset: SP = 0x00001000 */
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  /* Padding */
-    0x70, 0x08,               /* 0x10: MOVEQ #8, D0 */
-    0x72, 0x32,               /* 0x12: MOVEQ #50, D1 */
-    0x98, 0x80,               /* 0x14: SUB.L D0, D1  (D1 = 50 - 8 = 42) */
-    0x4E, 0x71,               /* 0x16: NOP */
-    0x60, 0xFC,               /* 0x18: BRA.S -4 (loop) */
+/* --- ADD/SUB/CMP tests: B, W, L order --- */
+
+/* ADD.B test: 10 + 32 = 42 in D1 (byte) */
+static const uint8_t add_b_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x70, 0x0A,               /* MOVEQ #10, D0 */
+    0x72, 0x20,               /* MOVEQ #32, D1 */
+    0xD8, 0x40,               /* ADD.B D0, D1  (D1 low byte = 42) */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* ADD.W test: 10 + 32 = 42 in D1 (word) */
+static const uint8_t add_w_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x70, 0x0A,               /* MOVEQ #10, D0 */
+    0x72, 0x20,               /* MOVEQ #32, D1 */
+    0xD9, 0x40,               /* ADD.W D0, D1  (D1 low word = 42) */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* SUB.B test: 50 - 8 = 42 in D1 (byte) */
+static const uint8_t sub_b_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x70, 0x08,               /* MOVEQ #8, D0 */
+    0x72, 0x32,               /* MOVEQ #50, D1 */
+    0x98, 0x40,               /* SUB.B D0, D1  (D1 low byte = 42) */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* SUB.W test: 50 - 8 = 42 in D1 (word) */
+static const uint8_t sub_w_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x70, 0x08,               /* MOVEQ #8, D0 */
+    0x72, 0x32,               /* MOVEQ #50, D1 */
+    0x99, 0x40,               /* SUB.W D0, D1  (D1 low word = 42) */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* CMP.B test: compare 10 and 10, Z flag set */
+static const uint8_t cmp_b_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x70, 0x0A,               /* MOVEQ #10, D0 */
+    0x72, 0x0A,               /* MOVEQ #10, D1 */
+    0xB8, 0x40,               /* CMP.B D0, D1  (Z set) */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* CMP.W test: compare 10 and 10, Z flag set */
+static const uint8_t cmp_w_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x70, 0x0A,               /* MOVEQ #10, D0 */
+    0x72, 0x0A,               /* MOVEQ #10, D1 */
+    0xB9, 0x40,               /* CMP.W D0, D1  (Z set) */
+    0x4E, 0x71, 0x60, 0xFC,
 };
 
 /* ADD.L test: 10 + 32 = 42 in D1 */
@@ -241,6 +291,18 @@ static const uint8_t add_test[] = {
     0x70, 0x0A,               /* 0x10: MOVEQ #10, D0 */
     0x72, 0x20,               /* 0x12: MOVEQ #32, D1 */
     0xD8, 0x80,               /* 0x14: ADD.L D0, D1  (D1 = 10 + 32 = 42) */
+    0x4E, 0x71,               /* 0x16: NOP */
+    0x60, 0xFC,               /* 0x18: BRA.S -4 (loop) */
+};
+
+/* SUB.L test: 50 - 8 = 42 in D1 */
+static const uint8_t sub_test[] = {
+    0x00, 0x00, 0x00, 0x10,   /* Reset: PC = 0x00000010 */
+    0x00, 0x00, 0x10, 0x00,   /* Reset: SP = 0x00001000 */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  /* Padding */
+    0x70, 0x08,               /* 0x10: MOVEQ #8, D0 */
+    0x72, 0x32,               /* 0x12: MOVEQ #50, D1 */
+    0x98, 0x80,               /* 0x14: SUB.L D0, D1  (D1 = 50 - 8 = 42) */
     0x4E, 0x71,               /* 0x16: NOP */
     0x60, 0xFC,               /* 0x18: BRA.S -4 (loop) */
 };
@@ -419,9 +481,7 @@ static const uint8_t move_l_dn_pdec_test[] = {
 /* --- Built-in test table --- */
 
 static const builtin_test_t builtin_tests[] = {
-    { "move",    move_test, sizeof(move_test), "Running MOVE.L test", 0 },
-    { "test",    move_test, sizeof(move_test), "Running MOVE.L test", 0 },
-    { "move_mem", move_mem_test, sizeof(move_mem_test), "Running MOVE.L (An)/Dn memory test", 0 },
+    /* MOVE.B */
     { "move_b",  move_b_test, sizeof(move_b_test), "Running MOVE.B test", 0 },
     { "move_b_mem", move_b_mem_test, sizeof(move_b_mem_test), "Running MOVE.B memory test", 0 },
     { "move_b_imm_dn", move_b_imm_dn_test, sizeof(move_b_imm_dn_test), "Running MOVE.B #imm, Dn test", 0 },
@@ -432,6 +492,7 @@ static const builtin_test_t builtin_tests[] = {
     { "move_b_dn_pdec", move_b_dn_pdec_test, sizeof(move_b_dn_pdec_test), "Running MOVE.B Dn, -(An) test", 0 },
     { "move_b_disp_dn", move_b_disp_dn_test, sizeof(move_b_disp_dn_test), "Running MOVE.B d(An), Dn test", 0 },
     { "move_b_dn_disp", move_b_dn_disp_test, sizeof(move_b_dn_disp_test), "Running MOVE.B Dn, d(An) test", 0 },
+    /* MOVE.W */
     { "move_w",  move_w_test, sizeof(move_w_test), "Running MOVE.W test", 0 },
     { "move_w_mem", move_w_mem_test, sizeof(move_w_mem_test), "Running MOVE.W memory test", 0 },
     { "move_w_imm_dn", move_w_imm_dn_test, sizeof(move_w_imm_dn_test), "Running MOVE.W #imm, Dn test", 0 },
@@ -442,6 +503,10 @@ static const builtin_test_t builtin_tests[] = {
     { "move_w_dn_pdec", move_w_dn_pdec_test, sizeof(move_w_dn_pdec_test), "Running MOVE.W Dn, -(An) test", 0 },
     { "move_w_disp_dn", move_w_disp_dn_test, sizeof(move_w_disp_dn_test), "Running MOVE.W d(An), Dn test", 0 },
     { "move_w_dn_disp", move_w_dn_disp_test, sizeof(move_w_dn_disp_test), "Running MOVE.W Dn, d(An) test", 0 },
+    /* MOVE.L */
+    { "move",    move_test, sizeof(move_test), "Running MOVE.L test", 0 },
+    { "test",    move_test, sizeof(move_test), "Running MOVE.L test", 0 },
+    { "move_mem", move_mem_test, sizeof(move_mem_test), "Running MOVE.L (An)/Dn memory test", 0 },
     { "move_imm", move_imm_test, sizeof(move_imm_test), "Running MOVE.L #imm, Dn test", 0 },
     { "move_imm_mem", move_imm_mem_test, sizeof(move_imm_mem_test), "Running MOVE.L #imm, (An) test", 0 },
     { "move_anp", move_anp_test, sizeof(move_anp_test), "Running MOVE.L (An)+ test", 0 },
@@ -451,8 +516,14 @@ static const builtin_test_t builtin_tests[] = {
     { "move_l_dn_anp", move_l_dn_anp_test, sizeof(move_l_dn_anp_test), "Running MOVE.L Dn, (An)+ test", 0 },
     { "move_l_dn_pdec", move_l_dn_pdec_test, sizeof(move_l_dn_pdec_test), "Running MOVE.L Dn, -(An) test", 0 },
     { "moveq", moveq_test, sizeof(moveq_test), "Running MOVEQ test", 0 },
+    { "add_b", add_b_test, sizeof(add_b_test), "Running ADD.B test", 0 },
+    { "add_w", add_w_test, sizeof(add_w_test), "Running ADD.W test", 0 },
     { "add", add_test, sizeof(add_test), "Running ADD.L test", 0 },
+    { "sub_b", sub_b_test, sizeof(sub_b_test), "Running SUB.B test", 0 },
+    { "sub_w", sub_w_test, sizeof(sub_w_test), "Running SUB.W test", 0 },
     { "sub", sub_test, sizeof(sub_test), "Running SUB.L test", 0 },
+    { "cmp_b", cmp_b_test, sizeof(cmp_b_test), "Running CMP.B test", 0 },
+    { "cmp_w", cmp_w_test, sizeof(cmp_w_test), "Running CMP.W test", 0 },
     { "cmp", cmp_test, sizeof(cmp_test), "Running CMP.L test", 0 },
     { "bcc", bcc_test, sizeof(bcc_test), "Running Bcc (BEQ/BNE) test", 0 },
     { "bcc_all", bcc_all_test, sizeof(bcc_all_test), "Running Bcc comprehensive test (all 15 conditions)", 500 },
