@@ -15,8 +15,8 @@
 
 static int alu_size(int op)
 {
-    int sz = (op >> 6) & 3;
-    return (sz == 0) ? 1 : (sz == 1) ? 2 : 4;
+    int size_code = (op >> 6) & 3;
+    return (size_code == 0) ? 1 : (size_code == 1) ? 2 : 4;
 }
 
 /* Dn register: bits 11-9 encoded as (high_byte - base) >> 3. Base: ADD 0xD0/0xE0/0xF0, SUB 0x90, CMP 0xB0 */
@@ -165,37 +165,37 @@ static void op_cmp_generic(uint16_t op, int size)
 /* ADDX: dest = dest + src + X. Format: 1101 Rx 1 SIZE 0 0 R/M Ry. Z: cleared if nonzero. */
 static void op_addx(uint16_t op)
 {
-    int rx = (op >> 9) & 7;
-    int ry = (op >> 0) & 7;
+    int dest_reg = (op >> 9) & 7;
+    int src_reg = (op >> 0) & 7;
     int size = alu_size(op);
-    int rm = (op >> 3) & 1;
+    int is_memory_mode = (op >> 3) & 1;
     uint32_t xbit = (cpu.sr & SR_X) ? 1 : 0;
 
-    if (rm == 0) {
+    if (is_memory_mode == 0) {
         /* ADDX Dy, Dx */
-        uint32_t src = cpu.d[ry];
-        uint32_t dest_val = cpu.d[rx];
+        uint32_t src = cpu.d[src_reg];
+        uint32_t dest_val = cpu.d[dest_reg];
         uint32_t result;
         if (size == 1) {
             src &= 0xFF;
             dest_val &= 0xFF;
             result = (dest_val + src + xbit) & 0xFF;
-            cpu.d[rx] = (cpu.d[rx] & 0xFFFFFF00) | result;
+            cpu.d[dest_reg] = (cpu.d[dest_reg] & 0xFFFFFF00) | result;
         } else if (size == 2) {
             src &= 0xFFFF;
             dest_val &= 0xFFFF;
             result = (dest_val + src + xbit) & 0xFFFF;
-            cpu.d[rx] = (cpu.d[rx] & 0xFFFF0000) | result;
+            cpu.d[dest_reg] = (cpu.d[dest_reg] & 0xFFFF0000) | result;
         } else {
             result = dest_val + src + xbit;
-            cpu.d[rx] = result;
+            cpu.d[dest_reg] = result;
         }
         set_nzvc_addx_sized(result, dest_val, src, size);
     } else {
         /* ADDX -(Ay), -(Ax): decrement both, fetch, add+X, store to Ax */
-        cpu.a[ry] -= ea_step(ry, size);
-        cpu.a[rx] -= ea_step(rx, size);
-        uint32_t addr_y = cpu.a[ry], addr_x = cpu.a[rx];
+        cpu.a[src_reg] -= ea_step(src_reg, size);
+        cpu.a[dest_reg] -= ea_step(dest_reg, size);
+        uint32_t addr_y = cpu.a[src_reg], addr_x = cpu.a[dest_reg];
         uint32_t src, dest_val;
         if (size == 1) {
             src = mem_read8(addr_y) & 0xFF;
@@ -222,37 +222,37 @@ static void op_addx(uint16_t op)
 /* SUBX: dest = dest - src - X. Format: 1001 Dy 1 SIZE 0 0 R/M Dx. Z: cleared if nonzero. */
 static void op_subx(uint16_t op)
 {
-    int rx = (op >> 9) & 7;   /* dest Dy/Ay */
-    int ry = (op >> 0) & 7;   /* src Dx/Ax */
+    int dest_reg = (op >> 9) & 7;   /* dest Dy/Ay */
+    int src_reg = (op >> 0) & 7;   /* src Dx/Ax */
     int size = alu_size(op);
-    int rm = (op >> 3) & 1;
+    int is_memory_mode = (op >> 3) & 1;
     uint32_t xbit = (cpu.sr & SR_X) ? 1 : 0;
 
-    if (rm == 0) {
+    if (is_memory_mode == 0) {
         /* SUBX Dx, Dy */
-        uint32_t src = cpu.d[ry];
-        uint32_t dest_val = cpu.d[rx];
+        uint32_t src = cpu.d[src_reg];
+        uint32_t dest_val = cpu.d[dest_reg];
         uint32_t result;
         if (size == 1) {
             src &= 0xFF;
             dest_val &= 0xFF;
             result = (dest_val - src - xbit) & 0xFF;
-            cpu.d[rx] = (cpu.d[rx] & 0xFFFFFF00) | result;
+            cpu.d[dest_reg] = (cpu.d[dest_reg] & 0xFFFFFF00) | result;
         } else if (size == 2) {
             src &= 0xFFFF;
             dest_val &= 0xFFFF;
             result = (dest_val - src - xbit) & 0xFFFF;
-            cpu.d[rx] = (cpu.d[rx] & 0xFFFF0000) | result;
+            cpu.d[dest_reg] = (cpu.d[dest_reg] & 0xFFFF0000) | result;
         } else {
             result = dest_val - src - xbit;
-            cpu.d[rx] = result;
+            cpu.d[dest_reg] = result;
         }
         set_nzvc_subx_sized(result, dest_val, src, size);
     } else {
         /* SUBX -(Ax), -(Ay) */
-        cpu.a[ry] -= ea_step(ry, size);
-        cpu.a[rx] -= ea_step(rx, size);
-        uint32_t addr_x = cpu.a[rx], addr_y = cpu.a[ry];
+        cpu.a[src_reg] -= ea_step(src_reg, size);
+        cpu.a[dest_reg] -= ea_step(dest_reg, size);
+        uint32_t addr_x = cpu.a[dest_reg], addr_y = cpu.a[src_reg];
         uint32_t src, dest_val;
         if (size == 1) {
             src = mem_read8(addr_y) & 0xFF;

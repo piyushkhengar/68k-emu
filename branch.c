@@ -4,28 +4,28 @@
 /* Bcc condition codes: return true if condition met. 0=BRA,1=BSR,2=BHI,3=BLS,4=BCC,5=BCS,6=BNE,7=BEQ, etc. */
 static int bcc_condition_met(uint8_t cond)
 {
-    uint8_t n = (cpu.sr & SR_N) ? 1 : 0;
-    uint8_t z = (cpu.sr & SR_Z) ? 1 : 0;
-    uint8_t v = (cpu.sr & SR_V) ? 1 : 0;
-    uint8_t c = (cpu.sr & SR_C) ? 1 : 0;
+    uint8_t negative_flag = (cpu.sr & SR_N) ? 1 : 0;
+    uint8_t zero_flag = (cpu.sr & SR_Z) ? 1 : 0;
+    uint8_t overflow_flag = (cpu.sr & SR_V) ? 1 : 0;
+    uint8_t carry_flag = (cpu.sr & SR_C) ? 1 : 0;
 
     switch (cond) {
         case 0x0: return 1;
         case 0x1: return 1;
-        case 0x2: return !c && !z;
-        case 0x3: return c || z;
-        case 0x4: return !c;
-        case 0x5: return c;
-        case 0x6: return !z;
-        case 0x7: return z;
-        case 0x8: return !v;
-        case 0x9: return v;
-        case 0xA: return !n;
-        case 0xB: return n;
-        case 0xC: return (n && v) || (!n && !v);
-        case 0xD: return (n && !v) || (!n && v);
-        case 0xE: return (n && v && !z) || (!n && !v && !z);
-        case 0xF: return z || (n && !v) || (!n && v);
+        case 0x2: return !carry_flag && !zero_flag;
+        case 0x3: return carry_flag || zero_flag;
+        case 0x4: return !carry_flag;
+        case 0x5: return carry_flag;
+        case 0x6: return !zero_flag;
+        case 0x7: return zero_flag;
+        case 0x8: return !overflow_flag;
+        case 0x9: return overflow_flag;
+        case 0xA: return !negative_flag;
+        case 0xB: return negative_flag;
+        case 0xC: return (negative_flag && overflow_flag) || (!negative_flag && !overflow_flag);
+        case 0xD: return (negative_flag && !overflow_flag) || (!negative_flag && overflow_flag);
+        case 0xE: return (negative_flag && overflow_flag && !zero_flag) || (!negative_flag && !overflow_flag && !zero_flag);
+        case 0xF: return zero_flag || (negative_flag && !overflow_flag) || (!negative_flag && overflow_flag);
         default: return 0;
     }
 }

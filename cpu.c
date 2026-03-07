@@ -61,7 +61,7 @@ void set_nz_from_val(uint32_t val, int size)
 /* Helper: set N,Z,V,C from ADD result (dest + source = result) */
 void set_nzvc_add(uint32_t result, uint32_t dest_val, uint32_t source_val)
 {
-    int32_t a = (int32_t)dest_val, b = (int32_t)source_val, r = (int32_t)result;
+    int32_t dest_signed = (int32_t)dest_val, source_signed = (int32_t)source_val, result_signed = (int32_t)result;
     cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);
     if (result == 0)
         cpu.sr |= SR_Z;
@@ -69,14 +69,14 @@ void set_nzvc_add(uint32_t result, uint32_t dest_val, uint32_t source_val)
         cpu.sr |= SR_N;
     if (result < dest_val)  /* Carry out (unsigned overflow) */
         cpu.sr |= SR_C;
-    if ((a > 0 && b > 0 && r < 0) || (a < 0 && b < 0 && r > 0))  /* Signed overflow */
+    if ((dest_signed > 0 && source_signed > 0 && result_signed < 0) || (dest_signed < 0 && source_signed < 0 && result_signed > 0))  /* Signed overflow */
         cpu.sr |= SR_V;
 }
 
 /* Helper: set N,Z,V,C from SUB/CMP result (dest - source = result) */
 void set_nzvc_sub(uint32_t result, uint32_t dest_val, uint32_t source_val)
 {
-    int32_t a = (int32_t)dest_val, b = (int32_t)source_val, r = (int32_t)result;
+    int32_t dest_signed = (int32_t)dest_val, source_signed = (int32_t)source_val, result_signed = (int32_t)result;
     cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);
     if (result == 0)
         cpu.sr |= SR_Z;
@@ -84,83 +84,83 @@ void set_nzvc_sub(uint32_t result, uint32_t dest_val, uint32_t source_val)
         cpu.sr |= SR_N;
     if (dest_val < source_val)  /* Borrow (unsigned underflow) */
         cpu.sr |= SR_C;
-    if ((a >= 0 && b < 0 && r < 0) || (a < 0 && b >= 0 && r > 0))  /* Signed overflow */
+    if ((dest_signed >= 0 && source_signed < 0 && result_signed < 0) || (dest_signed < 0 && source_signed >= 0 && result_signed > 0))  /* Signed overflow */
         cpu.sr |= SR_V;
 }
 
 /* Size-aware N,Z,V,C,X for ADD (masks operands by size before flag logic) */
 void set_nzvc_add_sized(uint32_t result, uint32_t dest_val, uint32_t source_val, int size)
 {
-    uint32_t m = (size == 1) ? 0xFF : (size == 2) ? 0xFFFF : 0xFFFFFFFF;
-    uint32_t r = result & m, d = dest_val & m, s = source_val & m;
-    int32_t ar = (size == 1) ? (int32_t)(int8_t)r : (size == 2) ? (int32_t)(int16_t)r : (int32_t)r;
-    int32_t ad = (size == 1) ? (int32_t)(int8_t)d : (size == 2) ? (int32_t)(int16_t)d : (int32_t)d;
-    int32_t as = (size == 1) ? (int32_t)(int8_t)s : (size == 2) ? (int32_t)(int16_t)s : (int32_t)s;
+    uint32_t size_mask = (size == 1) ? 0xFF : (size == 2) ? 0xFFFF : 0xFFFFFFFF;
+    uint32_t result_masked = result & size_mask, dest_masked = dest_val & size_mask, source_masked = source_val & size_mask;
+    int32_t result_signed = (size == 1) ? (int32_t)(int8_t)result_masked : (size == 2) ? (int32_t)(int16_t)result_masked : (int32_t)result_masked;
+    int32_t dest_signed = (size == 1) ? (int32_t)(int8_t)dest_masked : (size == 2) ? (int32_t)(int16_t)dest_masked : (int32_t)dest_masked;
+    int32_t source_signed = (size == 1) ? (int32_t)(int8_t)source_masked : (size == 2) ? (int32_t)(int16_t)source_masked : (int32_t)source_masked;
     cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C | SR_X);
-    if (r == 0)
+    if (result_masked == 0)
         cpu.sr |= SR_Z;
-    if (ar < 0)
+    if (result_signed < 0)
         cpu.sr |= SR_N;
-    if (r < d)  /* Carry out (unsigned) */
+    if (result_masked < dest_masked)  /* Carry out (unsigned) */
         cpu.sr |= SR_C | SR_X;
 
-    if ((ad > 0 && as > 0 && ar < 0) || (ad < 0 && as < 0 && ar > 0))
+    if ((dest_signed > 0 && source_signed > 0 && result_signed < 0) || (dest_signed < 0 && source_signed < 0 && result_signed > 0))
         cpu.sr |= SR_V;
 }
 
 /* Size-aware N,Z,V,C,X for ADDX/SUBX: Z cleared if result nonzero, unchanged otherwise */
 void set_nzvc_addx_sized(uint32_t result, uint32_t dest_val, uint32_t source_val, int size)
 {
-    uint32_t m = (size == 1) ? 0xFF : (size == 2) ? 0xFFFF : 0xFFFFFFFF;
-    uint32_t r = result & m, d = dest_val & m, s = source_val & m;
-    int32_t ar = (size == 1) ? (int32_t)(int8_t)r : (size == 2) ? (int32_t)(int16_t)r : (int32_t)r;
-    int32_t ad = (size == 1) ? (int32_t)(int8_t)d : (size == 2) ? (int32_t)(int16_t)d : (int32_t)d;
-    int32_t as = (size == 1) ? (int32_t)(int8_t)s : (size == 2) ? (int32_t)(int16_t)s : (int32_t)s;
+    uint32_t size_mask = (size == 1) ? 0xFF : (size == 2) ? 0xFFFF : 0xFFFFFFFF;
+    uint32_t result_masked = result & size_mask, dest_masked = dest_val & size_mask, source_masked = source_val & size_mask;
+    int32_t result_signed = (size == 1) ? (int32_t)(int8_t)result_masked : (size == 2) ? (int32_t)(int16_t)result_masked : (int32_t)result_masked;
+    int32_t dest_signed = (size == 1) ? (int32_t)(int8_t)dest_masked : (size == 2) ? (int32_t)(int16_t)dest_masked : (int32_t)dest_masked;
+    int32_t source_signed = (size == 1) ? (int32_t)(int8_t)source_masked : (size == 2) ? (int32_t)(int16_t)source_masked : (int32_t)source_masked;
     cpu.sr &= ~(SR_N | SR_V | SR_C | SR_X);
-    if (r != 0)
+    if (result_masked != 0)
         cpu.sr &= ~SR_Z;   /* Z cleared if nonzero */
-    if (ar < 0)
+    if (result_signed < 0)
         cpu.sr |= SR_N;
-    if (r < d)
+    if (result_masked < dest_masked)
         cpu.sr |= SR_C | SR_X;
-    if ((ad > 0 && as > 0 && ar < 0) || (ad < 0 && as < 0 && ar > 0))
+    if ((dest_signed > 0 && source_signed > 0 && result_signed < 0) || (dest_signed < 0 && source_signed < 0 && result_signed > 0))
         cpu.sr |= SR_V;
 }
 
 void set_nzvc_subx_sized(uint32_t result, uint32_t dest_val, uint32_t source_val, int size)
 {
-    uint32_t m = (size == 1) ? 0xFF : (size == 2) ? 0xFFFF : 0xFFFFFFFF;
-    uint32_t r = result & m, d = dest_val & m, s = source_val & m;
-    int32_t ar = (size == 1) ? (int32_t)(int8_t)r : (size == 2) ? (int32_t)(int16_t)r : (int32_t)r;
-    int32_t ad = (size == 1) ? (int32_t)(int8_t)d : (size == 2) ? (int32_t)(int16_t)d : (int32_t)d;
-    int32_t as = (size == 1) ? (int32_t)(int8_t)s : (size == 2) ? (int32_t)(int16_t)s : (int32_t)s;
+    uint32_t size_mask = (size == 1) ? 0xFF : (size == 2) ? 0xFFFF : 0xFFFFFFFF;
+    uint32_t result_masked = result & size_mask, dest_masked = dest_val & size_mask, source_masked = source_val & size_mask;
+    int32_t result_signed = (size == 1) ? (int32_t)(int8_t)result_masked : (size == 2) ? (int32_t)(int16_t)result_masked : (int32_t)result_masked;
+    int32_t dest_signed = (size == 1) ? (int32_t)(int8_t)dest_masked : (size == 2) ? (int32_t)(int16_t)dest_masked : (int32_t)dest_masked;
+    int32_t source_signed = (size == 1) ? (int32_t)(int8_t)source_masked : (size == 2) ? (int32_t)(int16_t)source_masked : (int32_t)source_masked;
     cpu.sr &= ~(SR_N | SR_V | SR_C | SR_X);
-    if (r != 0)
+    if (result_masked != 0)
         cpu.sr &= ~SR_Z;
-    if (ar < 0)
+    if (result_signed < 0)
         cpu.sr |= SR_N;
-    if (d < s)
+    if (dest_masked < source_masked)
         cpu.sr |= SR_C | SR_X;
-    if ((ad >= 0 && as < 0 && ar < 0) || (ad < 0 && as >= 0 && ar > 0))
+    if ((dest_signed >= 0 && source_signed < 0 && result_signed < 0) || (dest_signed < 0 && source_signed >= 0 && result_signed > 0))
         cpu.sr |= SR_V;
 }
 
 /* Size-aware N,Z,V,C,X for SUB/CMP */
 void set_nzvc_sub_sized(uint32_t result, uint32_t dest_val, uint32_t source_val, int size)
 {
-    uint32_t m = (size == 1) ? 0xFF : (size == 2) ? 0xFFFF : 0xFFFFFFFF;
-    uint32_t r = result & m, d = dest_val & m, s = source_val & m;
-    int32_t ar = (size == 1) ? (int32_t)(int8_t)r : (size == 2) ? (int32_t)(int16_t)r : (int32_t)r;
-    int32_t ad = (size == 1) ? (int32_t)(int8_t)d : (size == 2) ? (int32_t)(int16_t)d : (int32_t)d;
-    int32_t as = (size == 1) ? (int32_t)(int8_t)s : (size == 2) ? (int32_t)(int16_t)s : (int32_t)s;
+    uint32_t size_mask = (size == 1) ? 0xFF : (size == 2) ? 0xFFFF : 0xFFFFFFFF;
+    uint32_t result_masked = result & size_mask, dest_masked = dest_val & size_mask, source_masked = source_val & size_mask;
+    int32_t result_signed = (size == 1) ? (int32_t)(int8_t)result_masked : (size == 2) ? (int32_t)(int16_t)result_masked : (int32_t)result_masked;
+    int32_t dest_signed = (size == 1) ? (int32_t)(int8_t)dest_masked : (size == 2) ? (int32_t)(int16_t)dest_masked : (int32_t)dest_masked;
+    int32_t source_signed = (size == 1) ? (int32_t)(int8_t)source_masked : (size == 2) ? (int32_t)(int16_t)source_masked : (int32_t)source_masked;
     cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C | SR_X);
-    if (r == 0)
+    if (result_masked == 0)
         cpu.sr |= SR_Z;
-    if (ar < 0)
+    if (result_signed < 0)
         cpu.sr |= SR_N;
-    if (d < s)  /* Borrow */
+    if (dest_masked < source_masked)  /* Borrow */
         cpu.sr |= SR_C | SR_X;
-    if ((ad >= 0 && as < 0 && ar < 0) || (ad < 0 && as >= 0 && ar > 0))
+    if ((dest_signed >= 0 && source_signed < 0 && result_signed < 0) || (dest_signed < 0 && source_signed >= 0 && result_signed > 0))
         cpu.sr |= SR_V;
 }
 
