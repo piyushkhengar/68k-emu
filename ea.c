@@ -123,7 +123,7 @@ void ea_store_value(int mode, int reg, int size, uint32_t value)
         else cpu.d[reg] = value;
         break;
     case 1: /* An */
-        if (size == 2) cpu.a[reg] = (cpu.a[reg] & 0xFFFF0000) | (value & 0xFFFF);
+        if (size == 2) cpu.a[reg] = (uint32_t)(int32_t)(int16_t)(value & 0xFFFF);  /* sign-extend word */
         else cpu.a[reg] = value;
         break;
     default:
