@@ -25,6 +25,26 @@ static int alu_dn_reg(uint16_t op, uint8_t base)
     return ((op >> 8) - base) >> 3;
 }
 
+static uint32_t alu_size_mask(int size)
+{
+    return (size == 1) ? 0xFF : (size == 2) ? 0xFFFF : 0xFFFFFFFF;
+}
+
+static void alu_store_dn(int reg, uint32_t result, int size)
+{
+    if (size == 1)
+        cpu.d[reg] = (cpu.d[reg] & 0xFFFFFF00) | (result & 0xFF);
+    else if (size == 2)
+        cpu.d[reg] = (cpu.d[reg] & 0xFFFF0000) | (result & 0xFFFF);
+    else
+        cpu.d[reg] = result;
+}
+
+static int alu_is_an_word_32bit(int ea_mode, int size)
+{
+    return ea_mode == 1 && size == 2;
+}
+
 /* 68000: byte ops cannot use An (Address Register Direct) - illegal instruction. Returns 1 if invalid. */
 static int alu_reject_byte_an(uint16_t op, int ea_mode, int size)
 {
@@ -35,117 +55,52 @@ static int alu_reject_byte_an(uint16_t op, int ea_mode, int size)
     return 0;
 }
 
-static void op_add_generic(uint16_t op, int size)
+static void op_add_sub_generic(uint16_t op, int size, uint8_t base)
 {
-    /* ADD base 0xD0: 0xD0=D0, 0xD8=D1, 0xE0=D2, 0xE8=D3, 0xF0=D4, etc. */
-    int dn_reg = alu_dn_reg(op, 0xD0);
+    int dn_reg = alu_dn_reg(op, base);
     int ea_mode = (op >> 3) & 7;
     int ea_reg = op & 7;
     int dir = (op >> 9) & 1;  /* 0 = <ea> to Dn, 1 = Dn to <ea> */
+    int is_add = (base == 0xD0);
 
     if (alu_reject_byte_an(op, ea_mode, size))
         return;
 
-    if (dir == 0) {
-        /* ADD <ea>, Dn */
-        uint32_t src = ea_fetch_value(ea_mode, ea_reg, size);
-        uint32_t dest_val = cpu.d[dn_reg];
-        uint32_t result;
-        if (size == 1) {
-            dest_val &= 0xFF;
-            result = (dest_val + src) & 0xFF;
-            cpu.d[dn_reg] = (cpu.d[dn_reg] & 0xFFFFFF00) | result;
-        } else if (size == 2) {
-            dest_val &= 0xFFFF;
-            result = (dest_val + src) & 0xFFFF;
-            cpu.d[dn_reg] = (cpu.d[dn_reg] & 0xFFFF0000) | result;
-        } else {
-            result = dest_val + src;
-            cpu.d[dn_reg] = result;
-        }
-        set_nzvc_add_sized(result, dest_val, src, size);
-    } else {
-        /* ADD Dn, <ea> */
-        uint32_t src = cpu.d[dn_reg];
-        uint32_t dest_val = ea_fetch_value(ea_mode, ea_reg, size);
-        uint32_t result;
-        int store_size = size;
-        if (ea_mode == 1 && size == 2) {
-            /* An: 32-bit operation, source sign-extended, store full result */
-            int32_t src_se = (int32_t)(int16_t)(src & 0xFFFF);
-            dest_val = cpu.a[ea_reg];
-            result = dest_val + src_se;
-            store_size = 4;
-        } else if (size == 1) {
-            src &= 0xFF;
-            dest_val &= 0xFF;
-            result = (dest_val + src) & 0xFF;
-        } else if (size == 2) {
-            src &= 0xFFFF;
-            dest_val &= 0xFFFF;
-            result = (dest_val + src) & 0xFFFF;
-        } else {
-            result = dest_val + src;
-        }
-        ea_store_value(ea_mode, ea_reg, store_size, result);
-        set_nzvc_add_sized(result, dest_val, ea_mode == 1 && size == 2 ? (uint32_t)(int32_t)(int16_t)(src & 0xFFFF) : src, store_size);
-    }
-}
-
-static void op_sub_generic(uint16_t op, int size)
-{
-    int dn_reg = alu_dn_reg(op, 0x90);
-    int ea_mode = (op >> 3) & 7;
-    int ea_reg = op & 7;
-    int dir = (op >> 9) & 1;
-
-    if (alu_reject_byte_an(op, ea_mode, size))
-        return;
+    uint32_t src, dest_val, result;
+    uint32_t mask = alu_size_mask(size);
+    int store_size = size;
+    uint32_t src_for_flags;
 
     if (dir == 0) {
-        /* SUB <ea>, Dn */
-        uint32_t src = ea_fetch_value(ea_mode, ea_reg, size);
-        uint32_t dest_val = cpu.d[dn_reg];
-        uint32_t result;
-        if (size == 1) {
-            dest_val &= 0xFF;
-            result = (dest_val - src) & 0xFF;
-            cpu.d[dn_reg] = (cpu.d[dn_reg] & 0xFFFFFF00) | result;
-        } else if (size == 2) {
-            dest_val &= 0xFFFF;
-            result = (dest_val - src) & 0xFFFF;
-            cpu.d[dn_reg] = (cpu.d[dn_reg] & 0xFFFF0000) | result;
-        } else {
-            result = dest_val - src;
-            cpu.d[dn_reg] = result;
-        }
-        set_nzvc_sub_sized(result, dest_val, src, size);
+        /* ADD/SUB <ea>, Dn */
+        src = ea_fetch_value(ea_mode, ea_reg, size);
+        dest_val = cpu.d[dn_reg] & mask;
+        result = is_add ? (dest_val + src) & mask : (dest_val - src) & mask;
+        alu_store_dn(dn_reg, result, size);
+        src_for_flags = src;
     } else {
-        /* SUB Dn, <ea> */
-        uint32_t src = cpu.d[dn_reg];
-        uint32_t dest_val = ea_fetch_value(ea_mode, ea_reg, size);
-        uint32_t result;
-        int store_size = size;
-        if (ea_mode == 1 && size == 2) {
-            /* An: 32-bit operation, source sign-extended, store full result */
+        /* ADD/SUB Dn, <ea> */
+        src = cpu.d[dn_reg];
+        dest_val = ea_fetch_value(ea_mode, ea_reg, size);
+        if (alu_is_an_word_32bit(ea_mode, size)) {
             int32_t src_se = (int32_t)(int16_t)(src & 0xFFFF);
             dest_val = cpu.a[ea_reg];
-            result = dest_val - src_se;
+            result = is_add ? dest_val + src_se : dest_val - src_se;
             store_size = 4;
-        } else if (size == 1) {
-            src &= 0xFF;
-            dest_val &= 0xFF;
-            result = (dest_val - src) & 0xFF;
-        } else if (size == 2) {
-            src &= 0xFFFF;
-            dest_val &= 0xFFFF;
-            result = (dest_val - src) & 0xFFFF;
+            src_for_flags = (uint32_t)(int32_t)(int16_t)(src & 0xFFFF);
         } else {
-            result = dest_val - src;
+            src &= mask;
+            dest_val &= mask;
+            result = is_add ? (dest_val + src) & mask : (dest_val - src) & mask;
+            src_for_flags = src;
         }
         ea_store_value(ea_mode, ea_reg, store_size, result);
-        set_nzvc_sub_sized(result, dest_val, ea_mode == 1 && size == 2 ? (uint32_t)(int32_t)(int16_t)(src & 0xFFFF) : src, store_size);
     }
+
+    if (is_add)
+        set_nzvc_add_sized(result, dest_val, src_for_flags, store_size);
+    else
+        set_nzvc_sub_sized(result, dest_val, src_for_flags, store_size);
 }
 
 /* CMP only has <ea>, Dn (no store) */
@@ -158,135 +113,62 @@ static void op_cmp_generic(uint16_t op, int size)
     if (alu_reject_byte_an(op, ea_mode, size))
         return;
 
-    uint32_t dest_val = cpu.d[dn_reg];
-    uint32_t src = ea_fetch_value(ea_mode, ea_reg, size);
-    uint32_t result;
+    uint32_t mask = alu_size_mask(size);
+    uint32_t dest_val = cpu.d[dn_reg] & mask;
+    uint32_t src = ea_fetch_value(ea_mode, ea_reg, size) & mask;
+    uint32_t result = (dest_val - src) & mask;
 
-    if (size == 1) {
-        dest_val &= 0xFF;
-        src &= 0xFF;
-        result = (dest_val - src) & 0xFF;
-    } else if (size == 2) {
-        dest_val &= 0xFFFF;
-        src &= 0xFFFF;
-        result = (dest_val - src) & 0xFFFF;
-    } else {
-        result = dest_val - src;
-    }
     set_nzvc_sub_sized(result, dest_val, src, size);
 }
 
-/* ADDX: dest = dest + src + X. Format: 1101 Rx 1 SIZE 0 0 R/M Ry. Z: cleared if nonzero. */
-static void op_addx(uint16_t op)
+static uint32_t alu_mem_read_sized(uint32_t addr, int size)
+{
+    if (size == 1) return mem_read8(addr) & 0xFF;
+    if (size == 2) return mem_read16(addr) & 0xFFFF;
+    return mem_read32(addr);
+}
+
+static void alu_mem_write_sized(uint32_t addr, int size, uint32_t value)
+{
+    if (size == 1) mem_write8(addr, (uint8_t)(value & 0xFF));
+    else if (size == 2) mem_write16(addr, (uint16_t)(value & 0xFFFF));
+    else mem_write32(addr, value);
+}
+
+/* ADDX/SUBX: dest = dest op src op X. Format: 1101/1001 Rx 1 SIZE 0 0 R/M Ry. Z: cleared if nonzero. */
+static void op_addx_subx(uint16_t op, int is_add)
 {
     int dest_reg = (op >> 9) & 7;
     int src_reg = (op >> 0) & 7;
     int size = alu_size(op);
     int is_memory_mode = (op >> 3) & 1;
     uint32_t xbit = (cpu.sr & SR_X) ? 1 : 0;
+    uint32_t mask = alu_size_mask(size);
 
     if (is_memory_mode == 0) {
-        /* ADDX Dy, Dx */
-        uint32_t src = cpu.d[src_reg];
-        uint32_t dest_val = cpu.d[dest_reg];
-        uint32_t result;
-        if (size == 1) {
-            src &= 0xFF;
-            dest_val &= 0xFF;
-            result = (dest_val + src + xbit) & 0xFF;
-            cpu.d[dest_reg] = (cpu.d[dest_reg] & 0xFFFFFF00) | result;
-        } else if (size == 2) {
-            src &= 0xFFFF;
-            dest_val &= 0xFFFF;
-            result = (dest_val + src + xbit) & 0xFFFF;
-            cpu.d[dest_reg] = (cpu.d[dest_reg] & 0xFFFF0000) | result;
-        } else {
-            result = dest_val + src + xbit;
-            cpu.d[dest_reg] = result;
-        }
-        set_nzvc_addx_sized(result, dest_val, src, size);
+        /* ADDX/SUBX Dy, Dx (register mode) */
+        uint32_t src = cpu.d[src_reg] & mask;
+        uint32_t dest_val = cpu.d[dest_reg] & mask;
+        uint32_t result = is_add ? (dest_val + src + xbit) & mask : (dest_val - src - xbit) & mask;
+        alu_store_dn(dest_reg, result, size);
+        if (is_add)
+            set_nzvc_addx_sized(result, dest_val, src, size);
+        else
+            set_nzvc_subx_sized(result, dest_val, src, size);
     } else {
-        /* ADDX -(Ay), -(Ax): decrement both, fetch, add+X, store to Ax */
+        /* ADDX/SUBX -(Ay), -(Ax): decrement both, fetch, op, store */
         cpu.a[src_reg] -= ea_step(src_reg, size);
         cpu.a[dest_reg] -= ea_step(dest_reg, size);
-        uint32_t addr_y = cpu.a[src_reg], addr_x = cpu.a[dest_reg];
-        uint32_t src, dest_val;
-        if (size == 1) {
-            src = mem_read8(addr_y) & 0xFF;
-            dest_val = mem_read8(addr_x) & 0xFF;
-            uint32_t result = (dest_val + src + xbit) & 0xFF;
-            mem_write8(addr_x, (uint8_t)result);
+        uint32_t addr_x = cpu.a[dest_reg];
+        uint32_t addr_y = cpu.a[src_reg];
+        uint32_t src = alu_mem_read_sized(addr_y, size);
+        uint32_t dest_val = alu_mem_read_sized(addr_x, size);
+        uint32_t result = is_add ? (dest_val + src + xbit) & mask : (dest_val - src - xbit) & mask;
+        alu_mem_write_sized(addr_x, size, result);
+        if (is_add)
             set_nzvc_addx_sized(result, dest_val, src, size);
-        } else if (size == 2) {
-            src = mem_read16(addr_y) & 0xFFFF;
-            dest_val = mem_read16(addr_x) & 0xFFFF;
-            uint32_t result = (dest_val + src + xbit) & 0xFFFF;
-            mem_write16(addr_x, (uint16_t)result);
-            set_nzvc_addx_sized(result, dest_val, src, size);
-        } else {
-            src = mem_read32(addr_y);
-            dest_val = mem_read32(addr_x);
-            uint32_t result = dest_val + src + xbit;
-            mem_write32(addr_x, result);
-            set_nzvc_addx_sized(result, dest_val, src, size);
-        }
-    }
-}
-
-/* SUBX: dest = dest - src - X. Format: 1001 Dy 1 SIZE 0 0 R/M Dx. Z: cleared if nonzero. */
-static void op_subx(uint16_t op)
-{
-    int dest_reg = (op >> 9) & 7;   /* dest Dy/Ay */
-    int src_reg = (op >> 0) & 7;   /* src Dx/Ax */
-    int size = alu_size(op);
-    int is_memory_mode = (op >> 3) & 1;
-    uint32_t xbit = (cpu.sr & SR_X) ? 1 : 0;
-
-    if (is_memory_mode == 0) {
-        /* SUBX Dx, Dy */
-        uint32_t src = cpu.d[src_reg];
-        uint32_t dest_val = cpu.d[dest_reg];
-        uint32_t result;
-        if (size == 1) {
-            src &= 0xFF;
-            dest_val &= 0xFF;
-            result = (dest_val - src - xbit) & 0xFF;
-            cpu.d[dest_reg] = (cpu.d[dest_reg] & 0xFFFFFF00) | result;
-        } else if (size == 2) {
-            src &= 0xFFFF;
-            dest_val &= 0xFFFF;
-            result = (dest_val - src - xbit) & 0xFFFF;
-            cpu.d[dest_reg] = (cpu.d[dest_reg] & 0xFFFF0000) | result;
-        } else {
-            result = dest_val - src - xbit;
-            cpu.d[dest_reg] = result;
-        }
-        set_nzvc_subx_sized(result, dest_val, src, size);
-    } else {
-        /* SUBX -(Ax), -(Ay) */
-        cpu.a[src_reg] -= ea_step(src_reg, size);
-        cpu.a[dest_reg] -= ea_step(dest_reg, size);
-        uint32_t addr_x = cpu.a[dest_reg], addr_y = cpu.a[src_reg];
-        uint32_t src, dest_val;
-        if (size == 1) {
-            src = mem_read8(addr_y) & 0xFF;
-            dest_val = mem_read8(addr_x) & 0xFF;
-            uint32_t result = (dest_val - src - xbit) & 0xFF;
-            mem_write8(addr_x, (uint8_t)result);
+        else
             set_nzvc_subx_sized(result, dest_val, src, size);
-        } else if (size == 2) {
-            src = mem_read16(addr_y) & 0xFFFF;
-            dest_val = mem_read16(addr_x) & 0xFFFF;
-            uint32_t result = (dest_val - src - xbit) & 0xFFFF;
-            mem_write16(addr_x, (uint16_t)result);
-            set_nzvc_subx_sized(result, dest_val, src, size);
-        } else {
-            src = mem_read32(addr_y);
-            dest_val = mem_read32(addr_x);
-            uint32_t result = dest_val - src - xbit;
-            mem_write32(addr_x, result);
-            set_nzvc_subx_sized(result, dest_val, src, size);
-        }
     }
 }
 
@@ -304,27 +186,24 @@ void op_moveq(uint16_t op)
 void dispatch_9xxx(uint16_t op)
 {
     if ((op & 0x130) == 0x100) {
-        op_subx(op);
+        op_addx_subx(op, 0);
         return;
     }
-    int size = alu_size(op);
-    op_sub_generic(op, size);
+    op_add_sub_generic(op, alu_size(op), 0x90);
 }
 
 /* 0xBxxx: CMP */
 void dispatch_Bxxx(uint16_t op)
 {
-    int size = alu_size(op);
-    op_cmp_generic(op, size);
+    op_cmp_generic(op, alu_size(op));
 }
 
 /* 0xDxxx/0xExxx/0xFxxx: ADD or ADDX. ADDX when (op & 0x130) == 0x100 */
 void dispatch_add(uint16_t op)
 {
     if ((op & 0x130) == 0x100) {
-        op_addx(op);
+        op_addx_subx(op, 1);
         return;
     }
-    int size = alu_size(op);
-    op_add_generic(op, size);
+    op_add_sub_generic(op, alu_size(op), 0xD0);
 }
