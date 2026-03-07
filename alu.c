@@ -69,7 +69,14 @@ static void op_add_generic(uint16_t op, int size)
         uint32_t src = cpu.d[dn_reg];
         uint32_t dest_val = ea_fetch_value(ea_mode, ea_reg, size);
         uint32_t result;
-        if (size == 1) {
+        int store_size = size;
+        if (ea_mode == 1 && size == 2) {
+            /* An: 32-bit operation, source sign-extended, store full result */
+            int32_t src_se = (int32_t)(int16_t)(src & 0xFFFF);
+            dest_val = cpu.a[ea_reg];
+            result = dest_val + src_se;
+            store_size = 4;
+        } else if (size == 1) {
             src &= 0xFF;
             dest_val &= 0xFF;
             result = (dest_val + src) & 0xFF;
@@ -80,8 +87,8 @@ static void op_add_generic(uint16_t op, int size)
         } else {
             result = dest_val + src;
         }
-        ea_store_value(ea_mode, ea_reg, size, result);
-        set_nzvc_add_sized(result, dest_val, src, size);
+        ea_store_value(ea_mode, ea_reg, store_size, result);
+        set_nzvc_add_sized(result, dest_val, ea_mode == 1 && size == 2 ? (uint32_t)(int32_t)(int16_t)(src & 0xFFFF) : src, store_size);
     }
 }
 
@@ -118,7 +125,14 @@ static void op_sub_generic(uint16_t op, int size)
         uint32_t src = cpu.d[dn_reg];
         uint32_t dest_val = ea_fetch_value(ea_mode, ea_reg, size);
         uint32_t result;
-        if (size == 1) {
+        int store_size = size;
+        if (ea_mode == 1 && size == 2) {
+            /* An: 32-bit operation, source sign-extended, store full result */
+            int32_t src_se = (int32_t)(int16_t)(src & 0xFFFF);
+            dest_val = cpu.a[ea_reg];
+            result = dest_val - src_se;
+            store_size = 4;
+        } else if (size == 1) {
             src &= 0xFF;
             dest_val &= 0xFF;
             result = (dest_val - src) & 0xFF;
@@ -129,8 +143,8 @@ static void op_sub_generic(uint16_t op, int size)
         } else {
             result = dest_val - src;
         }
-        ea_store_value(ea_mode, ea_reg, size, result);
-        set_nzvc_sub_sized(result, dest_val, src, size);
+        ea_store_value(ea_mode, ea_reg, store_size, result);
+        set_nzvc_sub_sized(result, dest_val, ea_mode == 1 && size == 2 ? (uint32_t)(int32_t)(int16_t)(src & 0xFFFF) : src, store_size);
     }
 }
 
