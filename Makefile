@@ -63,6 +63,9 @@ test: $(TARGET)
 	output=$$(./$(TARGET) cmp_b 2>&1); echo "$$output" | grep -q "SR=0x2704" && echo "  cmp_b:  PASS" || { echo "  cmp_b:  FAIL"; failed=1; }; \
 	output=$$(./$(TARGET) cmp_w 2>&1); echo "$$output" | grep -q "SR=0x2704" && echo "  cmp_w:  PASS" || { echo "  cmp_w:  FAIL"; failed=1; }; \
 	output=$$(./$(TARGET) cmp 2>&1); echo "$$output" | grep -q "SR=0x2704" && echo "  cmp:    PASS" || { echo "  cmp:    FAIL"; failed=1; }; \
+	output=$$(./$(TARGET) add_idx 2>&1); echo "$$output" | grep -q "D1=0x0000002A" && echo "  add_idx: PASS" || { echo "  add_idx: FAIL"; failed=1; }; \
+	output=$$(./$(TARGET) sub_idx 2>&1); echo "$$output" | grep -q "D1=0x00000000" && echo "  sub_idx: PASS" || { echo "  sub_idx: FAIL"; failed=1; }; \
+	output=$$(./$(TARGET) cmp_idx 2>&1); echo "$$output" | grep -q "SR=0x2704" && echo "  cmp_idx: PASS" || { echo "  cmp_idx: FAIL"; failed=1; }; \
 	output=$$(./$(TARGET) bcc 2>&1); echo "$$output" | grep -q "D2=0x00000002" && echo "  bcc:    PASS" || { echo "  bcc:    FAIL"; failed=1; }; \
 	output=$$(./$(TARGET) bcc_all 2>&1); echo "$$output" | grep -q "D2=0x0000000F" && echo "  bcc_all: PASS" || { echo "  bcc_all: FAIL"; failed=1; }; \
 	output=$$(./$(TARGET) bsr_rts 2>&1); echo "$$output" | grep -q "D2=0x0000002A" && echo "  bsr_rts: PASS" || { echo "  bsr_rts: FAIL"; failed=1; }; \

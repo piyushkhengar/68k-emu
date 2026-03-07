@@ -307,6 +307,39 @@ static const uint8_t sub_test[] = {
     0x60, 0xFC,               /* 0x18: BRA.S -4 (loop) */
 };
 
+/* ADD.L (0,A7,D0.W), D1: indexed - store 42 at (A7), D0=0, D1=0 -> D1=42 */
+static const uint8_t add_idx_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x25, 0xFC, 0x00, 0x00, 0x00, 0x2A,   /* 0x10: MOVE.L #42, (A7) - store at 0x1000 */
+    0x70, 0x00,               /* 0x16: MOVEQ #0, D0 */
+    0x72, 0x00,               /* 0x18: MOVEQ #0, D1 */
+    0xD8, 0xB7, 0x00, 0x00,   /* 0x1A: ADD.L (0,A7,D0.W), D1 - (0x1000+0+0)=42 */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* SUB.L (0,A7,D0.W), D1: indexed - 50 at (A7), D0=0, D1=50 -> D1=50-50=0 */
+static const uint8_t sub_idx_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x25, 0xFC, 0x00, 0x00, 0x00, 0x32,   /* 0x10: MOVE.L #50, (A7) */
+    0x70, 0x00,               /* 0x16: MOVEQ #0, D0 */
+    0x72, 0x32,               /* 0x18: MOVEQ #50, D1 */
+    0x98, 0xB7, 0x00, 0x00,   /* 0x1A: SUB.L (0,A7,D0.W), D1 - D1=50-50=0 */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* CMP.L (0,A7,D0.W), D1: indexed - 10 at (A7), D1=10 -> Z set */
+static const uint8_t cmp_idx_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x25, 0xFC, 0x00, 0x00, 0x00, 0x0A,   /* 0x10: MOVE.L #10, (A7) */
+    0x70, 0x00,               /* 0x16: MOVEQ #0, D0 */
+    0x72, 0x0A,               /* 0x18: MOVEQ #10, D1 */
+    0xB8, 0xB7, 0x00, 0x00,   /* 0x1A: CMP.L (0,A7,D0.W), D1 - compare 10 and 10 */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
 /* --- MOVE variant tests (22): B, W, L order --- */
 
 static const uint8_t move_b_imm_dn_test[] = {
@@ -525,6 +558,9 @@ static const builtin_test_t builtin_tests[] = {
     { "cmp_b", cmp_b_test, sizeof(cmp_b_test), "Running CMP.B test", 0 },
     { "cmp_w", cmp_w_test, sizeof(cmp_w_test), "Running CMP.W test", 0 },
     { "cmp", cmp_test, sizeof(cmp_test), "Running CMP.L test", 0 },
+    { "add_idx", add_idx_test, sizeof(add_idx_test), "Running ADD.L (d8,An,Xn) indexed test", 0 },
+    { "sub_idx", sub_idx_test, sizeof(sub_idx_test), "Running SUB.L (d8,An,Xn) indexed test", 0 },
+    { "cmp_idx", cmp_idx_test, sizeof(cmp_idx_test), "Running CMP.L (d8,An,Xn) indexed test", 0 },
     { "bcc", bcc_test, sizeof(bcc_test), "Running Bcc (BEQ/BNE) test", 0 },
     { "bcc_all", bcc_all_test, sizeof(bcc_all_test), "Running Bcc comprehensive test (all 15 conditions)", 500 },
     { "bsr_rts", bsr_rts_test, sizeof(bsr_rts_test), "Running BSR/RTS test", 0 },
