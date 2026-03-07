@@ -26,4 +26,7 @@ void set_nzvc_subx_sized(uint32_t result, uint32_t dest_val, uint32_t source_val
 /* Fallback for unimplemented opcodes */
 void op_unimplemented(uint16_t op);
 
+/* Take exception: push PC and SR, set supervisor mode, load handler from vector. */
+void cpu_take_exception(int vector_num);
+
 #endif /* CPU_INTERNAL_H */

@@ -164,6 +164,29 @@ void set_nzvc_sub_sized(uint32_t result, uint32_t dest_val, uint32_t source_val,
         cpu.sr |= SR_V;
 }
 
+/*
+ * 68000 exception processing (format 0): push PC (4 bytes), push SR (2 bytes),
+ * set supervisor mode, load handler from vector table at 0x000000.
+ */
+void cpu_take_exception(int vector_num)
+{
+    uint32_t sp = cpu.a[7];
+    uint16_t saved_sr = cpu.sr;
+
+    /* Push PC (4 bytes), then SR (2 bytes). Stack grows downward. */
+    sp -= 4;
+    mem_write32(sp, cpu.pc);
+    sp -= 2;
+    mem_write16(sp, saved_sr);
+    cpu.a[7] = sp;
+
+    /* Switch to supervisor mode (S bit) */
+    cpu.sr |= 0x2000;
+
+    /* Load handler address from vector table */
+    cpu.pc = mem_read32((unsigned)vector_num * 4);
+}
+
 void op_unimplemented(uint16_t op)
 {
     fprintf(stderr, "Unimplemented opcode: 0x%04X at PC=0x%08X\n", op, cpu.pc - 2);
