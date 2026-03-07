@@ -10,6 +10,9 @@
  * Size: 1 = byte, 2 = word, 4 = long.
  */
 
+/* Step for (An)+/-(An): A7 uses 2 for byte (word align). */
+int ea_step(int reg, int size);
+
 /* Fetch value from effective address. Returns zero-extended value. */
 uint32_t ea_fetch_value(int mode, int reg, int size);
 

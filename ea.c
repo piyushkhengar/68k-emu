@@ -3,7 +3,7 @@
 #include "memory.h"
 
 /* 68K stack (A7) keeps word alignment: byte (An)+/-(An) use 2 for A7. */
-static int ea_step(int reg, int size)
+int ea_step(int reg, int size)
 {
     return (reg == 7 && size == 1) ? 2 : size;
 }

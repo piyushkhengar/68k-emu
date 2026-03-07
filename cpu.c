@@ -108,6 +108,43 @@ void set_nzvc_add_sized(uint32_t result, uint32_t dest_val, uint32_t source_val,
         cpu.sr |= SR_V;
 }
 
+/* Size-aware N,Z,V,C,X for ADDX/SUBX: Z cleared if result nonzero, unchanged otherwise */
+void set_nzvc_addx_sized(uint32_t result, uint32_t dest_val, uint32_t source_val, int size)
+{
+    uint32_t m = (size == 1) ? 0xFF : (size == 2) ? 0xFFFF : 0xFFFFFFFF;
+    uint32_t r = result & m, d = dest_val & m, s = source_val & m;
+    int32_t ar = (size == 1) ? (int32_t)(int8_t)r : (size == 2) ? (int32_t)(int16_t)r : (int32_t)r;
+    int32_t ad = (size == 1) ? (int32_t)(int8_t)d : (size == 2) ? (int32_t)(int16_t)d : (int32_t)d;
+    int32_t as = (size == 1) ? (int32_t)(int8_t)s : (size == 2) ? (int32_t)(int16_t)s : (int32_t)s;
+    cpu.sr &= ~(SR_N | SR_V | SR_C | SR_X);
+    if (r != 0)
+        cpu.sr &= ~SR_Z;   /* Z cleared if nonzero */
+    if (ar < 0)
+        cpu.sr |= SR_N;
+    if (r < d)
+        cpu.sr |= SR_C | SR_X;
+    if ((ad > 0 && as > 0 && ar < 0) || (ad < 0 && as < 0 && ar > 0))
+        cpu.sr |= SR_V;
+}
+
+void set_nzvc_subx_sized(uint32_t result, uint32_t dest_val, uint32_t source_val, int size)
+{
+    uint32_t m = (size == 1) ? 0xFF : (size == 2) ? 0xFFFF : 0xFFFFFFFF;
+    uint32_t r = result & m, d = dest_val & m, s = source_val & m;
+    int32_t ar = (size == 1) ? (int32_t)(int8_t)r : (size == 2) ? (int32_t)(int16_t)r : (int32_t)r;
+    int32_t ad = (size == 1) ? (int32_t)(int8_t)d : (size == 2) ? (int32_t)(int16_t)d : (int32_t)d;
+    int32_t as = (size == 1) ? (int32_t)(int8_t)s : (size == 2) ? (int32_t)(int16_t)s : (int32_t)s;
+    cpu.sr &= ~(SR_N | SR_V | SR_C | SR_X);
+    if (r != 0)
+        cpu.sr &= ~SR_Z;
+    if (ar < 0)
+        cpu.sr |= SR_N;
+    if (d < s)
+        cpu.sr |= SR_C | SR_X;
+    if ((ad >= 0 && as < 0 && ar < 0) || (ad < 0 && as >= 0 && ar > 0))
+        cpu.sr |= SR_V;
+}
+
 /* Size-aware N,Z,V,C,X for SUB/CMP */
 void set_nzvc_sub_sized(uint32_t result, uint32_t dest_val, uint32_t source_val, int size)
 {
@@ -150,9 +187,9 @@ static const op_handler_fn dispatch_top[16] = {
     [0xA] = op_unimplemented,
     [0xB] = dispatch_Bxxx,
     [0xC] = op_unimplemented,
-    [0xD] = dispatch_Dxxx,
-    [0xE] = dispatch_Exxx,
-    [0xF] = dispatch_Fxxx,
+    [0xD] = dispatch_add,
+    [0xE] = dispatch_add,
+    [0xF] = dispatch_add,
 };
 
 static void execute(uint16_t op)

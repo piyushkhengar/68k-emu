@@ -55,10 +55,10 @@ test: $(TARGET)
 	output=$$(./$(TARGET) move_l_dn_pdec 2>&1); echo "$$output" | grep -q "D1=0x12345678" && echo "$$output" | grep -q "A7=0x00001000" && echo "  move_l_dn_pdec: PASS" || { echo "  move_l_dn_pdec: FAIL"; failed=1; }; \
 	output=$$(./$(TARGET) moveq 2>&1); echo "$$output" | grep -q "D0=0x0000002A" && echo "$$output" | grep -q "D1=0xFFFFFFFF" && echo "  moveq:  PASS" || { echo "  moveq:  FAIL"; failed=1; }; \
 	output=$$(./$(TARGET) add_b 2>&1); echo "$$output" | grep -q "D1=0x0000002A" && echo "  add_b:  PASS" || { echo "  add_b:  FAIL"; failed=1; }; \
-	output=$$(./$(TARGET) add_w 2>&1); echo "$$output" | grep -q "D1=0x0000002A" && echo "  add_w:  PASS" || { echo "  add_w:  FAIL"; failed=1; }; \
+	output=$$(./$(TARGET) add_w 2>&1); echo "$$output" | grep -q "D0=0x0000002A" && echo "  add_w:  PASS" || { echo "  add_w:  FAIL"; failed=1; }; \
 	output=$$(./$(TARGET) add 2>&1); echo "$$output" | grep -q "D1=0x0000002A" && echo "  add:    PASS" || { echo "  add:    FAIL"; failed=1; }; \
 	output=$$(./$(TARGET) sub_b 2>&1); echo "$$output" | grep -q "D1=0x0000002A" && echo "  sub_b:  PASS" || { echo "  sub_b:  FAIL"; failed=1; }; \
-	output=$$(./$(TARGET) sub_w 2>&1); echo "$$output" | grep -q "D1=0x0000002A" && echo "  sub_w:  PASS" || { echo "  sub_w:  FAIL"; failed=1; }; \
+	output=$$(./$(TARGET) sub_w 2>&1); echo "$$output" | grep -q "D0=0x0000FFD6" && echo "  sub_w:  PASS" || { echo "  sub_w:  FAIL"; failed=1; }; \
 	output=$$(./$(TARGET) sub 2>&1); echo "$$output" | grep -q "D1=0x0000002A" && echo "  sub:    PASS" || { echo "  sub:    FAIL"; failed=1; }; \
 	output=$$(./$(TARGET) cmp_b 2>&1); echo "$$output" | grep -q "SR=0x2704" && echo "  cmp_b:  PASS" || { echo "  cmp_b:  FAIL"; failed=1; }; \
 	output=$$(./$(TARGET) cmp_w 2>&1); echo "$$output" | grep -q "SR=0x2704" && echo "  cmp_w:  PASS" || { echo "  cmp_w:  FAIL"; failed=1; }; \

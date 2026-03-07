@@ -1,12 +1,16 @@
 #include "cpu_internal.h"
 #include "ea.h"
 #include "alu.h"
+#include "memory.h"
 
 /*
  * ADD/SUB/CMP using EA module. Supports all sizes (B, W, L) and EA modes
  * implemented in ea.c: Dn, An, (An), (An)+, -(An), d(An), abs.w, abs.l, d(PC), #imm.
  *
  * Encoding: bits 7-6=size, bit 9=direction, bits 11-9=Dn, bits 5-0=EA mode/reg.
+ *
+ * ADDX/SUBX: Format 1101/1001 Rx 1 SIZE 0 0 R/M Ry. R/M=0: Dy,Dx. R/M=1: -(Ay),-(Ax).
+ * Distinguish from ADD/SUB: (op & 0x130) == 0x100 (bit 8=1, bits 5-4=00).
  */
 
 static int alu_size(int op)
@@ -158,6 +162,120 @@ static void op_cmp_generic(uint16_t op, int size)
     set_nzvc_sub_sized(result, dest_val, src, size);
 }
 
+/* ADDX: dest = dest + src + X. Format: 1101 Rx 1 SIZE 0 0 R/M Ry. Z: cleared if nonzero. */
+static void op_addx(uint16_t op)
+{
+    int rx = (op >> 9) & 7;
+    int ry = (op >> 0) & 7;
+    int size = alu_size(op);
+    int rm = (op >> 3) & 1;
+    uint32_t xbit = (cpu.sr & SR_X) ? 1 : 0;
+
+    if (rm == 0) {
+        /* ADDX Dy, Dx */
+        uint32_t src = cpu.d[ry];
+        uint32_t dest_val = cpu.d[rx];
+        uint32_t result;
+        if (size == 1) {
+            src &= 0xFF;
+            dest_val &= 0xFF;
+            result = (dest_val + src + xbit) & 0xFF;
+            cpu.d[rx] = (cpu.d[rx] & 0xFFFFFF00) | result;
+        } else if (size == 2) {
+            src &= 0xFFFF;
+            dest_val &= 0xFFFF;
+            result = (dest_val + src + xbit) & 0xFFFF;
+            cpu.d[rx] = (cpu.d[rx] & 0xFFFF0000) | result;
+        } else {
+            result = dest_val + src + xbit;
+            cpu.d[rx] = result;
+        }
+        set_nzvc_addx_sized(result, dest_val, src, size);
+    } else {
+        /* ADDX -(Ay), -(Ax): decrement both, fetch, add+X, store to Ax */
+        cpu.a[ry] -= ea_step(ry, size);
+        cpu.a[rx] -= ea_step(rx, size);
+        uint32_t addr_y = cpu.a[ry], addr_x = cpu.a[rx];
+        uint32_t src, dest_val;
+        if (size == 1) {
+            src = mem_read8(addr_y) & 0xFF;
+            dest_val = mem_read8(addr_x) & 0xFF;
+            uint32_t result = (dest_val + src + xbit) & 0xFF;
+            mem_write8(addr_x, (uint8_t)result);
+            set_nzvc_addx_sized(result, dest_val, src, size);
+        } else if (size == 2) {
+            src = mem_read16(addr_y) & 0xFFFF;
+            dest_val = mem_read16(addr_x) & 0xFFFF;
+            uint32_t result = (dest_val + src + xbit) & 0xFFFF;
+            mem_write16(addr_x, (uint16_t)result);
+            set_nzvc_addx_sized(result, dest_val, src, size);
+        } else {
+            src = mem_read32(addr_y);
+            dest_val = mem_read32(addr_x);
+            uint32_t result = dest_val + src + xbit;
+            mem_write32(addr_x, result);
+            set_nzvc_addx_sized(result, dest_val, src, size);
+        }
+    }
+}
+
+/* SUBX: dest = dest - src - X. Format: 1001 Dy 1 SIZE 0 0 R/M Dx. Z: cleared if nonzero. */
+static void op_subx(uint16_t op)
+{
+    int rx = (op >> 9) & 7;   /* dest Dy/Ay */
+    int ry = (op >> 0) & 7;   /* src Dx/Ax */
+    int size = alu_size(op);
+    int rm = (op >> 3) & 1;
+    uint32_t xbit = (cpu.sr & SR_X) ? 1 : 0;
+
+    if (rm == 0) {
+        /* SUBX Dx, Dy */
+        uint32_t src = cpu.d[ry];
+        uint32_t dest_val = cpu.d[rx];
+        uint32_t result;
+        if (size == 1) {
+            src &= 0xFF;
+            dest_val &= 0xFF;
+            result = (dest_val - src - xbit) & 0xFF;
+            cpu.d[rx] = (cpu.d[rx] & 0xFFFFFF00) | result;
+        } else if (size == 2) {
+            src &= 0xFFFF;
+            dest_val &= 0xFFFF;
+            result = (dest_val - src - xbit) & 0xFFFF;
+            cpu.d[rx] = (cpu.d[rx] & 0xFFFF0000) | result;
+        } else {
+            result = dest_val - src - xbit;
+            cpu.d[rx] = result;
+        }
+        set_nzvc_subx_sized(result, dest_val, src, size);
+    } else {
+        /* SUBX -(Ax), -(Ay) */
+        cpu.a[ry] -= ea_step(ry, size);
+        cpu.a[rx] -= ea_step(rx, size);
+        uint32_t addr_x = cpu.a[rx], addr_y = cpu.a[ry];
+        uint32_t src, dest_val;
+        if (size == 1) {
+            src = mem_read8(addr_y) & 0xFF;
+            dest_val = mem_read8(addr_x) & 0xFF;
+            uint32_t result = (dest_val - src - xbit) & 0xFF;
+            mem_write8(addr_x, (uint8_t)result);
+            set_nzvc_subx_sized(result, dest_val, src, size);
+        } else if (size == 2) {
+            src = mem_read16(addr_y) & 0xFFFF;
+            dest_val = mem_read16(addr_x) & 0xFFFF;
+            uint32_t result = (dest_val - src - xbit) & 0xFFFF;
+            mem_write16(addr_x, (uint16_t)result);
+            set_nzvc_subx_sized(result, dest_val, src, size);
+        } else {
+            src = mem_read32(addr_y);
+            dest_val = mem_read32(addr_x);
+            uint32_t result = dest_val - src - xbit;
+            mem_write32(addr_x, result);
+            set_nzvc_subx_sized(result, dest_val, src, size);
+        }
+    }
+}
+
 /* MOVEQ #imm, Dn: sign-extend 8-bit immediate to 32-bit, load into Dn. Sets N,Z; clears V,C. */
 void op_moveq(uint16_t op)
 {
@@ -168,9 +286,13 @@ void op_moveq(uint16_t op)
     set_nz_from_val(result, 4);
 }
 
-/* 0x9xxx: SUB */
+/* 0x9xxx: SUB or SUBX. SUBX when (op & 0x130) == 0x100 */
 void dispatch_9xxx(uint16_t op)
 {
+    if ((op & 0x130) == 0x100) {
+        op_subx(op);
+        return;
+    }
     int size = alu_size(op);
     op_sub_generic(op, size);
 }
@@ -182,23 +304,13 @@ void dispatch_Bxxx(uint16_t op)
     op_cmp_generic(op, size);
 }
 
-/* 0xDxxx: ADD */
-void dispatch_Dxxx(uint16_t op)
+/* 0xDxxx/0xExxx/0xFxxx: ADD or ADDX. ADDX when (op & 0x130) == 0x100 */
+void dispatch_add(uint16_t op)
 {
-    int size = alu_size(op);
-    op_add_generic(op, size);
-}
-
-/* 0xExxx: ADD (same encoding as 0xD) */
-void dispatch_Exxx(uint16_t op)
-{
-    int size = alu_size(op);
-    op_add_generic(op, size);
-}
-
-/* 0xFxxx: ADD (same encoding as 0xD) */
-void dispatch_Fxxx(uint16_t op)
-{
+    if ((op & 0x130) == 0x100) {
+        op_addx(op);
+        return;
+    }
     int size = alu_size(op);
     op_add_generic(op, size);
 }
