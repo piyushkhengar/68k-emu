@@ -351,6 +351,66 @@ static const uint8_t subx_l_test[] = {
     0x4E, 0x71, 0x60, 0xFC,
 };
 
+/* ADDA.W D0, A1: A1 = A1 + sign_extend(D0). A1=0x1000, D0=42 -> A1=0x102A */
+static const uint8_t adda_w_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x22, 0x7C, 0x00, 0x00, 0x10, 0x00,   /* MOVE.L #0x1000, A1 */
+    0x70, 0x2A,               /* MOVEQ #42, D0 */
+    0xD2, 0xC0,               /* ADDA.W D0, A1  (A1 = 0x1000 + 42 = 0x102A) */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* ADDA.L D0, A1: A1 = A1 + D0. A1=0x1000, D0=42 -> A1=0x102A */
+static const uint8_t adda_l_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x22, 0x7C, 0x00, 0x00, 0x10, 0x00,   /* MOVE.L #0x1000, A1 */
+    0x70, 0x2A,               /* MOVEQ #42, D0 */
+    0xD3, 0xC0,               /* ADDA.L D0, A1  (A1 = 0x1000 + 42 = 0x102A) */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* SUBA.W D0, A1: A1 = A1 - sign_extend(D0). A1=0x102A, D0=42 -> A1=0x1000 */
+static const uint8_t suba_w_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x22, 0x7C, 0x00, 0x00, 0x10, 0x2A,   /* MOVE.L #0x102A, A1 */
+    0x70, 0x2A,               /* MOVEQ #42, D0 */
+    0x92, 0xC0,               /* SUBA.W D0, A1  (A1 = 0x102A - 42 = 0x1000) */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* SUBA.L D0, A1: A1 = A1 - D0. A1=0x102A, D0=42 -> A1=0x1000 */
+static const uint8_t suba_l_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x22, 0x7C, 0x00, 0x00, 0x10, 0x2A,   /* MOVE.L #0x102A, A1 */
+    0x70, 0x2A,               /* MOVEQ #42, D0 */
+    0x93, 0xC0,               /* SUBA.L D0, A1  (A1 = 0x102A - 42 = 0x1000) */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* CMPA.W D0, A1: compare A1 with sign_extend(D0). A1=0x1000, D0=0x1000 (word) -> Z set */
+static const uint8_t cmpa_w_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x22, 0x7C, 0x00, 0x00, 0x10, 0x00,   /* MOVE.L #0x1000, A1 */
+    0x20, 0x3C, 0x00, 0x00, 0x10, 0x00,   /* MOVE.L #0x1000, D0 */
+    0xB2, 0xC0,               /* CMPA.W D0, A1  (A1=0x1000, D0.w=0x1000, equal -> Z) */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* CMPA.L D0, A1: compare A1 with D0. A1=0x1000, D0=0x1000 -> Z set */
+static const uint8_t cmpa_l_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x22, 0x7C, 0x00, 0x00, 0x10, 0x00,   /* MOVE.L #0x1000, A1 */
+    0x20, 0x3C, 0x00, 0x00, 0x10, 0x00,   /* MOVE.L #0x1000, D0 */
+    0xB3, 0xC0,               /* CMPA.L D0, A1  (equal -> Z) */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
 /* ADD.L (0,A7,D0.W), D1: indexed - store 42 at (A7), D0=0, D1=0 -> D1=42 */
 static const uint8_t add_idx_test[] = {
     0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
@@ -749,13 +809,19 @@ static int check_test_result(size_t idx)
     case 46: return cpu.d[1] == 0x2A;                                   /* subx_b */
     case 47: return cpu.d[1] == 0x2A;                                   /* subx_l */
     case 48: return (cpu.sr & 0x1F) == 0x04;                           /* cmp_idx */
-    case 49: return cpu.d[2] == 2;                                      /* bcc */
-    case 50: return cpu.d[2] == 15;                                     /* bcc_all */
-    case 51: return cpu.d[2] == 0x2A;                                   /* bsr_rts */
-    case 52: return cpu.d[2] == 0xAE;                                   /* addr_err */
-    case 53: return cpu.d[2] == 4;                                      /* illegal */
-    case 54: return cpu.d[0] == 0xFFFFFFAB;                              /* trap_rte (MOVEQ #0xAB sign-extends) */
-    case 55: return cpu.d[2] == 8;                                      /* rte_priv */
+    case 49: return cpu.a[1] == 0x102A;                                 /* adda_w */
+    case 50: return cpu.a[1] == 0x102A;                                 /* adda_l */
+    case 51: return cpu.a[1] == 0x1000;                                 /* suba_w */
+    case 52: return cpu.a[1] == 0x1000;                                 /* suba_l */
+    case 53: return (cpu.sr & 0x1F) == 0x04;                            /* cmpa_w (Z set) */
+    case 54: return (cpu.sr & 0x1F) == 0x04;                            /* cmpa_l (Z set) */
+    case 55: return cpu.d[2] == 2;                                      /* bcc */
+    case 56: return cpu.d[2] == 15;                                     /* bcc_all */
+    case 57: return cpu.d[2] == 0x2A;                                   /* bsr_rts */
+    case 58: return cpu.d[2] == 0xAE;                                   /* addr_err */
+    case 59: return cpu.d[2] == 4;                                      /* illegal */
+    case 60: return cpu.d[0] == 0xFFFFFFAB;                             /* trap_rte (MOVEQ #0xAB sign-extends) */
+    case 61: return cpu.d[2] == 8;                                       /* rte_priv */
     default: return 0;
     }
 }
@@ -813,6 +879,12 @@ static const builtin_test_t builtin_tests[] = {
     { "subx_b", subx_b_test, sizeof(subx_b_test), "Running SUBX.B test", 0 },
     { "subx_l", subx_l_test, sizeof(subx_l_test), "Running SUBX.L test", 0 },
     { "cmp_idx", cmp_idx_test, sizeof(cmp_idx_test), "Running CMP.L (d8,An,Xn) indexed test", 0 },
+    { "adda_w", adda_w_test, sizeof(adda_w_test), "Running ADDA.W test", 0 },
+    { "adda_l", adda_l_test, sizeof(adda_l_test), "Running ADDA.L test", 0 },
+    { "suba_w", suba_w_test, sizeof(suba_w_test), "Running SUBA.W test", 0 },
+    { "suba_l", suba_l_test, sizeof(suba_l_test), "Running SUBA.L test", 0 },
+    { "cmpa_w", cmpa_w_test, sizeof(cmpa_w_test), "Running CMPA.W test", 0 },
+    { "cmpa_l", cmpa_l_test, sizeof(cmpa_l_test), "Running CMPA.L test", 0 },
     { "bcc", bcc_test, sizeof(bcc_test), "Running Bcc (BEQ/BNE) test", 0 },
     { "bcc_all", bcc_all_test, sizeof(bcc_all_test), "Running Bcc comprehensive test (all 15 conditions)", 500 },
     { "bsr_rts", bsr_rts_test, sizeof(bsr_rts_test), "Running BSR/RTS test", 0 },

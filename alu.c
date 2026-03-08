@@ -138,6 +138,67 @@ static void alu_mem_write_sized(uint32_t addr, int size, uint32_t value)
     else mem_write32(addr, value);
 }
 
+/* ADDA/SUBA/CMPA: opmode (bits 8-6) 011=word, 111=long. Destination An, source EA. */
+static int alu_is_adda_suba_cmpa(uint16_t op)
+{
+    int opmode = (op >> 6) & 7;
+    return opmode == 3 || opmode == 7;
+}
+
+static int op_adda(uint16_t op)
+{
+    int an_reg = (op >> 9) & 7;
+    int ea_mode = (op >> 3) & 7;
+    int ea_reg = op & 7;
+    int size = ((op >> 6) & 7) == 7 ? 4 : 2;  /* 111=long, 011=word */
+
+    uint32_t src = ea_fetch_value(ea_mode, ea_reg, size);
+    uint32_t dest = cpu.a[an_reg];
+    uint32_t result;
+
+    if (size == 2)
+        src = (uint32_t)(int32_t)(int16_t)(src & 0xFFFF);
+    result = dest + src;
+    cpu.a[an_reg] = result;
+    return add_sub_cycles(ea_mode, ea_reg, size, 0);
+}
+
+static int op_suba(uint16_t op)
+{
+    int an_reg = (op >> 9) & 7;
+    int ea_mode = (op >> 3) & 7;
+    int ea_reg = op & 7;
+    int size = ((op >> 6) & 7) == 7 ? 4 : 2;
+
+    uint32_t src = ea_fetch_value(ea_mode, ea_reg, size);
+    uint32_t dest = cpu.a[an_reg];
+    uint32_t result;
+
+    if (size == 2)
+        src = (uint32_t)(int32_t)(int16_t)(src & 0xFFFF);
+    result = dest - src;
+    cpu.a[an_reg] = result;
+    return add_sub_cycles(ea_mode, ea_reg, size, 0);
+}
+
+static int op_cmpa(uint16_t op)
+{
+    int an_reg = (op >> 9) & 7;
+    int ea_mode = (op >> 3) & 7;
+    int ea_reg = op & 7;
+    int size = ((op >> 6) & 7) == 7 ? 4 : 2;
+
+    uint32_t dest = cpu.a[an_reg];
+    uint32_t src = ea_fetch_value(ea_mode, ea_reg, size);
+    uint32_t result;
+
+    if (size == 2)
+        src = (uint32_t)(int32_t)(int16_t)(src & 0xFFFF);
+    result = (dest - src) & 0xFFFFFFFF;
+    set_nzvc_sub_sized(result, dest, src, 4);
+    return cmp_cycles(ea_mode, ea_reg, size);
+}
+
 /* ADDX/SUBX: dest = dest op src op X. Format: 1101/1001 Rx 1 SIZE 0 0 R/M Ry. Z: cleared if nonzero. */
 static int op_addx_subx(uint16_t op, int is_add)
 {
@@ -187,23 +248,29 @@ int op_moveq(uint16_t op)
     return CYCLES_MOVEQ;
 }
 
-/* 0x9xxx: SUB or SUBX. SUBX when (op & 0x130) == 0x100 */
+/* 0x9xxx: SUB, SUBA, or SUBX. SUBA when opmode 011/111; SUBX when (op & 0x130)==0x100. */
 int dispatch_9xxx(uint16_t op)
 {
+    if (alu_is_adda_suba_cmpa(op))
+        return op_suba(op);
     if ((op & 0x130) == 0x100)
         return op_addx_subx(op, 0);
     return op_add_sub_generic(op, alu_size(op), 0x90);
 }
 
-/* 0xBxxx: CMP */
+/* 0xBxxx: CMP or CMPA. CMPA when opmode 011/111. */
 int dispatch_Bxxx(uint16_t op)
 {
+    if (alu_is_adda_suba_cmpa(op))
+        return op_cmpa(op);
     return op_cmp_generic(op, alu_size(op));
 }
 
-/* 0xDxxx/0xExxx/0xFxxx: ADD or ADDX. ADDX when (op & 0x130) == 0x100 */
+/* 0xDxxx/0xExxx/0xFxxx: ADD, ADDA, or ADDX. ADDA when opmode 011/111; ADDX when (op & 0x130)==0x100. */
 int dispatch_add(uint16_t op)
 {
+    if (alu_is_adda_suba_cmpa(op))
+        return op_adda(op);
     if ((op & 0x130) == 0x100)
         return op_addx_subx(op, 1);
     return op_add_sub_generic(op, alu_size(op), 0xD0);
