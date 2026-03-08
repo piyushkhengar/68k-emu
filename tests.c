@@ -444,6 +444,62 @@ static const uint8_t cmp_idx_test[] = {
     0x4E, 0x71, 0x60, 0xFC,
 };
 
+/* --- ADDI, SUBI, CMPI, ADDQ, SUBQ (Phase 2) --- */
+
+/* ADDI.L #32, D0: D0=10+32=42 */
+static const uint8_t addi_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x70, 0x0A,               /* MOVEQ #10, D0 */
+    0x06, 0x80, 0x00, 0x00, 0x00, 0x20,   /* ADDI.L #32, D0 */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* SUBI.L #8, D1: D1=50-8=42 */
+static const uint8_t subi_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x72, 0x32,               /* MOVEQ #50, D1 */
+    0x04, 0x81, 0x00, 0x00, 0x00, 0x08,   /* SUBI.L #8, D1 */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* CMPI.L #10, D1: D1=10, compare -> Z set */
+static const uint8_t cmpi_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x72, 0x0A,               /* MOVEQ #10, D1 */
+    0x0C, 0x81, 0x00, 0x00, 0x00, 0x0A,   /* CMPI.L #10, D1 */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* ADDQ.L #1, D0: D0=41+1=42 */
+static const uint8_t addq_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x70, 0x29,               /* MOVEQ #41, D0 */
+    0x52, 0x80,               /* ADDQ.L #1, D0 */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* SUBQ.L #1, D1: D1=43-1=42 */
+static const uint8_t subq_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x72, 0x2B,               /* MOVEQ #43, D1 */
+    0x53, 0x81,               /* SUBQ.L #1, D1 */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* ADDQ.L #1, A1: A1=0x1000+1=0x1001 (address reg, no flags) */
+static const uint8_t addq_a_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x22, 0x7C, 0x00, 0x00, 0x10, 0x00,   /* MOVE.L #0x1000, A1 */
+    0x52, 0x89,               /* ADDQ.L #1, A1 (mode 1 reg 1 = 0x09, size L = 0x89) */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
 /* --- MOVE variant tests (22): B, W, L order --- */
 
 static const uint8_t move_b_imm_dn_test[] = {
@@ -809,19 +865,25 @@ static int check_test_result(size_t idx)
     case 46: return cpu.d[1] == 0x2A;                                   /* subx_b */
     case 47: return cpu.d[1] == 0x2A;                                   /* subx_l */
     case 48: return (cpu.sr & 0x1F) == 0x04;                           /* cmp_idx */
-    case 49: return cpu.a[1] == 0x102A;                                 /* adda_w */
-    case 50: return cpu.a[1] == 0x102A;                                 /* adda_l */
-    case 51: return cpu.a[1] == 0x1000;                                 /* suba_w */
-    case 52: return cpu.a[1] == 0x1000;                                 /* suba_l */
-    case 53: return (cpu.sr & 0x1F) == 0x04;                            /* cmpa_w (Z set) */
-    case 54: return (cpu.sr & 0x1F) == 0x04;                            /* cmpa_l (Z set) */
-    case 55: return cpu.d[2] == 2;                                      /* bcc */
-    case 56: return cpu.d[2] == 15;                                     /* bcc_all */
-    case 57: return cpu.d[2] == 0x2A;                                   /* bsr_rts */
-    case 58: return cpu.d[2] == 0xAE;                                   /* addr_err */
-    case 59: return cpu.d[2] == 4;                                      /* illegal */
-    case 60: return cpu.d[0] == 0xFFFFFFAB;                             /* trap_rte (MOVEQ #0xAB sign-extends) */
-    case 61: return cpu.d[2] == 8;                                       /* rte_priv */
+    case 49: return cpu.d[0] == 0x2A;                                   /* addi */
+    case 50: return cpu.d[1] == 0x2A;                                   /* subi */
+    case 51: return (cpu.sr & 0x1F) == 0x04;                            /* cmpi (Z set) */
+    case 52: return cpu.d[0] == 0x2A;                                   /* addq */
+    case 53: return cpu.d[1] == 0x2A;                                   /* subq */
+    case 54: return cpu.a[1] == 0x1001;                                 /* addq_a */
+    case 55: return cpu.a[1] == 0x102A;                                 /* adda_w */
+    case 56: return cpu.a[1] == 0x102A;                                 /* adda_l */
+    case 57: return cpu.a[1] == 0x1000;                                 /* suba_w */
+    case 58: return cpu.a[1] == 0x1000;                                 /* suba_l */
+    case 59: return (cpu.sr & 0x1F) == 0x04;                            /* cmpa_w (Z set) */
+    case 60: return (cpu.sr & 0x1F) == 0x04;                            /* cmpa_l (Z set) */
+    case 61: return cpu.d[2] == 2;                                      /* bcc */
+    case 62: return cpu.d[2] == 15;                                     /* bcc_all */
+    case 63: return cpu.d[2] == 0x2A;                                   /* bsr_rts */
+    case 64: return cpu.d[2] == 0xAE;                                   /* addr_err */
+    case 65: return cpu.d[2] == 4;                                      /* illegal */
+    case 66: return cpu.d[0] == 0xFFFFFFAB;                             /* trap_rte (MOVEQ #0xAB sign-extends) */
+    case 67: return cpu.d[2] == 8;                                       /* rte_priv */
     default: return 0;
     }
 }
@@ -879,6 +941,12 @@ static const builtin_test_t builtin_tests[] = {
     { "subx_b", subx_b_test, sizeof(subx_b_test), "Running SUBX.B test", 0 },
     { "subx_l", subx_l_test, sizeof(subx_l_test), "Running SUBX.L test", 0 },
     { "cmp_idx", cmp_idx_test, sizeof(cmp_idx_test), "Running CMP.L (d8,An,Xn) indexed test", 0 },
+    { "addi", addi_test, sizeof(addi_test), "Running ADDI.L test", 0 },
+    { "subi", subi_test, sizeof(subi_test), "Running SUBI.L test", 0 },
+    { "cmpi", cmpi_test, sizeof(cmpi_test), "Running CMPI.L test", 0 },
+    { "addq", addq_test, sizeof(addq_test), "Running ADDQ.L test", 0 },
+    { "subq", subq_test, sizeof(subq_test), "Running SUBQ.L test", 0 },
+    { "addq_a", addq_a_test, sizeof(addq_a_test), "Running ADDQ.L to address register test", 0 },
     { "adda_w", adda_w_test, sizeof(adda_w_test), "Running ADDA.W test", 0 },
     { "adda_l", adda_l_test, sizeof(adda_l_test), "Running ADDA.L test", 0 },
     { "suba_w", suba_w_test, sizeof(suba_w_test), "Running SUBA.W test", 0 },

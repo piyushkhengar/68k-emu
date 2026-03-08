@@ -4,6 +4,7 @@
 #include "alu.h"
 #include "branch.h"
 #include "control.h"
+#include "immediate.h"
 #include "memory.h"
 #include "timing.h"
 #include <setjmp.h>
@@ -211,12 +212,12 @@ typedef int (*op_handler_fn)(uint16_t op);
 
 /* Top-nibble dispatch table. Index = op >> 12. */
 static const op_handler_fn dispatch_top[16] = {
-    [0x0] = op_unimplemented,
+    [0x0] = dispatch_0xxx,
     [0x1] = dispatch_move_b,
     [0x3] = dispatch_move_w,
     [0x2] = dispatch_move_l,
     [0x4] = dispatch_4xxx,
-    [0x5] = op_unimplemented,
+    [0x5] = dispatch_5xxx,
     [0x6] = op_bcc,
     [0x7] = op_moveq,
     [0x8] = op_unimplemented,
