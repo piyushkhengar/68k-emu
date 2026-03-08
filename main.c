@@ -1,8 +1,10 @@
 /*
  * 68K CPU Emulator - Learning Project
  *
- * Run with: ./68k-emu [rom.bin]
- * Without a ROM, runs a tiny built-in NOP loop to verify the CPU executes.
+ * Run with: ./68k-emu [rom.bin|test_name] [--speed MHz]
+ * Without a ROM, runs a tiny built-in NOP loop.
+ * --speed 0 or omitted: hyperspeed (no throttling)
+ * --speed 7.09: PAL Amiga speed (7.09 MHz)
  */
 
 #include "cpu.h"
@@ -11,6 +13,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+
+#define SLICE_MS 10
 
 static void print_cpu_state(void)
 {
@@ -18,22 +23,76 @@ static void print_cpu_state(void)
            cpu.d[0], cpu.d[1], cpu.d[2], cpu.a[7], cpu.sr);
 }
 
+/* Parse argv; returns speed_mhz (0 = unlimited), sets *rom_or_test, *run_all. */
+static double parse_args(int argc, char *argv[], const char **rom_or_test, int *run_all)
+{
+    double speed_mhz = 0;
+    *rom_or_test = NULL;
+    *run_all = 0;
+
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--speed") == 0) {
+            if (i + 1 < argc) {
+                speed_mhz = strtod(argv[i + 1], NULL);
+                if (speed_mhz < 0)
+                    speed_mhz = 0;
+                i++;
+            }
+        } else if (strcmp(argv[i], "--run-all-tests") == 0) {
+            *run_all = 1;
+        } else if (*rom_or_test == NULL) {
+            *rom_or_test = argv[i];
+        }
+    }
+    return speed_mhz;
+}
+
+static double get_monotonic_sec(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
+}
+
+static void sleep_sec(double sec)
+{
+    if (sec <= 0)
+        return;
+    struct timespec req = {
+        .tv_sec = (time_t)sec,
+        .tv_nsec = (long)((sec - (time_t)sec) * 1e9)
+    };
+    if (req.tv_nsec < 0)
+        req.tv_nsec = 0;
+    if (req.tv_nsec >= 1000000000)
+        req.tv_nsec = 999999999;
+    nanosleep(&req, NULL);
+}
+
 int main(int argc, char *argv[])
 {
     mem_init();
     cpu_init();
 
+    const char *rom_or_test = NULL;
+    int run_all = 0;
+    double speed_mhz = parse_args(argc, argv, &rom_or_test, &run_all);
+
+    if (run_all) {
+        return run_all_tests(speed_mhz);
+    }
+
     const builtin_test_t *test = NULL;
-    if (argc >= 2)
-        test = find_builtin_test(argv[1]);
+    if (rom_or_test)
+        test = find_builtin_test(rom_or_test);
 
     if (test) {
         mem_load_rom(test->rom, test->size);
         printf("%s\n", test->description);
-    } else if (argc >= 2) {
-        FILE *f = fopen(argv[1], "rb");
+    } else if (rom_or_test) {
+        FILE *f = fopen(rom_or_test, "rb");
         if (!f) {
-            perror(argv[1]);
+            perror(rom_or_test);
             return 1;
         }
         fseek(f, 0, SEEK_END);
@@ -49,7 +108,7 @@ int main(int argc, char *argv[])
         fclose(f);
         mem_load_rom(rom, size);
         free(rom);
-        printf("Loaded ROM: %s (%ld bytes)\n", argv[1], size);
+        printf("Loaded ROM: %s (%ld bytes)\n", rom_or_test, size);
     } else {
         mem_load_rom(nop_loop, nop_loop_size);
         printf("Running built-in NOP loop (no ROM specified)\n");
@@ -58,14 +117,32 @@ int main(int argc, char *argv[])
     cpu_reset();
     printf("PC=0x%08X  SP=0x%08X\n", cpu.pc, cpu.a[7]);
 
+    if (speed_mhz > 0)
+        printf("Running at %.2f MHz\n", speed_mhz);
+
     int steps = 0;
     int max_steps = test && test->max_steps ? test->max_steps : 100;
+    uint64_t cycles_this_slice = 0;
+    double slice_start = get_monotonic_sec();
+
     while (steps < max_steps) {
         int c = cpu_step();
         if (c == 0)
             break;
         cpu.cycles += c;
+        cycles_this_slice += c;
         steps++;
+
+        if (speed_mhz > 0) {
+            uint64_t target_cycles = (uint64_t)(speed_mhz * 1e6 * SLICE_MS / 1000);
+            if (cycles_this_slice >= target_cycles) {
+                double target_elapsed = (double)cycles_this_slice / (speed_mhz * 1e6);
+                double actual_elapsed = get_monotonic_sec() - slice_start;
+                sleep_sec(target_elapsed - actual_elapsed);
+                cycles_this_slice = 0;
+                slice_start = get_monotonic_sec();
+            }
+        }
     }
 
     printf("Executed %d instructions. PC=0x%08X %s\n",

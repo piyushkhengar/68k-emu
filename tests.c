@@ -4,7 +4,11 @@
  */
 
 #include "tests.h"
+#include "cpu.h"
+#include "memory.h"
+#include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 /* Minimal test: reset vector at 0, code at 0x10 */
 const uint8_t nop_loop[] = {
@@ -591,7 +595,95 @@ static const uint8_t illegal_test[] = {
 
 /* --- Built-in test table --- */
 
+#define SLICE_MS 10
+#define SLICE_MS_THROTTLED 1   /* 1ms slices so we sleep every ~7,090 cycles at 7.09 MHz */
+
+static double get_monotonic_sec(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
+}
+
+static void sleep_sec(double sec)
+{
+    if (sec <= 0)
+        return;
+    struct timespec req = {
+        .tv_sec = (time_t)sec,
+        .tv_nsec = (long)((sec - (time_t)sec) * 1e9)
+    };
+    if (req.tv_nsec < 0)
+        req.tv_nsec = 0;
+    if (req.tv_nsec >= 1000000000)
+        req.tv_nsec = 999999999;
+    nanosleep(&req, NULL);
+}
+
+/* Check expected result for test index. Returns 1 if pass. */
+static int check_test_result(size_t idx)
+{
+    switch (idx) {
+    case 0:  return cpu.pc == 0x12;                                    /* nop */
+    case 1:  return cpu.d[1] == 0x2A;                                  /* move_b */
+    case 2:  return cpu.d[1] == 0xAB;                                  /* move_b_mem */
+    case 3:  return cpu.d[0] == 0xAB;                                  /* move_b_imm_dn */
+    case 4:  return cpu.d[1] == 0xAB;                                  /* move_b_imm_an */
+    case 5:  return cpu.d[1] == 0xAB && cpu.a[7] == 0x1002;            /* move_b_anp_dn */
+    case 6:  return cpu.d[1] == 0xAB && cpu.a[7] == 0x0FFE;            /* move_b_pdec_dn */
+    case 7:  return cpu.d[1] == 0xAB;                                  /* move_b_dn_anp */
+    case 8:  return cpu.d[1] == 0xAB;                                  /* move_b_dn_pdec */
+    case 9:  return cpu.d[1] == 0xAB;                                  /* move_b_disp_dn */
+    case 10: return cpu.d[1] == 0xAB;                                  /* move_b_dn_disp */
+    case 11: return cpu.d[1] == 0x2A;                                  /* move_w */
+    case 12: return cpu.d[1] == 0xFFFF;                                /* move_w_mem */
+    case 13: return cpu.d[0] == 0x1234;                                 /* move_w_imm_dn */
+    case 14: return cpu.d[1] == 0x1234;                                 /* move_w_imm_an */
+    case 15: return cpu.d[1] == 0x1234 && cpu.a[7] == 0x1002;          /* move_w_anp_dn */
+    case 16: return cpu.d[1] == 0x1234 && cpu.a[7] == 0x0FFE;          /* move_w_pdec_dn */
+    case 17: return cpu.d[1] == 0x1234;                                 /* move_w_dn_anp */
+    case 18: return cpu.d[1] == 0x1234;                                 /* move_w_dn_pdec */
+    case 19: return cpu.d[1] == 0x1234;                                 /* move_w_disp_dn */
+    case 20: return cpu.d[1] == 0x1234;                                 /* move_w_dn_disp */
+    case 21: return cpu.d[2] == 0;                                     /* move */
+    case 22: return cpu.d[2] == 0;                                     /* test (same as move) */
+    case 23: return cpu.d[1] == 0x2A;                                  /* move_mem */
+    case 24: return cpu.d[0] == 0x12345678;                             /* move_imm */
+    case 25: return cpu.d[1] == 0xDEADBEEF;                            /* move_imm_mem */
+    case 26: return cpu.d[1] == 0x12345678 && cpu.a[7] == 0x1004;     /* move_anp */
+    case 27: return cpu.d[1] == 0x12345678;                             /* move_disp */
+    case 28: return cpu.d[1] == 0x12345678;                             /* move_l_imm_disp */
+    case 29: return cpu.d[1] == 0x12345678 && cpu.a[7] == 0x0FFC;      /* move_l_pdec_dn */
+    case 30: return cpu.a[7] == 0x1004;                                 /* move_l_dn_anp */
+    case 31: return cpu.d[1] == 0x12345678 && cpu.a[7] == 0x1000;     /* move_l_dn_pdec */
+    case 32: return cpu.d[0] == 0x2A && cpu.d[1] == 0xFFFFFFFF;        /* moveq */
+    case 33: return cpu.d[1] == 0x2A;                                   /* add_b */
+    case 34: return cpu.d[0] == 0x2A;                                   /* add_w */
+    case 35: return cpu.d[1] == 0x2A;                                   /* add */
+    case 36: return cpu.d[1] == 0x2A;                                   /* sub_b */
+    case 37: return cpu.d[0] == 0xFFD6;                                 /* sub_w */
+    case 38: return cpu.d[1] == 0x2A;                                   /* sub */
+    case 39: return (cpu.sr & 0x1F) == 0x04;                            /* cmp_b */
+    case 40: return (cpu.sr & 0x1F) == 0x04;                            /* cmp_w */
+    case 41: return (cpu.sr & 0x1F) == 0x04;                            /* cmp */
+    case 42: return cpu.d[1] == 0x2A;                                   /* add_idx */
+    case 43: return cpu.d[0] == 0x2A;                                   /* addx_b */
+    case 44: return cpu.d[0] == 0x2A;                                   /* addx_l */
+    case 45: return cpu.d[1] == 0;                                      /* sub_idx */
+    case 46: return cpu.d[1] == 0x2A;                                   /* subx_b */
+    case 47: return cpu.d[1] == 0x2A;                                   /* subx_l */
+    case 48: return (cpu.sr & 0x1F) == 0x04;                           /* cmp_idx */
+    case 49: return cpu.d[2] == 2;                                      /* bcc */
+    case 50: return cpu.d[2] == 15;                                     /* bcc_all */
+    case 51: return cpu.d[2] == 0x2A;                                   /* bsr_rts */
+    case 52: return cpu.d[2] == 0xAE;                                   /* addr_err */
+    case 53: return cpu.d[2] == 4;                                      /* illegal */
+    default: return 0;
+    }
+}
+
 static const builtin_test_t builtin_tests[] = {
+    { "nop", nop_loop, nop_loop_size, "Running built-in NOP loop", 0 },
     /* MOVE.B */
     { "move_b",  move_b_test, sizeof(move_b_test), "Running MOVE.B test", 0 },
     { "move_b_mem", move_b_mem_test, sizeof(move_b_mem_test), "Running MOVE.B memory test", 0 },
@@ -659,4 +751,54 @@ const builtin_test_t *find_builtin_test(const char *name)
             return &builtin_tests[i];
     }
     return NULL;
+}
+
+int run_all_tests(double speed_mhz)
+{
+    int failed = 0;
+    uint64_t cycles_this_slice = 0;
+    double slice_start = get_monotonic_sec();
+
+    printf("Running regression tests%s...\n", speed_mhz > 0 ? " at given speed" : "");
+
+    for (size_t i = 0; i < NUM_BUILTIN_TESTS; i++) {
+        const builtin_test_t *t = &builtin_tests[i];
+        mem_load_rom(t->rom, t->size);
+        cpu_reset();
+
+        int max_steps = t->max_steps ? t->max_steps : 100;
+        int steps = 0;
+
+        while (steps < max_steps) {
+            int c = cpu_step();
+            if (c == 0)
+                break;
+            cpu.cycles += c;
+            cycles_this_slice += c;
+            steps++;
+
+            if (speed_mhz > 0) {
+                int slice_ms = SLICE_MS_THROTTLED;
+                uint64_t target_cycles = (uint64_t)(speed_mhz * 1e6 * slice_ms / 1000);
+                if (cycles_this_slice >= target_cycles) {
+                    double target_elapsed = (double)cycles_this_slice / (speed_mhz * 1e6);
+                    double actual_elapsed = get_monotonic_sec() - slice_start;
+                    sleep_sec(target_elapsed - actual_elapsed);
+                    cycles_this_slice = 0;
+                    slice_start = get_monotonic_sec();
+                }
+            }
+        }
+
+        int pass = check_test_result(i);
+        printf("  %-12s %s\n", t->name, pass ? "PASS" : "FAIL");
+        if (!pass)
+            failed = 1;
+    }
+
+    if (failed)
+        printf("Some tests failed.\n");
+    else
+        printf("All tests passed.\n");
+    return failed ? 1 : 0;
 }

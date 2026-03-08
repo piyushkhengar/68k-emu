@@ -117,9 +117,9 @@ void ea_store_value(int mode, int reg, int size, uint32_t value)
     }
 
     switch (mode) {
-    case 0: /* Dn */
-        if (size == 1) cpu.d[reg] = (cpu.d[reg] & 0xFFFFFF00) | (value & 0xFF);
-        else if (size == 2) cpu.d[reg] = (cpu.d[reg] & 0xFFFF0000) | (value & 0xFFFF);
+    case 0: /* Dn - MOVE zero-extends byte/word to long */
+        if (size == 1) cpu.d[reg] = value & 0xFF;
+        else if (size == 2) cpu.d[reg] = value & 0xFFFF;
         else cpu.d[reg] = value;
         break;
     case 1: /* An */

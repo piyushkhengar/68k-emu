@@ -23,4 +23,7 @@ extern const size_t nop_loop_size;
 /* Look up built-in test by name. Returns NULL if not found. */
 const builtin_test_t *find_builtin_test(const char *name);
 
+/* Run all built-in tests in one process. speed_mhz: 0 = hyperspeed. Returns 0 if all pass, 1 if any fail. */
+int run_all_tests(double speed_mhz);
+
 #endif /* TESTS_H */
