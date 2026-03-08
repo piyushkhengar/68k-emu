@@ -1,6 +1,7 @@
 #include "cpu_internal.h"
 #include "ea.h"
 #include "move.h"
+#include "timing.h"
 
 /*
  * MOVE encoding: dest EA in bits 11-6 (mode 9-11, reg 6-8), source EA in bits 5-0 (mode 3-5, reg 0-2).
@@ -8,7 +9,7 @@
  * Exception: MOVE.L #imm, d(An) has dest extension word (displacement) before source (immediate).
  */
 
-static void op_move_generic(uint16_t op, int size)
+static int op_move_generic(uint16_t op, int size)
 {
     int src_mode = (op >> 3) & 7;
     int src_reg = op & 7;
@@ -18,10 +19,11 @@ static void op_move_generic(uint16_t op, int size)
     uint32_t val = ea_fetch_value(src_mode, src_reg, size);
     ea_store_value(dst_mode, dst_reg, size, val);
     set_nz_from_val(val, size);
+    return move_cycles(src_mode, src_reg, dst_mode, dst_reg, size);
 }
 
 /* MOVE.L #imm, d(An): dest displacement comes before source immediate in extension words. */
-static void op_move_l_imm_disp_an(uint16_t op)
+static int op_move_l_imm_disp_an(uint16_t op)
 {
     int addr_reg = (op >> 6) & 7;
     int32_t disp = (int16_t)fetch16();
@@ -29,6 +31,7 @@ static void op_move_l_imm_disp_an(uint16_t op)
     uint32_t val = fetch32();
     mem_write32(addr, val);
     set_nz_from_val(val, 4);
+    return move_cycles(7, 4, 5, addr_reg, 4);  /* #imm to d(An) */
 }
 
 /*
@@ -38,21 +41,19 @@ static void op_move_l_imm_disp_an(uint16_t op)
  * MOVE.L #imm,d(An) is special-cased: dest ext word (disp) comes before source (imm).
  */
 
-void dispatch_move_b(uint16_t op)
+int dispatch_move_b(uint16_t op)
 {
-    op_move_generic(op, 1);
+    return op_move_generic(op, 1);
 }
 
-void dispatch_move_w(uint16_t op)
+int dispatch_move_w(uint16_t op)
 {
-    op_move_generic(op, 2);
+    return op_move_generic(op, 2);
 }
 
-void dispatch_move_l(uint16_t op)
+int dispatch_move_l(uint16_t op)
 {
-    if ((op & 0x003F) == 0x3C && (op & 0x0E00) == 0x0A00) {
-        op_move_l_imm_disp_an(op);
-        return;
-    }
-    op_move_generic(op, 4);
+    if ((op & 0x003F) == 0x3C && (op & 0x0E00) == 0x0A00)
+        return op_move_l_imm_disp_an(op);
+    return op_move_generic(op, 4);
 }

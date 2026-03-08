@@ -2,6 +2,7 @@
 #include "ea.h"
 #include "alu.h"
 #include "memory.h"
+#include "timing.h"
 
 /*
  * ADD/SUB/CMP using EA module. Supports all sizes (B, W, L) and EA modes
@@ -55,7 +56,7 @@ static int alu_reject_byte_an(uint16_t op, int ea_mode, int size)
     return 0;
 }
 
-static void op_add_sub_generic(uint16_t op, int size, uint8_t base)
+static int op_add_sub_generic(uint16_t op, int size, uint8_t base)
 {
     int dn_reg = alu_dn_reg(op, base);
     int ea_mode = (op >> 3) & 7;
@@ -64,7 +65,7 @@ static void op_add_sub_generic(uint16_t op, int size, uint8_t base)
     int is_add = (base == 0xD0);
 
     if (alu_reject_byte_an(op, ea_mode, size))
-        return;
+        return 0;  /* unreachable - longjmps */
 
     uint32_t src, dest_val, result;
     uint32_t mask = alu_size_mask(size);
@@ -101,17 +102,18 @@ static void op_add_sub_generic(uint16_t op, int size, uint8_t base)
         set_nzvc_add_sized(result, dest_val, src_for_flags, store_size);
     else
         set_nzvc_sub_sized(result, dest_val, src_for_flags, store_size);
+    return add_sub_cycles(ea_mode, ea_reg, size, dir);
 }
 
 /* CMP only has <ea>, Dn (no store) */
-static void op_cmp_generic(uint16_t op, int size)
+static int op_cmp_generic(uint16_t op, int size)
 {
     int dn_reg = alu_dn_reg(op, 0xB0);
     int ea_mode = (op >> 3) & 7;
     int ea_reg = op & 7;
 
     if (alu_reject_byte_an(op, ea_mode, size))
-        return;
+        return 0;  /* unreachable - longjmps */
 
     uint32_t mask = alu_size_mask(size);
     uint32_t dest_val = cpu.d[dn_reg] & mask;
@@ -119,6 +121,7 @@ static void op_cmp_generic(uint16_t op, int size)
     uint32_t result = (dest_val - src) & mask;
 
     set_nzvc_sub_sized(result, dest_val, src, size);
+    return cmp_cycles(ea_mode, ea_reg, size);
 }
 
 static uint32_t alu_mem_read_sized(uint32_t addr, int size)
@@ -136,7 +139,7 @@ static void alu_mem_write_sized(uint32_t addr, int size, uint32_t value)
 }
 
 /* ADDX/SUBX: dest = dest op src op X. Format: 1101/1001 Rx 1 SIZE 0 0 R/M Ry. Z: cleared if nonzero. */
-static void op_addx_subx(uint16_t op, int is_add)
+static int op_addx_subx(uint16_t op, int is_add)
 {
     int dest_reg = (op >> 9) & 7;
     int src_reg = (op >> 0) & 7;
@@ -170,40 +173,38 @@ static void op_addx_subx(uint16_t op, int is_add)
         else
             set_nzvc_subx_sized(result, dest_val, src, size);
     }
+    return addx_subx_cycles(is_memory_mode, size);
 }
 
 /* MOVEQ #imm, Dn: sign-extend 8-bit immediate to 32-bit, load into Dn. Sets N,Z; clears V,C. */
-void op_moveq(uint16_t op)
+int op_moveq(uint16_t op)
 {
     int dest_reg = (op >> 9) & 7;
     int32_t imm = (int8_t)(op & 0xFF);
     uint32_t result = (uint32_t)imm;
     cpu.d[dest_reg] = result;
     set_nz_from_val(result, 4);
+    return CYCLES_MOVEQ;
 }
 
 /* 0x9xxx: SUB or SUBX. SUBX when (op & 0x130) == 0x100 */
-void dispatch_9xxx(uint16_t op)
+int dispatch_9xxx(uint16_t op)
 {
-    if ((op & 0x130) == 0x100) {
-        op_addx_subx(op, 0);
-        return;
-    }
-    op_add_sub_generic(op, alu_size(op), 0x90);
+    if ((op & 0x130) == 0x100)
+        return op_addx_subx(op, 0);
+    return op_add_sub_generic(op, alu_size(op), 0x90);
 }
 
 /* 0xBxxx: CMP */
-void dispatch_Bxxx(uint16_t op)
+int dispatch_Bxxx(uint16_t op)
 {
-    op_cmp_generic(op, alu_size(op));
+    return op_cmp_generic(op, alu_size(op));
 }
 
 /* 0xDxxx/0xExxx/0xFxxx: ADD or ADDX. ADDX when (op & 0x130) == 0x100 */
-void dispatch_add(uint16_t op)
+int dispatch_add(uint16_t op)
 {
-    if ((op & 0x130) == 0x100) {
-        op_addx_subx(op, 1);
-        return;
-    }
-    op_add_sub_generic(op, alu_size(op), 0xD0);
+    if ((op & 0x130) == 0x100)
+        return op_addx_subx(op, 1);
+    return op_add_sub_generic(op, alu_size(op), 0xD0);
 }

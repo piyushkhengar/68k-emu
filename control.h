@@ -3,6 +3,6 @@
 
 #include <stdint.h>
 
-void dispatch_4xxx(uint16_t op);
+int dispatch_4xxx(uint16_t op);
 
 #endif /* CONTROL_H */

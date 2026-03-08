@@ -194,15 +194,16 @@ void cpu_take_exception(int vector_num)
     longjmp(exception_buf, 1);
 }
 
-void op_unimplemented(uint16_t op)
+int op_unimplemented(uint16_t op)
 {
     (void)op;
     /* PC was advanced by fetch16; push address of illegal instruction */
     cpu.pc -= 2;
     cpu_take_exception(ILLEGAL_VECTOR);
+    return 0;  /* unreachable */
 }
 
-typedef void (*op_handler_fn)(uint16_t op);
+typedef int (*op_handler_fn)(uint16_t op);
 
 /* Top-nibble dispatch table. Index = op >> 12. */
 static const op_handler_fn dispatch_top[16] = {
@@ -224,9 +225,9 @@ static const op_handler_fn dispatch_top[16] = {
     [0xF] = dispatch_add,
 };
 
-static void execute(uint16_t op)
+static int execute(uint16_t op)
 {
-    dispatch_top[op >> 12](op);
+    return dispatch_top[op >> 12](op);
 }
 
 int cpu_step(void)
@@ -240,8 +241,5 @@ int cpu_step(void)
     }
 
     uint16_t op = fetch16();
-    execute(op);
-
-    /* Return 4 cycles as placeholder (NOP takes 4 cycles on 68K) */
-    return 4;
+    return execute(op);
 }

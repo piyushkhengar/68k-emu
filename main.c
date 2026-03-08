@@ -64,13 +64,16 @@ int main(int argc, char *argv[])
         int c = cpu_step();
         if (c == 0)
             break;
+        cpu.cycles += c;
         steps++;
     }
 
     printf("Executed %d instructions. PC=0x%08X %s\n",
            steps, cpu.pc, cpu.halted ? "(halted)" : "");
-    if (test)
+    if (test) {
         print_cpu_state();
+        printf("Cycles: %u\n", (unsigned)cpu.cycles);
+    }
 
     return 0;
 }

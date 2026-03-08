@@ -1,5 +1,6 @@
 #include "cpu_internal.h"
 #include "branch.h"
+#include "timing.h"
 
 /* Bcc condition codes: return true if condition met. 0=BRA,1=BSR,2=BHI,3=BLS,4=BCC,5=BCS,6=BNE,7=BEQ, etc. */
 static int bcc_condition_met(uint8_t cond)
@@ -32,7 +33,7 @@ static int bcc_condition_met(uint8_t cond)
 
 /* Bcc: branch on condition. 0x6xxx, cond in bits 11-8. 8-bit disp in low byte; if 0, fetch 16-bit. BSR pushes return addr.
  * E.g. BEQ.S label  (branch if equal, short disp); BNE.W far_label  (word disp); BSR.S sub  (call subroutine). */
-void op_bcc(uint16_t op)
+int op_bcc(uint16_t op)
 {
     uint8_t cond = (op >> 8) & 0x0F;
     int32_t disp;
@@ -47,7 +48,12 @@ void op_bcc(uint16_t op)
         cpu.a[7] -= 4;
         mem_write32(cpu.a[7], cpu.pc);
         cpu.pc += disp;
-    } else if (bcc_condition_met(cond)) {
-        cpu.pc += disp;
+        return CYCLES_BSR;
+    }
+    {
+        int taken = bcc_condition_met(cond);
+        if (taken)
+            cpu.pc += disp;
+        return taken ? CYCLES_BCC_TAKEN : CYCLES_BCC_NOT;
     }
 }
