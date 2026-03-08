@@ -119,10 +119,14 @@ int exception_cycles(int vector_num)
 {
     switch (vector_num) {
     case 3:  return 50;  /* Address Error / Bus Error */
-    case 4:  return 34;  /* Illegal Instruction / Privilege Violation / Trace */
+    case 4:  return 34;  /* Illegal Instruction / Trace */
     case 5:  return 34;  /* Divide by Zero */
     case 7:  return 34;  /* TRAPV (trap taken) */
-    case 9:  return 38;  /* TRAP #n */
+    case 8:  return 34;  /* Privilege Violation */
+    case 9:  return 38;  /* Trace */
+    case 32: case 33: case 34: case 35: case 36: case 37: case 38: case 39:
+    case 40: case 41: case 42: case 43: case 44: case 45: case 46: case 47:
+        return 34;  /* TRAP #0..#15 */
     case 10: return 42;  /* (A-Line) */
     case 11: return 42;  /* (F-Line) */
     case 14: return 44;  /* CHK (trap taken) */
