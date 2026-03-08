@@ -74,4 +74,5 @@ test: $(TARGET)
 	output=$$(./$(TARGET) bcc_all 2>&1); echo "$$output" | grep -q "D2=0x0000000F" && echo "  bcc_all: PASS" || { echo "  bcc_all: FAIL"; failed=1; }; \
 	output=$$(./$(TARGET) bsr_rts 2>&1); echo "$$output" | grep -q "D2=0x0000002A" && echo "  bsr_rts: PASS" || { echo "  bsr_rts: FAIL"; failed=1; }; \
 	output=$$(./$(TARGET) addr_err 2>&1); echo "$$output" | grep -q "D2=0x000000AE" && echo "  addr_err: PASS" || { echo "  addr_err: FAIL"; failed=1; }; \
+	output=$$(./$(TARGET) illegal 2>&1); echo "$$output" | grep -q "D2=0x00000004" && echo "  illegal: PASS" || { echo "  illegal: FAIL"; failed=1; }; \
 	if [ $$failed -eq 0 ]; then echo "All tests passed."; else echo "Some tests failed."; exit 1; fi

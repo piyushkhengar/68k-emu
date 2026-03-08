@@ -5,6 +5,10 @@
 #include "memory.h"
 #include <stdint.h>
 
+/* 68000 exception vector numbers */
+#define ADDR_ERR_VECTOR   3
+#define ILLEGAL_VECTOR    4
+
 /* Shared CPU state (defined in cpu.c) */
 extern CPU cpu;
 

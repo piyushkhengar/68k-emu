@@ -196,8 +196,10 @@ void cpu_take_exception(int vector_num)
 
 void op_unimplemented(uint16_t op)
 {
-    fprintf(stderr, "Unimplemented opcode: 0x%04X at PC=0x%08X\n", op, cpu.pc - 2);
-    cpu.halted = 1;
+    (void)op;
+    /* PC was advanced by fetch16; push address of illegal instruction */
+    cpu.pc -= 2;
+    cpu_take_exception(ILLEGAL_VECTOR);
 }
 
 typedef void (*op_handler_fn)(uint16_t op);
