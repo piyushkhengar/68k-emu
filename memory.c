@@ -36,7 +36,7 @@ uint8_t mem_read8(uint32_t addr)
 uint16_t mem_read16(uint32_t addr)
 {
     if (addr & 1) {
-        cpu_take_exception(ADDR_ERR_VECTOR);
+        cpu_take_exception(ADDR_ERR_VECTOR, 0);
         return 0;  /* unreachable */
     }
     if (addr >= MEM_SIZE - 1)
@@ -47,7 +47,7 @@ uint16_t mem_read16(uint32_t addr)
 uint32_t mem_read32(uint32_t addr)
 {
     if (addr & 1) {
-        cpu_take_exception(ADDR_ERR_VECTOR);
+        cpu_take_exception(ADDR_ERR_VECTOR, 0);
         return 0;  /* unreachable */
     }
     if (addr >= MEM_SIZE - 3)
@@ -64,7 +64,7 @@ void mem_write8(uint32_t addr, uint8_t val)
 void mem_write16(uint32_t addr, uint16_t val)
 {
     if (addr & 1) {
-        cpu_take_exception(ADDR_ERR_VECTOR);
+        cpu_take_exception(ADDR_ERR_VECTOR, 0);
         return;
     }
     if (addr < MEM_SIZE - 1) {
@@ -76,7 +76,7 @@ void mem_write16(uint32_t addr, uint16_t val)
 void mem_write32(uint32_t addr, uint32_t val)
 {
     if (addr & 1) {
-        cpu_take_exception(ADDR_ERR_VECTOR);
+        cpu_take_exception(ADDR_ERR_VECTOR, 0);
         return;
     }
     if (addr < MEM_SIZE - 3) {

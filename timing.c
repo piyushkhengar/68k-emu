@@ -113,3 +113,21 @@ int addx_subx_cycles(int is_memory, int size)
         return (size == 1) ? 4 : 8;
     return (size == 1) ? 18 : 30;
 }
+
+/* Exception processing: stacking + vector fetch + first 2 words of handler. Motorola MC68000. */
+int exception_cycles(int vector_num)
+{
+    switch (vector_num) {
+    case 3:  return 50;  /* Address Error / Bus Error */
+    case 4:  return 34;  /* Illegal Instruction / Privilege Violation / Trace */
+    case 5:  return 34;  /* Divide by Zero */
+    case 7:  return 34;  /* TRAPV (trap taken) */
+    case 9:  return 38;  /* TRAP #n */
+    case 10: return 42;  /* (A-Line) */
+    case 11: return 42;  /* (F-Line) */
+    case 14: return 44;  /* CHK (trap taken) */
+    case 24: return 44;  /* Spurious interrupt */
+    case 25: return 44;  /* Level 1-7 interrupt */
+    default: return 34;  /* Fallback for unimplemented vectors */
+    }
+}

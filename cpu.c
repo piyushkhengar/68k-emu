@@ -5,6 +5,7 @@
 #include "branch.h"
 #include "control.h"
 #include "memory.h"
+#include "timing.h"
 #include <setjmp.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,6 +15,7 @@ CPU cpu;
 
 /* Used by cpu_take_exception to unwind and abort the current instruction */
 static jmp_buf exception_buf;
+static int exception_cycles_result;
 
 void cpu_init(void)
 {
@@ -172,10 +174,12 @@ void set_nzvc_sub_sized(uint32_t result, uint32_t dest_val, uint32_t source_val,
  * 68000 exception processing (format 0): push PC (4 bytes), push SR (2 bytes),
  * set supervisor mode, load handler from vector table at 0x000000.
  */
-void cpu_take_exception(int vector_num)
+void cpu_take_exception(int vector_num, int cycles_before_fault)
 {
     uint32_t sp = cpu.a[7];
     uint16_t saved_sr = cpu.sr;
+
+    exception_cycles_result = cycles_before_fault + exception_cycles(vector_num);
 
     /* Push PC (4 bytes), then SR (2 bytes). Stack grows downward. */
     sp -= 4;
@@ -199,7 +203,7 @@ int op_unimplemented(uint16_t op)
     (void)op;
     /* PC was advanced by fetch16; push address of illegal instruction */
     cpu.pc -= 2;
-    cpu_take_exception(ILLEGAL_VECTOR);
+    cpu_take_exception(ILLEGAL_VECTOR, 4);  /* 4 cycles for opcode fetch */
     return 0;  /* unreachable */
 }
 
@@ -237,7 +241,7 @@ int cpu_step(void)
 
     if (setjmp(exception_buf) != 0) {
         /* Exception occurred; PC already updated to handler */
-        return 4;
+        return exception_cycles_result;
     }
 
     uint16_t op = fetch16();
