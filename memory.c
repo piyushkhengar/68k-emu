@@ -1,6 +1,9 @@
 #include "memory.h"
+#include "cpu_internal.h"
 #include <stdlib.h>
 #include <string.h>
+
+#define ADDR_ERR_VECTOR 3
 
 #define MEM_SIZE (16 * 1024 * 1024)  /* 16MB - enough for test ROMs */
 
@@ -34,6 +37,10 @@ uint8_t mem_read8(uint32_t addr)
 
 uint16_t mem_read16(uint32_t addr)
 {
+    if (addr & 1) {
+        cpu_take_exception(ADDR_ERR_VECTOR);
+        return 0;  /* unreachable */
+    }
     if (addr >= MEM_SIZE - 1)
         return 0;
     return (ram[addr] << 8) | ram[addr + 1];
@@ -41,6 +48,10 @@ uint16_t mem_read16(uint32_t addr)
 
 uint32_t mem_read32(uint32_t addr)
 {
+    if (addr & 1) {
+        cpu_take_exception(ADDR_ERR_VECTOR);
+        return 0;  /* unreachable */
+    }
     if (addr >= MEM_SIZE - 3)
         return 0;
     return (ram[addr] << 24) | (ram[addr + 1] << 16) | (ram[addr + 2] << 8) | ram[addr + 3];
@@ -54,6 +65,10 @@ void mem_write8(uint32_t addr, uint8_t val)
 
 void mem_write16(uint32_t addr, uint16_t val)
 {
+    if (addr & 1) {
+        cpu_take_exception(ADDR_ERR_VECTOR);
+        return;
+    }
     if (addr < MEM_SIZE - 1) {
         ram[addr] = val >> 8;
         ram[addr + 1] = val & 0xFF;
@@ -62,6 +77,10 @@ void mem_write16(uint32_t addr, uint16_t val)
 
 void mem_write32(uint32_t addr, uint32_t val)
 {
+    if (addr & 1) {
+        cpu_take_exception(ADDR_ERR_VECTOR);
+        return;
+    }
     if (addr < MEM_SIZE - 3) {
         ram[addr] = val >> 24;
         ram[addr + 1] = (val >> 16) & 0xFF;

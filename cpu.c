@@ -5,11 +5,15 @@
 #include "branch.h"
 #include "control.h"
 #include "memory.h"
+#include <setjmp.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 CPU cpu;
+
+/* Used by cpu_take_exception to unwind and abort the current instruction */
+static jmp_buf exception_buf;
 
 void cpu_init(void)
 {
@@ -185,6 +189,9 @@ void cpu_take_exception(int vector_num)
 
     /* Load handler address from vector table */
     cpu.pc = mem_read32((unsigned)vector_num * 4);
+
+    /* Unwind to cpu_step and abort the current instruction */
+    longjmp(exception_buf, 1);
 }
 
 void op_unimplemented(uint16_t op)
@@ -224,6 +231,11 @@ int cpu_step(void)
 {
     if (cpu.halted)
         return 0;
+
+    if (setjmp(exception_buf) != 0) {
+        /* Exception occurred; PC already updated to handler */
+        return 4;
+    }
 
     uint16_t op = fetch16();
     execute(op);

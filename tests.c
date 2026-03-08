@@ -551,6 +551,25 @@ static const uint8_t move_l_dn_pdec_test[] = {
     0x4E, 0x71, 0x60, 0xFC,
 };
 
+/* Address error test: MOVE.W (A1) with A1=0x1001 (odd) triggers vector 3 */
+static const uint8_t addr_err_test[] = {
+    0x00, 0x00, 0x00, 0x10,   /* Reset: PC = 0x00000010 */
+    0x00, 0x00, 0x10, 0x00,   /* Reset: SP = 0x00001000 */
+    0x00, 0x00, 0x00, 0x00,   /* Vector 2 */
+    0x00, 0x00, 0x00, 0x30,   /* Vector 3 (address error): handler at 0x30 */
+    0x22, 0x7C, 0x00, 0x00, 0x10, 0x01,   /* 0x10: MOVE.L #0x1001, A1 */
+    0x30, 0x11,               /* 0x16: MOVE.W (A1), D0 - odd addr, triggers address error */
+    0x74, 0x00,               /* 0x18: MOVEQ #0, D2 (not reached) */
+    0x4E, 0x71, 0x60, 0xFC,   /* 0x1A: NOP, BRA (not reached) */
+    /* Padding to 0x30 (18 bytes) */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00,
+    /* 0x30: Address error handler */
+    0x20, 0xBC, 0x00, 0x00, 0x00, 0xAE,   /* MOVE.L #0xAE, D2 (address error marker) */
+    0x60, 0xFE,               /* BRA.S -2 (loop) */
+};
+
 /* --- Built-in test table --- */
 
 static const builtin_test_t builtin_tests[] = {
@@ -608,6 +627,7 @@ static const builtin_test_t builtin_tests[] = {
     { "bcc", bcc_test, sizeof(bcc_test), "Running Bcc (BEQ/BNE) test", 0 },
     { "bcc_all", bcc_all_test, sizeof(bcc_all_test), "Running Bcc comprehensive test (all 15 conditions)", 500 },
     { "bsr_rts", bsr_rts_test, sizeof(bsr_rts_test), "Running BSR/RTS test", 0 },
+    { "addr_err", addr_err_test, sizeof(addr_err_test), "Running address error test (misaligned word access)", 0 },
 };
 
 #define NUM_BUILTIN_TESTS (sizeof(builtin_tests) / sizeof(builtin_tests[0]))
