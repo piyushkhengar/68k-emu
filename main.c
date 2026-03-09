@@ -15,7 +15,14 @@
 #include <string.h>
 #include <time.h>
 
-#define SLICE_MS 10
+#define FRAME_RATE_HZ 50   /* PAL Amiga; use 60 for NTSC */
+
+static double get_monotonic_sec(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
+}
 
 static void print_cpu_state(void)
 {
@@ -45,13 +52,6 @@ static double parse_args(int argc, char *argv[], const char **rom_or_test, int *
         }
     }
     return speed_mhz;
-}
-
-static double get_monotonic_sec(void)
-{
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
 }
 
 static void sleep_sec(double sec)
@@ -122,26 +122,36 @@ int main(int argc, char *argv[])
 
     int steps = 0;
     int max_steps = test && test->max_steps ? test->max_steps : 100;
-    uint64_t cycles_this_slice = 0;
-    double slice_start = get_monotonic_sec();
+    uint64_t cycles_this_frame = 0;
+    double frame_start = get_monotonic_sec();
 
-    while (steps < max_steps) {
-        int c = cpu_step();
-        if (c == 0)
-            break;
-        cpu.cycles += c;
-        cycles_this_slice += c;
-        steps++;
+    if (speed_mhz > 0) {
+        uint64_t cycles_per_frame = (uint64_t)(speed_mhz * 1e6 / FRAME_RATE_HZ);
+        double frame_sec = 1.0 / FRAME_RATE_HZ;
 
-        if (speed_mhz > 0) {
-            uint64_t target_cycles = (uint64_t)(speed_mhz * 1e6 * SLICE_MS / 1000);
-            if (cycles_this_slice >= target_cycles) {
-                double target_elapsed = (double)cycles_this_slice / (speed_mhz * 1e6);
-                double actual_elapsed = get_monotonic_sec() - slice_start;
+        while (steps < max_steps) {
+            int c = cpu_step();
+            if (c == 0)
+                break;
+            cpu.cycles += c;
+            cycles_this_frame += c;
+            steps++;
+
+            if (cycles_this_frame >= cycles_per_frame) {
+                double target_elapsed = frame_sec;
+                double actual_elapsed = get_monotonic_sec() - frame_start;
                 sleep_sec(target_elapsed - actual_elapsed);
-                cycles_this_slice = 0;
-                slice_start = get_monotonic_sec();
+                cycles_this_frame = 0;
+                frame_start = get_monotonic_sec();
             }
+        }
+    } else {
+        while (steps < max_steps) {
+            int c = cpu_step();
+            if (c == 0)
+                break;
+            cpu.cycles += c;
+            steps++;
         }
     }
 
