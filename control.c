@@ -45,24 +45,43 @@ static int op_rte(uint16_t op)
     return CYCLES_RTE;
 }
 
-/* NOT <ea>: one's complement. 0x46xx. An not allowed. */
-static int op_not(uint16_t op)
-{
-    int ea_mode = (op >> 3) & 7;
-    int ea_reg = op & 7;
-    int size_code = (op >> 6) & 3;
-    int size = (size_code == 0) ? 1 : (size_code == 1) ? 2 : 4;
-    uint32_t mask = (size == 1) ? 0xFF : (size == 2) ? 0xFFFF : 0xFFFFFFFF;
+/* Decoded fields for NOT. An not allowed. */
+typedef struct {
+    int ea_mode;
+    int ea_reg;
+    int size;
+    uint32_t mask;
+} not_decoded_t;
 
-    if (ea_mode == 1) {
+/* Returns 0 if rejected, 1 if OK to proceed. */
+static int not_decode(uint16_t op, not_decoded_t *d)
+{
+    d->ea_mode = (op >> 3) & 7;
+    d->ea_reg = op & 7;
+    {
+        int size_code = (op >> 6) & 3;
+        d->size = (size_code == 0) ? 1 : (size_code == 1) ? 2 : 4;
+    }
+    d->mask = (d->size == 1) ? 0xFF : (d->size == 2) ? 0xFFFF : 0xFFFFFFFF;
+    if (d->ea_mode == 1) {
         op_unimplemented(op);
         return 0;
     }
-    uint32_t val = ea_fetch_value(ea_mode, ea_reg, size) & mask;
-    uint32_t result = (~val) & mask;
-    ea_store_value(ea_mode, ea_reg, size, result);
-    set_nz_from_val(result, size);
-    return add_sub_cycles(ea_mode, ea_reg, size, 1);
+    return 1;
+}
+
+/* NOT <ea>: one's complement. 0x46xx. An not allowed. */
+static int op_not(uint16_t op)
+{
+    not_decoded_t d;
+    if (!not_decode(op, &d))
+        return 0;
+
+    uint32_t val = ea_fetch_value(d.ea_mode, d.ea_reg, d.size) & d.mask;
+    uint32_t result = (~val) & d.mask;
+    ea_store_value(d.ea_mode, d.ea_reg, d.size, result);
+    set_nz_from_val(result, d.size);
+    return add_sub_cycles(d.ea_mode, d.ea_reg, d.size, 1);
 }
 
 /* 0x4xxx: TRAP (0x4E40-0x4E4F), RTE (0x4E73), NOP (0x4E71), RTS (0x4E75), NOT (0x46xx). */

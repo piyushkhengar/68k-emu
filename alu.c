@@ -57,72 +57,85 @@ static int alu_reject_byte_an(uint16_t op, int ea_mode, int size)
     return 0;
 }
 
-static int op_add_sub_generic(uint16_t op, int size, uint8_t base)
-{
-    int dn_reg = alu_dn_reg(op, base);
-    int ea_mode = (op >> 3) & 7;
-    int ea_reg = op & 7;
-    int dir = (op >> 9) & 1;  /* 0 = <ea> to Dn, 1 = Dn to <ea> */
-    int is_add = (base == 0xD0);
+/* Decoded fields for ADD/SUB. */
+typedef struct {
+    int dn_reg;
+    int ea_mode;
+    int ea_reg;
+    int size;
+    uint32_t mask;
+    int dir;
+} alu_decoded_t;
 
-    if (alu_reject_byte_an(op, ea_mode, size))
+/* Returns 0 if rejected, 1 if OK to proceed. */
+static int alu_decode(uint16_t op, uint8_t base, alu_decoded_t *d)
+{
+    d->dn_reg = alu_dn_reg(op, base);
+    d->ea_mode = (op >> 3) & 7;
+    d->ea_reg = op & 7;
+    d->size = alu_size(op);
+    d->mask = alu_size_mask(d->size);
+    d->dir = (op >> 9) & 1;  /* 0 = <ea> to Dn, 1 = Dn to <ea> */
+    return alu_reject_byte_an(op, d->ea_mode, d->size) ? 0 : 1;
+}
+
+static int op_add_sub_generic(uint16_t op, uint8_t base)
+{
+    alu_decoded_t d;
+    if (!alu_decode(op, base, &d))
         return 0;  /* unreachable - longjmps */
 
+    int is_add = (base == 0xD0);
     uint32_t src, dest_val, result;
-    uint32_t mask = alu_size_mask(size);
-    int store_size = size;
+    int store_size = d.size;
     uint32_t src_for_flags;
 
-    if (dir == 0) {
+    if (d.dir == 0) {
         /* ADD/SUB <ea>, Dn */
-        src = ea_fetch_value(ea_mode, ea_reg, size);
-        dest_val = cpu.d[dn_reg] & mask;
-        result = is_add ? (dest_val + src) & mask : (dest_val - src) & mask;
-        alu_store_dn(dn_reg, result, size);
+        src = ea_fetch_value(d.ea_mode, d.ea_reg, d.size);
+        dest_val = cpu.d[d.dn_reg] & d.mask;
+        result = is_add ? (dest_val + src) & d.mask : (dest_val - src) & d.mask;
+        alu_store_dn(d.dn_reg, result, d.size);
         src_for_flags = src;
     } else {
         /* ADD/SUB Dn, <ea> */
-        src = cpu.d[dn_reg];
-        dest_val = ea_fetch_value(ea_mode, ea_reg, size);
-        if (alu_is_an_word_32bit(ea_mode, size)) {
+        src = cpu.d[d.dn_reg];
+        dest_val = ea_fetch_value(d.ea_mode, d.ea_reg, d.size);
+        if (alu_is_an_word_32bit(d.ea_mode, d.size)) {
             int32_t src_se = (int32_t)(int16_t)(src & 0xFFFF);
-            dest_val = cpu.a[ea_reg];
+            dest_val = cpu.a[d.ea_reg];
             result = is_add ? dest_val + src_se : dest_val - src_se;
             store_size = 4;
             src_for_flags = (uint32_t)(int32_t)(int16_t)(src & 0xFFFF);
         } else {
-            src &= mask;
-            dest_val &= mask;
-            result = is_add ? (dest_val + src) & mask : (dest_val - src) & mask;
+            src &= d.mask;
+            dest_val &= d.mask;
+            result = is_add ? (dest_val + src) & d.mask : (dest_val - src) & d.mask;
             src_for_flags = src;
         }
-        ea_store_value(ea_mode, ea_reg, store_size, result);
+        ea_store_value(d.ea_mode, d.ea_reg, store_size, result);
     }
 
     if (is_add)
         set_nzvc_add_sized(result, dest_val, src_for_flags, store_size);
     else
         set_nzvc_sub_sized(result, dest_val, src_for_flags, store_size);
-    return add_sub_cycles(ea_mode, ea_reg, size, dir);
+    return add_sub_cycles(d.ea_mode, d.ea_reg, d.size, d.dir);
 }
 
 /* CMP only has <ea>, Dn (no store) */
-static int op_cmp_generic(uint16_t op, int size)
+static int op_cmp_generic(uint16_t op)
 {
-    int dn_reg = alu_dn_reg(op, 0xB0);
-    int ea_mode = (op >> 3) & 7;
-    int ea_reg = op & 7;
-
-    if (alu_reject_byte_an(op, ea_mode, size))
+    alu_decoded_t d;
+    if (!alu_decode(op, 0xB0, &d))
         return 0;  /* unreachable - longjmps */
 
-    uint32_t mask = alu_size_mask(size);
-    uint32_t dest_val = cpu.d[dn_reg] & mask;
-    uint32_t src = ea_fetch_value(ea_mode, ea_reg, size) & mask;
-    uint32_t result = (dest_val - src) & mask;
+    uint32_t dest_val = cpu.d[d.dn_reg] & d.mask;
+    uint32_t src = ea_fetch_value(d.ea_mode, d.ea_reg, d.size) & d.mask;
+    uint32_t result = (dest_val - src) & d.mask;
 
-    set_nzvc_sub_sized(result, dest_val, src, size);
-    return cmp_cycles(ea_mode, ea_reg, size);
+    set_nzvc_sub_sized(result, dest_val, src, d.size);
+    return cmp_cycles(d.ea_mode, d.ea_reg, d.size);
 }
 
 static uint32_t alu_mem_read_sized(uint32_t addr, int size)
@@ -146,58 +159,68 @@ static int alu_is_adda_suba_cmpa(uint16_t op)
     return opmode == 3 || opmode == 7;
 }
 
+/* Decoded fields for ADDA/SUBA/CMPA. */
+typedef struct {
+    int an_reg;
+    int ea_mode;
+    int ea_reg;
+    int size;
+} adda_decoded_t;
+
+static void adda_decode(uint16_t op, adda_decoded_t *d)
+{
+    d->an_reg = (op >> 9) & 7;
+    d->ea_mode = (op >> 3) & 7;
+    d->ea_reg = op & 7;
+    d->size = ((op >> 6) & 7) == 7 ? 4 : 2;  /* 111=long, 011=word */
+}
+
 static int op_adda(uint16_t op)
 {
-    int an_reg = (op >> 9) & 7;
-    int ea_mode = (op >> 3) & 7;
-    int ea_reg = op & 7;
-    int size = ((op >> 6) & 7) == 7 ? 4 : 2;  /* 111=long, 011=word */
+    adda_decoded_t d;
+    adda_decode(op, &d);
 
-    uint32_t src = ea_fetch_value(ea_mode, ea_reg, size);
-    uint32_t dest = cpu.a[an_reg];
+    uint32_t src = ea_fetch_value(d.ea_mode, d.ea_reg, d.size);
+    uint32_t dest = cpu.a[d.an_reg];
     uint32_t result;
 
-    if (size == 2)
+    if (d.size == 2)
         src = (uint32_t)(int32_t)(int16_t)(src & 0xFFFF);
     result = dest + src;
-    cpu.a[an_reg] = result;
-    return add_sub_cycles(ea_mode, ea_reg, size, 0);
+    cpu.a[d.an_reg] = result;
+    return add_sub_cycles(d.ea_mode, d.ea_reg, d.size, 0);
 }
 
 static int op_suba(uint16_t op)
 {
-    int an_reg = (op >> 9) & 7;
-    int ea_mode = (op >> 3) & 7;
-    int ea_reg = op & 7;
-    int size = ((op >> 6) & 7) == 7 ? 4 : 2;
+    adda_decoded_t d;
+    adda_decode(op, &d);
 
-    uint32_t src = ea_fetch_value(ea_mode, ea_reg, size);
-    uint32_t dest = cpu.a[an_reg];
+    uint32_t src = ea_fetch_value(d.ea_mode, d.ea_reg, d.size);
+    uint32_t dest = cpu.a[d.an_reg];
     uint32_t result;
 
-    if (size == 2)
+    if (d.size == 2)
         src = (uint32_t)(int32_t)(int16_t)(src & 0xFFFF);
     result = dest - src;
-    cpu.a[an_reg] = result;
-    return add_sub_cycles(ea_mode, ea_reg, size, 0);
+    cpu.a[d.an_reg] = result;
+    return add_sub_cycles(d.ea_mode, d.ea_reg, d.size, 0);
 }
 
 static int op_cmpa(uint16_t op)
 {
-    int an_reg = (op >> 9) & 7;
-    int ea_mode = (op >> 3) & 7;
-    int ea_reg = op & 7;
-    int size = ((op >> 6) & 7) == 7 ? 4 : 2;
+    adda_decoded_t d;
+    adda_decode(op, &d);
 
-    uint32_t dest = cpu.a[an_reg];
-    uint32_t src = ea_fetch_value(ea_mode, ea_reg, size);
+    uint32_t dest = cpu.a[d.an_reg];
+    uint32_t src = ea_fetch_value(d.ea_mode, d.ea_reg, d.size);
     uint32_t result;
 
-    if (size == 2)
+    if (d.size == 2)
         src = (uint32_t)(int32_t)(int16_t)(src & 0xFFFF);
     result = (dest - src) & 0xFFFFFFFF;
     set_nzvc_sub_sized(result, dest, src, 4);
-    return cmp_cycles(ea_mode, ea_reg, size);
+    return cmp_cycles(d.ea_mode, d.ea_reg, d.size);
 }
 
 /* ADDX/SUBX: dest = dest op src op X. Format: 1101/1001 Rx 1 SIZE 0 0 R/M Ry. Z: cleared if nonzero. */
@@ -256,7 +279,7 @@ int dispatch_9xxx(uint16_t op)
         return op_suba(op);
     if ((op & 0x130) == 0x100)
         return op_addx_subx(op, 0);
-    return op_add_sub_generic(op, alu_size(op), 0x90);
+    return op_add_sub_generic(op, 0x90);
 }
 
 /* 0xBxxx: CMP, CMPA, or EOR. CMPA when opmode 011/111. EOR when bit 8 set (1ss vs 0ss). */
@@ -266,7 +289,7 @@ int dispatch_Bxxx(uint16_t op)
         return op_cmpa(op);
     if (op & 0x0100)  /* EOR has 1ss in bits 8-6, CMP has 0ss */
         return op_eor(op);
-    return op_cmp_generic(op, alu_size(op));
+    return op_cmp_generic(op);
 }
 
 /* 0xDxxx/0xExxx/0xFxxx: ADD, ADDA, or ADDX. ADDA when opmode 011/111; ADDX when (op & 0x130)==0x100. */
@@ -276,5 +299,5 @@ int dispatch_add(uint16_t op)
         return op_adda(op);
     if ((op & 0x130) == 0x100)
         return op_addx_subx(op, 1);
-    return op_add_sub_generic(op, alu_size(op), 0xD0);
+    return op_add_sub_generic(op, 0xD0);
 }

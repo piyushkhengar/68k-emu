@@ -41,100 +41,125 @@ static int imm_reject_an(uint16_t op, int ea_mode)
     return 0;
 }
 
+/* Decoded fields for ADDI/SUBI/CMPI. */
+typedef struct {
+    int ea_mode;
+    int ea_reg;
+    int size;
+    uint32_t mask;
+} imm_decoded_t;
+
+/* Returns 0 if rejected, 1 if OK to proceed. */
+static int imm_decode(uint16_t op, imm_decoded_t *d)
+{
+    d->ea_mode = (op >> 3) & 7;
+    d->ea_reg = op & 7;
+    d->size = imm_alu_size(op);
+    d->mask = imm_size_mask(d->size);
+    return imm_reject_an(op, d->ea_mode) ? 0 : 1;
+}
+
 /* ADDI #imm, <ea>: dest = dest + imm. 0x06xx */
 static int op_addi(uint16_t op)
 {
-    int ea_mode = (op >> 3) & 7;
-    int ea_reg = op & 7;
-    int size = imm_alu_size(op);
-    uint32_t mask = imm_size_mask(size);
-
-    if (imm_reject_an(op, ea_mode))
+    imm_decoded_t d;
+    if (!imm_decode(op, &d))
         return 0;
 
-    uint32_t imm = fetch_imm(size);
-    uint32_t dest = ea_fetch_value(ea_mode, ea_reg, size);
-    uint32_t result = (dest + imm) & mask;
+    uint32_t imm = fetch_imm(d.size);
+    uint32_t dest = ea_fetch_value(d.ea_mode, d.ea_reg, d.size);
+    uint32_t result = (dest + imm) & d.mask;
 
-    ea_store_value(ea_mode, ea_reg, size, result);
-    set_nzvc_add_sized(result, dest, imm, size);
-    return add_sub_cycles(ea_mode, ea_reg, size, 1) + (size == 4 ? 4 : 0);
+    ea_store_value(d.ea_mode, d.ea_reg, d.size, result);
+    set_nzvc_add_sized(result, dest, imm, d.size);
+    return add_sub_cycles(d.ea_mode, d.ea_reg, d.size, 1) + (d.size == 4 ? 4 : 0);
 }
 
 /* SUBI #imm, <ea>: dest = dest - imm. 0x04xx */
 static int op_subi(uint16_t op)
 {
-    int ea_mode = (op >> 3) & 7;
-    int ea_reg = op & 7;
-    int size = imm_alu_size(op);
-    uint32_t mask = imm_size_mask(size);
-
-    if (imm_reject_an(op, ea_mode))
+    imm_decoded_t d;
+    if (!imm_decode(op, &d))
         return 0;
 
-    uint32_t imm = fetch_imm(size);
-    uint32_t dest = ea_fetch_value(ea_mode, ea_reg, size);
-    uint32_t result = (dest - imm) & mask;
+    uint32_t imm = fetch_imm(d.size);
+    uint32_t dest = ea_fetch_value(d.ea_mode, d.ea_reg, d.size);
+    uint32_t result = (dest - imm) & d.mask;
 
-    ea_store_value(ea_mode, ea_reg, size, result);
-    set_nzvc_sub_sized(result, dest, imm, size);
-    return add_sub_cycles(ea_mode, ea_reg, size, 1) + (size == 4 ? 4 : 0);
+    ea_store_value(d.ea_mode, d.ea_reg, d.size, result);
+    set_nzvc_sub_sized(result, dest, imm, d.size);
+    return add_sub_cycles(d.ea_mode, d.ea_reg, d.size, 1) + (d.size == 4 ? 4 : 0);
 }
 
 /* CMPI #imm, <ea>: compare, no store. 0x0Cxx. X not affected. */
 static int op_cmpi(uint16_t op)
 {
-    int ea_mode = (op >> 3) & 7;
-    int ea_reg = op & 7;
-    int size = imm_alu_size(op);
-    uint32_t mask = imm_size_mask(size);
-
-    if (imm_reject_an(op, ea_mode))
+    imm_decoded_t d;
+    if (!imm_decode(op, &d))
         return 0;
 
-    uint32_t imm = fetch_imm(size);
-    uint32_t dest = ea_fetch_value(ea_mode, ea_reg, size) & mask;
-    uint32_t result = (dest - imm) & mask;
+    uint32_t imm = fetch_imm(d.size);
+    uint32_t dest = ea_fetch_value(d.ea_mode, d.ea_reg, d.size) & d.mask;
+    uint32_t result = (dest - imm) & d.mask;
 
-    set_nzvc_sub_sized(result, dest, imm, size);
-    return cmp_cycles(ea_mode, ea_reg, size) + (size == 4 ? 8 : 4);
+    set_nzvc_sub_sized(result, dest, imm, d.size);
+    return cmp_cycles(d.ea_mode, d.ea_reg, d.size) + (d.size == 4 ? 8 : 4);
+}
+
+/* Decoded fields for ADDQ/SUBQ. An+byte rejected. */
+typedef struct {
+    int data;
+    int ea_mode;
+    int ea_reg;
+    int size;
+    uint32_t mask;
+} addq_decoded_t;
+
+/* Returns 0 if rejected, 1 if OK to proceed. */
+static int addq_decode(uint16_t op, addq_decoded_t *d)
+{
+    d->data = (op >> 9) & 7;
+    if (d->data == 0)
+        d->data = 8;
+    d->ea_mode = (op >> 3) & 7;
+    d->ea_reg = op & 7;
+    d->size = imm_alu_size(op);
+    d->mask = imm_size_mask(d->size);
+    /* An + byte: illegal */
+    if (d->ea_mode == 1 && d->size == 1) {
+        op_unimplemented(op);
+        return 0;
+    }
+    return 1;
 }
 
 /* ADDQ/SUBQ: data 1-8 in bits 11-9 (0=8). 0x50xx=ADDQ, 0x51xx=SUBQ */
 static int op_addq_subq(uint16_t op, int is_sub)
 {
-    int data = (op >> 9) & 7;
-    if (data == 0)
-        data = 8;
-    int ea_mode = (op >> 3) & 7;
-    int ea_reg = op & 7;
-    int size = imm_alu_size(op);
+    addq_decoded_t d;
+    if (!addq_decode(op, &d))
+        return 0;
 
-    if (ea_mode == 1) {
+    if (d.ea_mode == 1) {
         /* Address register: W/L only, no flags, 32-bit result */
-        if (size == 1) {
-            op_unimplemented(op);
-            return 0;
-        }
-        uint32_t dest = cpu.a[ea_reg];
-        uint32_t result = is_sub ? dest - data : dest + data;
-        cpu.a[ea_reg] = result;
+        uint32_t dest = cpu.a[d.ea_reg];
+        uint32_t result = is_sub ? dest - d.data : dest + d.data;
+        cpu.a[d.ea_reg] = result;
         return 8;
     }
 
-    uint32_t mask = imm_size_mask(size);
-    uint32_t dest = ea_fetch_value(ea_mode, ea_reg, size);
-    uint32_t result = is_sub ? (dest - data) & mask : (dest + data) & mask;
+    uint32_t dest = ea_fetch_value(d.ea_mode, d.ea_reg, d.size);
+    uint32_t result = is_sub ? (dest - d.data) & d.mask : (dest + d.data) & d.mask;
 
-    ea_store_value(ea_mode, ea_reg, size, result);
+    ea_store_value(d.ea_mode, d.ea_reg, d.size, result);
     if (is_sub)
-        set_nzvc_sub_sized(result, dest, (uint32_t)data, size);
+        set_nzvc_sub_sized(result, dest, (uint32_t)d.data, d.size);
     else
-        set_nzvc_add_sized(result, dest, (uint32_t)data, size);
+        set_nzvc_add_sized(result, dest, (uint32_t)d.data, d.size);
 
-    if (ea_mode == 0)
+    if (d.ea_mode == 0)
         return 4;
-    return 8 + ea_cycles(ea_mode, ea_reg, size) * 2;
+    return 8 + ea_cycles(d.ea_mode, d.ea_reg, d.size) * 2;
 }
 
 /* 0x0xxx: ADDI (0x06), SUBI (0x04), CMPI (0x0C). Others -> unimplemented. */
