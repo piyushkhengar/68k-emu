@@ -77,16 +77,24 @@ make test
 
 ```
 68k-emu/
-├── main.c           - Entry point, load ROM, run loop
-├── cpu.c/h          - CPU state, fetch, flags, dispatch table
-├── cpu_internal.h   - Shared declarations for instruction modules
-├── move.c/h          - MOVE.B, MOVE.W, MOVE.L handlers
-├── alu.c/h          - MOVEQ, ADD, SUB, CMP handlers
-├── branch.c/h       - Bcc (branch on condition) handlers
-├── control.c/h      - NOP, RTS handlers
-├── memory.c/h       - Bus/memory interface (RAM, read/write)
 ├── Makefile
-└── README.md
+├── README.md
+└── src/
+    ├── main.c              - Entry point, load ROM, run loop
+    ├── timing.c/h          - Cycle counts
+    ├── tests.c/h           - Built-in test ROMs and harness
+    ├── core/               - CPU core, memory, effective address
+    │   ├── cpu.c/h         - CPU state, fetch, flags, dispatch table
+    │   ├── cpu_internal.h  - Shared declarations for instruction modules
+    │   ├── memory.c/h      - Bus/memory interface (RAM, read/write)
+    │   └── ea.c/h          - Effective address resolution
+    └── isa/                - Instruction implementations
+        ├── alu.c/h         - MOVEQ, ADD, SUB, CMP, ADDA, SUBA, CMPA, ADDX, SUBX
+        ├── move.c/h        - MOVE.B, MOVE.W, MOVE.L handlers
+        ├── branch.c/h      - Bcc (branch on condition) handlers
+        ├── control.c/h     - NOP, RTS, RTE, TRAP, NOT handlers
+        ├── immediate.c/h  - ADDI, SUBI, CMPI, ADDQ, SUBQ
+        └── logic.c/h       - AND, OR, EOR handlers
 ```
 
 ## Learning Roadmap

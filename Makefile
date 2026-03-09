@@ -1,8 +1,10 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -g -std=c11
+CFLAGS = -Wall -Wextra -g -std=c11 -Isrc -Isrc/core -Isrc/isa
 TARGET = 68k-emu
 
-SRCS = main.c cpu.c memory.c ea.c move.c alu.c branch.c control.c immediate.c logic.c tests.c timing.c
+SRCS = src/main.c src/core/cpu.c src/core/memory.c src/core/ea.c \
+       src/isa/move.c src/isa/alu.c src/isa/branch.c src/isa/control.c \
+       src/isa/immediate.c src/isa/logic.c src/tests.c src/timing.c
 OBJS = $(SRCS:.c=.o)
 
 .PHONY: all clean test
