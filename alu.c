@@ -1,6 +1,7 @@
 #include "cpu_internal.h"
 #include "ea.h"
 #include "alu.h"
+#include "logic.h"
 #include "memory.h"
 #include "timing.h"
 
@@ -258,11 +259,13 @@ int dispatch_9xxx(uint16_t op)
     return op_add_sub_generic(op, alu_size(op), 0x90);
 }
 
-/* 0xBxxx: CMP or CMPA. CMPA when opmode 011/111. */
+/* 0xBxxx: CMP, CMPA, or EOR. CMPA when opmode 011/111. EOR when bit 8 set (1ss vs 0ss). */
 int dispatch_Bxxx(uint16_t op)
 {
     if (alu_is_adda_suba_cmpa(op))
         return op_cmpa(op);
+    if (op & 0x0100)  /* EOR has 1ss in bits 8-6, CMP has 0ss */
+        return op_eor(op);
     return op_cmp_generic(op, alu_size(op));
 }
 

@@ -283,7 +283,7 @@ static const uint8_t cmp_w_test[] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x70, 0x0A,               /* MOVEQ #10, D0 */
     0x72, 0x0A,               /* MOVEQ #10, D1 */
-    0xB9, 0x40,               /* CMP.W D0, D1  (Z set) */
+    0xB1, 0x40,               /* CMP.W D0, D1  (Z set) - 0xB140: Dn=D1, EA=D0 */
     0x4E, 0x71, 0x60, 0xFC,
 };
 
@@ -497,6 +497,49 @@ static const uint8_t addq_a_test[] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x22, 0x7C, 0x00, 0x00, 0x10, 0x00,   /* MOVE.L #0x1000, A1 */
     0x52, 0x89,               /* ADDQ.L #1, A1 (mode 1 reg 1 = 0x09, size L = 0x89) */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* --- Phase 3: AND, OR, EOR, NOT --- */
+
+/* AND.B D1, D0: D0=0xFF, D1=0x0F -> D0=0x0F */
+static const uint8_t and_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x70, 0xFF,               /* MOVEQ #-1, D0 (0xFF in low byte) */
+    0x72, 0x0F,               /* MOVEQ #15, D1 (0x0F) */
+    0xC0, 0x01,               /* AND.B D1, D0 (EA to Dn: D0 = D0 & D1 = 0x0F) */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* OR.B D1, D0: D0=0x0F, D1=0xF0 -> D0=0xFF */
+static const uint8_t or_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x70, 0x0F,               /* MOVEQ #15, D0 (0x0F) */
+    0x72, 0xF0,               /* MOVEQ #-16, D1 (0xF0 in low byte) */
+    0x80, 0x01,               /* OR.B D1, D0 (EA to Dn: D0 = D0 | D1 = 0xFF) */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* EOR.B D0, (A7): store 0xFF at (A7), D0=0x0F, EOR -> (A7)=0xF0, load to D1 */
+static const uint8_t eor_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x70, 0xFF,               /* MOVEQ #-1, D0 */
+    0x15, 0xC0,               /* MOVE.B D0, (A7) - store 0xFF at 0x1000 */
+    0x70, 0x0F,               /* MOVEQ #15, D0 */
+    0xB1, 0x17,               /* EOR.B D0, (A7) - opmode 100 in bits 8-6 */
+    0x10, 0x57,               /* MOVE.B (A7), D1 - verify */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* NOT.B D0: D0=0 -> D0=0xFF, N set */
+static const uint8_t not_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x70, 0x00,               /* MOVEQ #0, D0 */
+    0x46, 0x00,               /* NOT.B D0 - D0 = 0xFF */
     0x4E, 0x71, 0x60, 0xFC,
 };
 
@@ -871,19 +914,23 @@ static int check_test_result(size_t idx)
     case 52: return cpu.d[0] == 0x2A;                                   /* addq */
     case 53: return cpu.d[1] == 0x2A;                                   /* subq */
     case 54: return cpu.a[1] == 0x1001;                                 /* addq_a */
-    case 55: return cpu.a[1] == 0x102A;                                 /* adda_w */
-    case 56: return cpu.a[1] == 0x102A;                                 /* adda_l */
-    case 57: return cpu.a[1] == 0x1000;                                 /* suba_w */
-    case 58: return cpu.a[1] == 0x1000;                                 /* suba_l */
-    case 59: return (cpu.sr & 0x1F) == 0x04;                            /* cmpa_w (Z set) */
-    case 60: return (cpu.sr & 0x1F) == 0x04;                            /* cmpa_l (Z set) */
-    case 61: return cpu.d[2] == 2;                                      /* bcc */
-    case 62: return cpu.d[2] == 15;                                     /* bcc_all */
-    case 63: return cpu.d[2] == 0x2A;                                   /* bsr_rts */
-    case 64: return cpu.d[2] == 0xAE;                                   /* addr_err */
-    case 65: return cpu.d[2] == 4;                                      /* illegal */
-    case 66: return cpu.d[0] == 0xFFFFFFAB;                             /* trap_rte (MOVEQ #0xAB sign-extends) */
-    case 67: return cpu.d[2] == 8;                                       /* rte_priv */
+    case 55: return (cpu.d[0] & 0xFF) == 0x0F;                           /* and */
+    case 56: return (cpu.d[0] & 0xFF) == 0xFF;                           /* or */
+    case 57: return (cpu.d[1] & 0xFF) == 0xF0;                           /* eor */
+    case 58: return (cpu.d[0] & 0xFF) == 0xFF && (cpu.sr & SR_N);        /* not (N set) */
+    case 59: return cpu.a[1] == 0x102A;                                 /* adda_w */
+    case 60: return cpu.a[1] == 0x102A;                                 /* adda_l */
+    case 61: return cpu.a[1] == 0x1000;                                 /* suba_w */
+    case 62: return cpu.a[1] == 0x1000;                                 /* suba_l */
+    case 63: return (cpu.sr & 0x1F) == 0x04;                            /* cmpa_w (Z set) */
+    case 64: return (cpu.sr & 0x1F) == 0x04;                            /* cmpa_l (Z set) */
+    case 65: return cpu.d[2] == 2;                                      /* bcc */
+    case 66: return cpu.d[2] == 15;                                     /* bcc_all */
+    case 67: return cpu.d[2] == 0x2A;                                   /* bsr_rts */
+    case 68: return cpu.d[2] == 0xAE;                                   /* addr_err */
+    case 69: return cpu.d[2] == 4;                                      /* illegal */
+    case 70: return cpu.d[0] == 0xFFFFFFAB;                             /* trap_rte (MOVEQ #0xAB sign-extends) */
+    case 71: return cpu.d[2] == 8;                                       /* rte_priv */
     default: return 0;
     }
 }
@@ -947,6 +994,10 @@ static const builtin_test_t builtin_tests[] = {
     { "addq", addq_test, sizeof(addq_test), "Running ADDQ.L test", 0 },
     { "subq", subq_test, sizeof(subq_test), "Running SUBQ.L test", 0 },
     { "addq_a", addq_a_test, sizeof(addq_a_test), "Running ADDQ.L to address register test", 0 },
+    { "and", and_test, sizeof(and_test), "Running AND.B test", 0 },
+    { "or", or_test, sizeof(or_test), "Running OR.B test", 0 },
+    { "eor", eor_test, sizeof(eor_test), "Running EOR.B test", 0 },
+    { "not", not_test, sizeof(not_test), "Running NOT.B test", 0 },
     { "adda_w", adda_w_test, sizeof(adda_w_test), "Running ADDA.W test", 0 },
     { "adda_l", adda_l_test, sizeof(adda_l_test), "Running ADDA.L test", 0 },
     { "suba_w", suba_w_test, sizeof(suba_w_test), "Running SUBA.W test", 0 },
@@ -983,6 +1034,7 @@ int run_all_tests(double speed_mhz)
 
     for (size_t i = 0; i < NUM_BUILTIN_TESTS; i++) {
         const builtin_test_t *t = &builtin_tests[i];
+        mem_reset();
         mem_load_rom(t->rom, t->size);
         cpu_reset();
 

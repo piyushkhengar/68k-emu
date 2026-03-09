@@ -5,6 +5,7 @@
 #include "branch.h"
 #include "control.h"
 #include "immediate.h"
+#include "logic.h"
 #include "memory.h"
 #include "timing.h"
 #include <setjmp.h>
@@ -220,11 +221,11 @@ static const op_handler_fn dispatch_top[16] = {
     [0x5] = dispatch_5xxx,
     [0x6] = op_bcc,
     [0x7] = op_moveq,
-    [0x8] = op_unimplemented,
+    [0x8] = dispatch_8xxx,
     [0x9] = dispatch_9xxx,
     [0xA] = op_unimplemented,
     [0xB] = dispatch_Bxxx,
-    [0xC] = op_unimplemented,
+    [0xC] = dispatch_Cxxx,
     [0xD] = dispatch_add,
     [0xE] = dispatch_add,
     [0xF] = dispatch_add,

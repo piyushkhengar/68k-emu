@@ -1,5 +1,6 @@
 #include "cpu_internal.h"
 #include "control.h"
+#include "ea.h"
 #include "timing.h"
 
 /* NOP: no operation. 0x4E71. */
@@ -44,12 +45,33 @@ static int op_rte(uint16_t op)
     return CYCLES_RTE;
 }
 
-/* 0x4xxx: TRAP (0x4E40-0x4E4F), RTE (0x4E73), NOP (0x4E71), RTS (0x4E75). */
+/* NOT <ea>: one's complement. 0x46xx. An not allowed. */
+static int op_not(uint16_t op)
+{
+    int ea_mode = (op >> 3) & 7;
+    int ea_reg = op & 7;
+    int size_code = (op >> 6) & 3;
+    int size = (size_code == 0) ? 1 : (size_code == 1) ? 2 : 4;
+    uint32_t mask = (size == 1) ? 0xFF : (size == 2) ? 0xFFFF : 0xFFFFFFFF;
+
+    if (ea_mode == 1) {
+        op_unimplemented(op);
+        return 0;
+    }
+    uint32_t val = ea_fetch_value(ea_mode, ea_reg, size) & mask;
+    uint32_t result = (~val) & mask;
+    ea_store_value(ea_mode, ea_reg, size, result);
+    set_nz_from_val(result, size);
+    return add_sub_cycles(ea_mode, ea_reg, size, 1);
+}
+
+/* 0x4xxx: TRAP (0x4E40-0x4E4F), RTE (0x4E73), NOP (0x4E71), RTS (0x4E75), NOT (0x46xx). */
 int dispatch_4xxx(uint16_t op)
 {
     if ((op & 0xFFF0) == 0x4E40) return op_trap(op);
     if (op == 0x4E73) return op_rte(op);
     if (op == 0x4E71) return op_nop(op);
     if (op == 0x4E75) return op_rts(op);
+    if ((op & 0xFF00) == 0x4600) return op_not(op);
     return op_unimplemented(op);
 }
