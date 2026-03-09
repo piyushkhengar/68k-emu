@@ -223,51 +223,78 @@ static int op_cmpa(uint16_t op)
     return cmp_cycles(d.ea_mode, d.ea_reg, d.size);
 }
 
-/* ADDX/SUBX: dest = dest op src op X. Format: 1101/1001 Rx 1 SIZE 0 0 R/M Ry. Z: cleared if nonzero. */
+/* Decoded fields for ADDX/SUBX. Format: 1101/1001 Rx 1 SIZE 0 0 R/M Ry. */
+typedef struct {
+    int dest_reg;
+    int src_reg;
+    int size;
+    int is_memory_mode;
+    uint32_t mask;
+} addx_decoded_t;
+
+static void addx_decode(uint16_t op, addx_decoded_t *d)
+{
+    d->dest_reg = (op >> 9) & 7;
+    d->src_reg = (op >> 0) & 7;
+    d->size = alu_size(op);
+    d->is_memory_mode = (op >> 3) & 1;
+    d->mask = alu_size_mask(d->size);
+}
+
+/* ADDX/SUBX: dest = dest op src op X. Z: cleared if nonzero. */
 static int op_addx_subx(uint16_t op, int is_add)
 {
-    int dest_reg = (op >> 9) & 7;
-    int src_reg = (op >> 0) & 7;
-    int size = alu_size(op);
-    int is_memory_mode = (op >> 3) & 1;
+    addx_decoded_t d;
+    addx_decode(op, &d);
     uint32_t xbit = (cpu.sr & SR_X) ? 1 : 0;
-    uint32_t mask = alu_size_mask(size);
 
-    if (is_memory_mode == 0) {
+    if (d.is_memory_mode == 0) {
         /* ADDX/SUBX Dy, Dx (register mode) */
-        uint32_t src = cpu.d[src_reg] & mask;
-        uint32_t dest_val = cpu.d[dest_reg] & mask;
-        uint32_t result = is_add ? (dest_val + src + xbit) & mask : (dest_val - src - xbit) & mask;
-        alu_store_dn(dest_reg, result, size);
+        uint32_t src = cpu.d[d.src_reg] & d.mask;
+        uint32_t dest_val = cpu.d[d.dest_reg] & d.mask;
+        uint32_t result = is_add ? (dest_val + src + xbit) & d.mask : (dest_val - src - xbit) & d.mask;
+        alu_store_dn(d.dest_reg, result, d.size);
         if (is_add)
-            set_nzvc_addx_sized(result, dest_val, src, size);
+            set_nzvc_addx_sized(result, dest_val, src, d.size);
         else
-            set_nzvc_subx_sized(result, dest_val, src, size);
+            set_nzvc_subx_sized(result, dest_val, src, d.size);
     } else {
         /* ADDX/SUBX -(Ay), -(Ax): decrement both, fetch, op, store */
-        cpu.a[src_reg] -= ea_step(src_reg, size);
-        cpu.a[dest_reg] -= ea_step(dest_reg, size);
-        uint32_t addr_x = cpu.a[dest_reg];
-        uint32_t addr_y = cpu.a[src_reg];
-        uint32_t src = alu_mem_read_sized(addr_y, size);
-        uint32_t dest_val = alu_mem_read_sized(addr_x, size);
-        uint32_t result = is_add ? (dest_val + src + xbit) & mask : (dest_val - src - xbit) & mask;
-        alu_mem_write_sized(addr_x, size, result);
+        cpu.a[d.src_reg] -= ea_step(d.src_reg, d.size);
+        cpu.a[d.dest_reg] -= ea_step(d.dest_reg, d.size);
+        uint32_t addr_x = cpu.a[d.dest_reg];
+        uint32_t addr_y = cpu.a[d.src_reg];
+        uint32_t src = alu_mem_read_sized(addr_y, d.size);
+        uint32_t dest_val = alu_mem_read_sized(addr_x, d.size);
+        uint32_t result = is_add ? (dest_val + src + xbit) & d.mask : (dest_val - src - xbit) & d.mask;
+        alu_mem_write_sized(addr_x, d.size, result);
         if (is_add)
-            set_nzvc_addx_sized(result, dest_val, src, size);
+            set_nzvc_addx_sized(result, dest_val, src, d.size);
         else
-            set_nzvc_subx_sized(result, dest_val, src, size);
+            set_nzvc_subx_sized(result, dest_val, src, d.size);
     }
-    return addx_subx_cycles(is_memory_mode, size);
+    return addx_subx_cycles(d.is_memory_mode, d.size);
+}
+
+/* Decoded fields for MOVEQ. */
+typedef struct {
+    int dest_reg;
+    int32_t imm;
+} moveq_decoded_t;
+
+static void moveq_decode(uint16_t op, moveq_decoded_t *d)
+{
+    d->dest_reg = (op >> 9) & 7;
+    d->imm = (int8_t)(op & 0xFF);
 }
 
 /* MOVEQ #imm, Dn: sign-extend 8-bit immediate to 32-bit, load into Dn. Sets N,Z; clears V,C. */
 int op_moveq(uint16_t op)
 {
-    int dest_reg = (op >> 9) & 7;
-    int32_t imm = (int8_t)(op & 0xFF);
-    uint32_t result = (uint32_t)imm;
-    cpu.d[dest_reg] = result;
+    moveq_decoded_t d;
+    moveq_decode(op, &d);
+    uint32_t result = (uint32_t)d.imm;
+    cpu.d[d.dest_reg] = result;
     set_nz_from_val(result, 4);
     return CYCLES_MOVEQ;
 }
