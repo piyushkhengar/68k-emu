@@ -554,6 +554,65 @@ static const uint8_t asl_mem_test[] = {
     0x4E, 0x71, 0x60, 0xFC,
 };
 
+/* MULU.W (A7), D1: D1=256, (A7)=256 -> D1=65536 */
+static const uint8_t mulu_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x35, 0xFC, 0x01, 0x00,               /* 0x10: MOVE.W #0x100, (A7) - 0x35FC = MOVE.W #imm, (A7) */
+    0x20, 0x7C, 0x00, 0x00, 0x01, 0x00,   /* 0x14: MOVE.L #0x100, D1 */
+    0xC2, 0xD7,                           /* 0x1A: MULU.W (A7), D1 */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* MULS.W D0, D1: D0=-1, D1=10 -> D1=-10 */
+static const uint8_t muls_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x70, 0xFF,               /* 0x10: MOVEQ #-1, D0 */
+    0x72, 0x0A,               /* 0x12: MOVEQ #10, D1 */
+    0xC3, 0xC0,               /* 0x14: MULS.W D0, D1 (0xC3C0: MULS D0, D1) */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* DIVU.W (A7), D0: D0=65536, (A7)=256 -> D0=0x00000100 (q=256, r=0) */
+static const uint8_t divu_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x35, 0xFC, 0x01, 0x00,               /* 0x10: MOVE.W #0x100, (A7) */
+    0x20, 0x3C, 0x00, 0x01, 0x00, 0x00,   /* 0x14: MOVE.L #0x10000, D0 */
+    0x80, 0xD7,                           /* 0x1A: DIVU.W (A7), D0 */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* DIVS.W D1, D0: D0=-10, D1=2 -> D0=0x0000FFFB (q=-5, r=0) */
+static const uint8_t divs_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x20, 0x3C, 0xFF, 0xFF, 0xFF, 0xF6,       /* 0x10: MOVE.L #-10, D0 */
+    0x72, 0x02,               /* 0x16: MOVEQ #2, D1 */
+    0x81, 0xC1,                               /* 0x18: DIVS.W D1, D0 */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* DIVU.W (A7), D0 with divisor 0: trap vector 5, handler sets D2=0xDEAD */
+static const uint8_t div_by_zero_test[] = {
+    0x00, 0x00, 0x00, 0x18,   /* Reset: PC = 0x18 (code starts after vector table) */
+    0x00, 0x00, 0x10, 0x00,   /* Reset: SP = 0x1000 */
+    0x00, 0x00, 0x00, 0x00,   /* Vector 2 */
+    0x00, 0x00, 0x00, 0x00,   /* Vector 3 */
+    0x00, 0x00, 0x00, 0x00,   /* Vector 4 */
+    0x00, 0x00, 0x00, 0x30,   /* Vector 5 (div by zero): handler at 0x30 */
+    0x25, 0xC0,               /* 0x10: MOVE.L D0, (A7) - store 0 at 0x1000 (D0=0 from reset) */
+    0x20, 0x3C, 0x00, 0x01, 0x00, 0x00,   /* 0x12: MOVE.L #0x10000, D0 */
+    0x80, 0xD7,               /* 0x18: DIVU.W (A7), D0 - divide by zero */
+    0x4E, 0x71, 0x60, 0xFC,   /* 0x1A: NOP, BRA (not reached) */
+    /* Padding: bytes 38-47 so handler at 0x30 (byte 48) */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    /* 0x30: Divide-by-zero handler */
+    0x20, 0xBC, 0x00, 0x00, 0xDE, 0xAD,   /* MOVE.L #0xDEAD, D2 */
+    0x4E, 0x73,               /* RTE */
+};
+
 static const uint8_t addq_test[] = {
     0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -1081,6 +1140,11 @@ static int check_test_result(size_t idx)
     case 83: return (cpu.d[0] & 0xFFFF) == 0x0800;                          /* lsr_imm: 0x1000>>1=0x800 */
     case 84: return cpu.d[0] == 0x00000006;                                 /* rol_reg */
     case 85: return (cpu.d[0] & 0xFFFF) == 0x8000;                          /* asl_mem */
+    case 86: return cpu.d[1] == 0x10000;                                   /* mulu: 256*256 */
+    case 87: return cpu.d[1] == 0xFFFFFFF6;                                 /* muls: 10*(-1)=-10 */
+    case 88: return cpu.d[0] == 0x00000100;                                /* divu: 65536/256=256, r=0 */
+    case 89: return cpu.d[0] == 0x0000FFFB;                                /* divs: -10/2=-5, r=0 */
+    case 90: return cpu.d[2] == 0xDEAD;                                       /* div_by_zero: handler sets D2=0xDEAD */
     default: return 0;
     }
 }
@@ -1175,6 +1239,11 @@ static const builtin_test_t builtin_tests[] = {
     { "lsr_imm", lsr_imm_test, sizeof(lsr_imm_test), "Running LSR.W #1 test", 5 },
     { "rol_reg", rol_reg_test, sizeof(rol_reg_test), "Running ROL.L #2,D0 test", 4 },
     { "asl_mem", asl_mem_test, sizeof(asl_mem_test), "Running ASL (A0) memory test", 5 },
+    { "mulu", mulu_test, sizeof(mulu_test), "Running MULU.W test", 5 },
+    { "muls", muls_test, sizeof(muls_test), "Running MULS.W test", 5 },
+    { "divu", divu_test, sizeof(divu_test), "Running DIVU.W test", 5 },
+    { "divs", divs_test, sizeof(divs_test), "Running DIVS.W test", 5 },
+    { "div_by_zero", div_by_zero_test, sizeof(div_by_zero_test), "Running DIV by zero test", 15 },
 };
 
 #define NUM_BUILTIN_TESTS (sizeof(builtin_tests) / sizeof(builtin_tests[0]))

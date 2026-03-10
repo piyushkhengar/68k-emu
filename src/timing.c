@@ -188,6 +188,19 @@ int shift_cycles_memory(int ea_mode, int ea_reg)
     return 8 + ea_cycles(ea_mode, ea_reg, 2);
 }
 
+/* MULU/MULS: ~70 base + EA fetch (word). */
+int mul_cycles(int ea_mode, int ea_reg)
+{
+    return 70 + ea_cycles(ea_mode, ea_reg, 2);
+}
+
+/* DIVU ~140, DIVS ~158 base + EA fetch (word). */
+int div_cycles(int ea_mode, int ea_reg, int is_signed)
+{
+    int base = is_signed ? 158 : 140;
+    return base + ea_cycles(ea_mode, ea_reg, 2);
+}
+
 /* TST: base 4 + EA read. Dn/An: 4. Memory: 4 + ea_cycles. */
 int tst_cycles(int mode, int reg, int size)
 {

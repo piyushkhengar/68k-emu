@@ -8,6 +8,7 @@
 /* 68000 exception vector numbers */
 #define ADDR_ERR_VECTOR   3
 #define ILLEGAL_VECTOR    4
+#define DIVIDE_BY_ZERO_VECTOR 5
 #define PRIVILEGE_VECTOR  8
 
 /* Shared CPU state (defined in cpu.c) */

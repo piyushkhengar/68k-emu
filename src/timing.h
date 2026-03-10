@@ -37,6 +37,10 @@ int exception_cycles(int vector_num);
 int shift_cycles_register(int size, int count, int is_reg_count);
 int shift_cycles_memory(int ea_mode, int ea_reg);
 
+/* MUL/DIV: base + EA fetch. Word form only. */
+int mul_cycles(int ea_mode, int ea_reg);
+int div_cycles(int ea_mode, int ea_reg, int is_signed);
+
 /* LEA, JMP, JSR, TST, CLR cycle counts. */
 int lea_cycles(int mode, int reg);
 int jmp_cycles(int mode, int reg);

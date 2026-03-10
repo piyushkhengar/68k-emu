@@ -105,6 +105,127 @@ static int op_or_generic(uint16_t op)
     return op_logic_binop(op, logic_or);
 }
 
+/* MUL/DIV: An (mode 1) not allowed as source. */
+static int mul_div_reject_an(uint16_t op, int ea_mode)
+{
+    if (ea_mode == 1) {
+        op_unimplemented(op);
+        return 1;
+    }
+    return 0;
+}
+
+/* Decoded fields for MULU/MULS/DIVU/DIVS. All use <ea>, Dn, word source. */
+typedef struct {
+    int dn_reg;
+    int ea_mode;
+    int ea_reg;
+} mul_div_decoded_t;
+
+/* Returns 0 if rejected, 1 if OK to proceed. */
+static int decode_mul_div(uint16_t op, mul_div_decoded_t *d)
+{
+    d->dn_reg = (op >> 9) & 7;
+    d->ea_mode = (op >> 3) & 7;
+    d->ea_reg = op & 7;
+    return mul_div_reject_an(op, d->ea_mode) ? 0 : 1;
+}
+
+/* MULU.W <ea>, Dn: 16x16 -> 32 unsigned. Source=EA, multiplicand=Dn low word. */
+static int op_mulu(uint16_t op)
+{
+    mul_div_decoded_t d;
+    if (!decode_mul_div(op, &d))
+        return 0;
+
+    uint32_t src = ea_fetch_value(d.ea_mode, d.ea_reg, 2) & 0xFFFF;
+    uint32_t mult = cpu.d[d.dn_reg] & 0xFFFF;
+    uint32_t result = src * mult;
+
+    cpu.d[d.dn_reg] = result;
+    cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);
+    set_nz_from_val(result, 4);
+    return mul_cycles(d.ea_mode, d.ea_reg);
+}
+
+/* MULS.W <ea>, Dn: 16x16 -> 32 signed. */
+static int op_muls(uint16_t op)
+{
+    mul_div_decoded_t d;
+    if (!decode_mul_div(op, &d))
+        return 0;
+
+    int32_t src = (int32_t)(int16_t)(ea_fetch_value(d.ea_mode, d.ea_reg, 2) & 0xFFFF);
+    int32_t mult = (int32_t)(int16_t)(cpu.d[d.dn_reg] & 0xFFFF);
+    uint32_t result = (uint32_t)(int32_t)(src * mult);
+
+    cpu.d[d.dn_reg] = result;
+    cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);
+    set_nz_from_val(result, 4);
+    return mul_cycles(d.ea_mode, d.ea_reg);
+}
+
+/* DIVU.W <ea>, Dn: 32/16 -> 16q:16r. Dividend=Dn, divisor=EA. */
+static int op_divu(uint16_t op)
+{
+    mul_div_decoded_t d;
+    if (!decode_mul_div(op, &d))
+        return 0;
+
+    uint32_t divisor = ea_fetch_value(d.ea_mode, d.ea_reg, 2) & 0xFFFF;
+    if (divisor == 0) {
+        cpu.pc -= 2;
+        cpu_take_exception(DIVIDE_BY_ZERO_VECTOR, 4);
+        return 0;
+    }
+
+    uint32_t dividend = cpu.d[d.dn_reg];
+    uint32_t quotient = dividend / divisor;
+    if (quotient > 0xFFFF) {
+        cpu.sr |= SR_V;
+        cpu.sr &= ~(SR_N | SR_Z | SR_C);
+        return div_cycles(d.ea_mode, d.ea_reg, 0);
+    }
+
+    uint32_t remainder = dividend % divisor;
+    cpu.d[d.dn_reg] = (remainder << 16) | (quotient & 0xFFFF);
+    cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);
+    set_nz_from_val(quotient & 0xFFFF, 2);
+    return div_cycles(d.ea_mode, d.ea_reg, 0);
+}
+
+/* DIVS.W <ea>, Dn: 32/16 -> 16q:16r signed. */
+static int op_divs(uint16_t op)
+{
+    mul_div_decoded_t d;
+    if (!decode_mul_div(op, &d))
+        return 0;
+
+    uint32_t div_raw = ea_fetch_value(d.ea_mode, d.ea_reg, 2) & 0xFFFF;
+    if (div_raw == 0) {
+        cpu.pc -= 2;
+        cpu_take_exception(DIVIDE_BY_ZERO_VECTOR, 4);
+        return 0;
+    }
+
+    int32_t divisor = (int32_t)(int16_t)div_raw;
+    int32_t dividend = (int32_t)cpu.d[d.dn_reg];
+    int32_t quotient = dividend / divisor;
+
+    if (quotient > 32767 || quotient < -32768) {
+        cpu.sr |= SR_V;
+        cpu.sr &= ~(SR_N | SR_Z | SR_C);
+        return div_cycles(d.ea_mode, d.ea_reg, 1);
+    }
+
+    int32_t remainder = dividend % divisor;
+    uint32_t result = ((uint32_t)(uint16_t)remainder << 16) | ((uint32_t)(uint16_t)quotient & 0xFFFF);
+    cpu.d[d.dn_reg] = result;
+    cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);
+    set_nz_from_val((uint32_t)(uint16_t)quotient, 2);
+    return div_cycles(d.ea_mode, d.ea_reg, 1);
+}
+
 /* EOR: Dn to EA only. result = ea_val ^ Dn. When EA is Dn, preserve upper bits. */
 int op_eor(uint16_t op)
 {
@@ -124,20 +245,24 @@ int op_eor(uint16_t op)
     return add_sub_cycles(d.ea_mode, d.ea_reg, d.size, 1);
 }
 
-/* 0x8xxx: OR. DIVU/DIVS use opmode 011/111 -> unimplemented. */
+/* 0x8xxx: OR. DIVU (opmode 3), DIVS (opmode 7). */
 int dispatch_8xxx(uint16_t op)
 {
     int opmode = (op >> 6) & 7;
-    if (opmode == 3 || opmode == 7)
-        return op_unimplemented(op);
+    if (opmode == 3)
+        return op_divu(op);
+    if (opmode == 7)
+        return op_divs(op);
     return op_or_generic(op);
 }
 
-/* 0xCxxx: AND. MULU/MULS use opmode 011/111 -> unimplemented. */
+/* 0xCxxx: AND. MULU (opmode 3), MULS (opmode 7). */
 int dispatch_Cxxx(uint16_t op)
 {
     int opmode = (op >> 6) & 7;
-    if (opmode == 3 || opmode == 7)
-        return op_unimplemented(op);
+    if (opmode == 3)
+        return op_mulu(op);
+    if (opmode == 7)
+        return op_muls(op);
     return op_and_generic(op);
 }
