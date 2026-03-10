@@ -499,6 +499,23 @@ static const uint8_t eori_test[] = {
     0x0A, 0x80, 0xAA, 0xAA, 0xAA, 0xAA,               /* 0x16: EORI.L #0xAAAAAAAA, D0 */
     0x4E, 0x71, 0x60, 0xFC,
 };
+
+/* ORI #0x1F, CCR: set all 5 condition code bits. 0x003C + byte imm. */
+static const uint8_t ori_ccr_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x3C, 0x00, 0x1F,               /* 0x10: ORI #0x1F, CCR */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* ORI #0x0700, SR: set interrupt mask (supervisor mode). 0x007C + word imm. */
+static const uint8_t ori_sr_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x7C, 0x07, 0x00,               /* 0x10: ORI #0x0700, SR */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
 static const uint8_t addq_test[] = {
     0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -1021,6 +1038,8 @@ static int check_test_result(size_t idx)
     case 77: return cpu.d[0] == 0xFFFFFFFF;                                /* ori */
     case 78: return cpu.d[0] == 0x00005600;                                /* andi */
     case 79: return cpu.d[0] == 0 && (cpu.sr & SR_Z);                     /* eori */
+    case 80: return (cpu.sr & 0x1F) == 0x1F;                               /* ori_ccr */
+    case 81: return (cpu.sr & 0x0700) == 0x0700;                           /* ori_sr */
     default: return 0;
     }
 }
@@ -1109,6 +1128,8 @@ static const builtin_test_t builtin_tests[] = {
     { "ori", ori_test, sizeof(ori_test), "Running ORI.L test", 0 },
     { "andi", andi_test, sizeof(andi_test), "Running ANDI.L test", 0 },
     { "eori", eori_test, sizeof(eori_test), "Running EORI.L test", 0 },
+    { "ori_ccr", ori_ccr_test, sizeof(ori_ccr_test), "Running ORI to CCR test", 0 },
+    { "ori_sr", ori_sr_test, sizeof(ori_sr_test), "Running ORI to SR test", 0 },
 };
 
 #define NUM_BUILTIN_TESTS (sizeof(builtin_tests) / sizeof(builtin_tests[0]))

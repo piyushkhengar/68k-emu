@@ -157,6 +157,73 @@ static int op_eori(uint16_t op)
     return add_sub_cycles(d.ea_mode, d.ea_reg, d.size, 1) + (d.size == 4 ? 4 : 0);
 }
 
+#define CYCLES_ORI_ANDI_EORI_CCR_SR  20
+
+/* ORI/ANDI/EORI to CCR: byte immediate, CCR = low byte of SR. 0x003C, 0x023C, 0x0A3C. */
+static int op_ori_ccr(uint16_t op)
+{
+    (void)op;
+    uint8_t imm = fetch16() & 0xFF;
+    uint8_t ccr = cpu.sr & 0xFF;
+    cpu.sr = (cpu.sr & 0xFF00) | (ccr | imm);
+    return CYCLES_ORI_ANDI_EORI_CCR_SR;
+}
+
+static int op_andi_ccr(uint16_t op)
+{
+    (void)op;
+    uint8_t imm = fetch16() & 0xFF;
+    uint8_t ccr = cpu.sr & 0xFF;
+    cpu.sr = (cpu.sr & 0xFF00) | (ccr & imm);
+    return CYCLES_ORI_ANDI_EORI_CCR_SR;
+}
+
+static int op_eori_ccr(uint16_t op)
+{
+    (void)op;
+    uint8_t imm = fetch16() & 0xFF;
+    uint8_t ccr = cpu.sr & 0xFF;
+    cpu.sr = (cpu.sr & 0xFF00) | (ccr ^ imm);
+    return CYCLES_ORI_ANDI_EORI_CCR_SR;
+}
+
+/* ORI/ANDI/EORI to SR: word immediate, supervisor only. 0x007C, 0x027C, 0x0A7C. */
+static int op_ori_sr(uint16_t op)
+{
+    (void)op;
+    if (!(cpu.sr & 0x2000)) {
+        cpu_take_exception(PRIVILEGE_VECTOR, 4);
+        return 0;
+    }
+    uint16_t imm = fetch16();
+    cpu.sr = (cpu.sr | imm) & 0xFFFF;
+    return CYCLES_ORI_ANDI_EORI_CCR_SR;
+}
+
+static int op_andi_sr(uint16_t op)
+{
+    (void)op;
+    if (!(cpu.sr & 0x2000)) {
+        cpu_take_exception(PRIVILEGE_VECTOR, 4);
+        return 0;
+    }
+    uint16_t imm = fetch16();
+    cpu.sr = (cpu.sr & imm) & 0xFFFF;
+    return CYCLES_ORI_ANDI_EORI_CCR_SR;
+}
+
+static int op_eori_sr(uint16_t op)
+{
+    (void)op;
+    if (!(cpu.sr & 0x2000)) {
+        cpu_take_exception(PRIVILEGE_VECTOR, 4);
+        return 0;
+    }
+    uint16_t imm = fetch16();
+    cpu.sr = (cpu.sr ^ imm) & 0xFFFF;
+    return CYCLES_ORI_ANDI_EORI_CCR_SR;
+}
+
 /* Decoded fields for ADDQ/SUBQ. An+byte rejected. */
 typedef struct {
     int data;
@@ -214,14 +281,24 @@ static int op_addq_subq(uint16_t op, int is_sub)
 }
 
 /* 0x0xxx: ORI (0x00), ANDI (0x02), SUBI (0x04), ADDI (0x06), EORI (0x0A), CMPI (0x0C).
- * ORI/ANDI/EORI to CCR (0x3C) and SR (0x7C) are unimplemented. */
+ * ORI/ANDI/EORI to CCR (0x3C) and SR (0x7C). */
 int dispatch_0xxx(uint16_t op)
 {
     int ea_field = op & 0x003F;
-    if (ea_field == 0x003C || ea_field == 0x007C)
-        return op_unimplemented(op);  /* ORI/ANDI/EORI to CCR/SR - Phase 2 step 2 */
-
     int high = (op >> 8) & 0x0F;
+    if (ea_field == 0x003C) {
+        if (high == 0x00) return op_ori_ccr(op);
+        if (high == 0x02) return op_andi_ccr(op);
+        if (high == 0x0A) return op_eori_ccr(op);
+        return op_unimplemented(op);  /* SUBI/ADDI/CMPI to CCR invalid */
+    }
+    if (ea_field == 0x007C) {
+        if (high == 0x00) return op_ori_sr(op);
+        if (high == 0x02) return op_andi_sr(op);
+        if (high == 0x0A) return op_eori_sr(op);
+        return op_unimplemented(op);  /* SUBI/ADDI/CMPI to SR invalid */
+    }
+
     if (high == 0x00) return op_ori(op);
     if (high == 0x02) return op_andi(op);
     if (high == 0x04) return op_subi(op);
