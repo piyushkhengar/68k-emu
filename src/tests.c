@@ -9,6 +9,9 @@
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 /* Minimal test: reset vector at 0, code at 0x10 */
 const uint8_t nop_loop[] = {
@@ -1082,15 +1085,26 @@ static const uint8_t rte_priv_test[] = {
 
 static double get_monotonic_sec(void)
 {
+#ifdef _WIN32
+    return (double)GetTickCount64() / 1000.0;
+#else
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
+#endif
 }
 
 static void sleep_sec(double sec)
 {
     if (sec <= 0)
         return;
+#ifdef _WIN32
+    {
+        DWORD ms = (DWORD)(sec * 1000.0);
+        if (ms > 0)
+            Sleep(ms);
+    }
+#else
     struct timespec req = {
         .tv_sec = (time_t)sec,
         .tv_nsec = (long)((sec - (time_t)sec) * 1e9)
@@ -1100,6 +1114,7 @@ static void sleep_sec(double sec)
     if (req.tv_nsec >= 1000000000)
         req.tv_nsec = 999999999;
     nanosleep(&req, NULL);
+#endif
 }
 
 /* Check expected result for test index. Returns 1 if pass. */
@@ -1326,6 +1341,7 @@ int run_all_tests(double speed_mhz)
     double slice_start = get_monotonic_sec();
 
     printf("Running regression tests%s...\n", speed_mhz > 0 ? " at given speed" : "");
+    fflush(stdout);
 
     for (size_t i = 0; i < NUM_BUILTIN_TESTS; i++) {
         const builtin_test_t *t = &builtin_tests[i];

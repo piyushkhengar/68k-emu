@@ -14,14 +14,21 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 #define FRAME_RATE_HZ 50   /* PAL Amiga; use 60 for NTSC */
 
 static double get_monotonic_sec(void)
 {
+#ifdef _WIN32
+    return (double)GetTickCount64() / 1000.0;
+#else
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
+#endif
 }
 
 static void print_cpu_state(void)
@@ -58,6 +65,13 @@ static void sleep_sec(double sec)
 {
     if (sec <= 0)
         return;
+#ifdef _WIN32
+    {
+        DWORD ms = (DWORD)(sec * 1000.0);
+        if (ms > 0)
+            Sleep(ms);
+    }
+#else
     struct timespec req = {
         .tv_sec = (time_t)sec,
         .tv_nsec = (long)((sec - (time_t)sec) * 1e9)
@@ -67,6 +81,7 @@ static void sleep_sec(double sec)
     if (req.tv_nsec >= 1000000000)
         req.tv_nsec = 999999999;
     nanosleep(&req, NULL);
+#endif
 }
 
 int main(int argc, char *argv[])

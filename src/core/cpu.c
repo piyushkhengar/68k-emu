@@ -198,7 +198,12 @@ void cpu_take_exception(int vector_num, int cycles_before_fault)
     cpu.pc = mem_read32((unsigned)vector_num * 4);
 
     /* Unwind to cpu_step and abort the current instruction */
+#if defined(__GNUC__) && defined(_WIN32)
+    /* MinGW-w64 setjmp/longjmp can crash on 64-bit Windows; use GCC builtins (see e.g. MinGW-w64 bug 406). */
+    __builtin_longjmp(exception_buf, 1);
+#else
     longjmp(exception_buf, 1);
+#endif
 }
 
 int op_unimplemented(uint16_t op)
@@ -242,7 +247,11 @@ int cpu_step(void)
     if (cpu.halted)
         return 0;
 
+#if defined(__GNUC__) && defined(_WIN32)
+    if (__builtin_setjmp(exception_buf) != 0) {
+#else
     if (setjmp(exception_buf) != 0) {
+#endif
         /* Exception occurred; PC already updated to handler */
         return exception_cycles_result;
     }
