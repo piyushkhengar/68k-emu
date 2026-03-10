@@ -5,6 +5,7 @@
  */
 
 #include "cpu_internal.h"
+#include "branch.h"
 #include "ea.h"
 #include "memory.h"
 #include "timing.h"
@@ -308,9 +309,52 @@ int dispatch_0xxx(uint16_t op)
     return op_unimplemented(op);
 }
 
-/* 0x5xxx: ADDQ (bit 8=0), SUBQ (bit 8=1). Data in bits 11-9. */
+/* DBcc: 0x50C0-0x50FF. Decrement Dn (word); if condition false and Dn != -1, branch. */
+static int op_dbcc(uint16_t op)
+{
+    uint8_t cond = (op >> 8) & 0x0F;
+    int dn = op & 7;
+    int32_t disp = (int16_t)fetch16();
+
+    if (branch_condition_met(cond))
+        return dbcc_cycles(0);   /* Condition true: terminate, no operation */
+
+    uint16_t dn_val = (uint16_t)(cpu.d[dn] & 0xFFFF);
+    int16_t new_val = (int16_t)(dn_val - 1);
+    cpu.d[dn] = (cpu.d[dn] & 0xFFFF0000) | ((uint32_t)(uint16_t)new_val & 0xFFFF);
+
+    if (new_val != -1) {
+        cpu.pc += disp;
+        return dbcc_cycles(1);
+    }
+    return dbcc_cycles(0);
+}
+
+/* Scc: 0x5Cxx. Set byte to 0xFF if condition true, else 0x00. An (mode 1) not allowed. */
+static int op_scc(uint16_t op)
+{
+    int ea_mode = (op >> 3) & 7;
+    int ea_reg = op & 7;
+    uint8_t cond = (op >> 8) & 0x0F;
+
+    if (ea_mode == 1) {
+        op_unimplemented(op);
+        return 0;
+    }
+
+    uint8_t val = branch_condition_met(cond) ? 0xFF : 0x00;
+    ea_store_value(ea_mode, ea_reg, 1, val);
+    return scc_cycles(ea_mode, ea_reg);
+}
+
+/* 0x5xxx: DBcc (bits 7-3=11001), Scc (bits 7-3!=11001, size 11), ADDQ, SUBQ. */
 int dispatch_5xxx(uint16_t op)
 {
+    if ((op & 0xF0C0) == 0x50C0) {  /* Size 11 in bits 7-6 */
+        if ((op & 0x00F8) == 0x00C8)  /* DBcc: bits 7-3 = 11001 */
+            return op_dbcc(op);
+        return op_scc(op);             /* Scc: EA in bits 5-0 */
+    }
     if ((op & 0x0100) == 0)
         return op_addq_subq(op, 0);   /* ADDQ */
     return op_addq_subq(op, 1);       /* SUBQ */

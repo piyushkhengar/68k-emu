@@ -41,6 +41,10 @@ int shift_cycles_memory(int ea_mode, int ea_reg);
 int mul_cycles(int ea_mode, int ea_reg);
 int div_cycles(int ea_mode, int ea_reg, int is_signed);
 
+/* DBcc, Scc cycle counts. */
+int dbcc_cycles(int taken);
+int scc_cycles(int ea_mode, int ea_reg);
+
 /* LEA, JMP, JSR, TST, CLR cycle counts. */
 int lea_cycles(int mode, int reg);
 int jmp_cycles(int mode, int reg);

@@ -613,6 +613,58 @@ static const uint8_t div_by_zero_test[] = {
     0x4E, 0x73,               /* RTE */
 };
 
+/* DBRA D0, loop: D0=3, loop until D0=-1. D1 counts iterations. 0x51C8 = DBRA D0. */
+static const uint8_t dbcc_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x70, 0x03,               /* 0x10: MOVEQ #3, D0 - loop 4 times (3,2,1,0 then -1) */
+    0x72, 0x00,               /* 0x12: MOVEQ #0, D1 - counter */
+    0x52, 0x81,               /* 0x14: ADDQ.L #1, D1 - increment */
+    0x51, 0xC8, 0xFF, 0xFA,   /* 0x16: DBRA D0, -6 - loop back to ADDQ at 0x14 */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* SEQ D0: CMP sets Z, SEQ sets D0=0xFF. 0x57C0 = SEQ D0. */
+static const uint8_t scc_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x70, 0x0A,               /* MOVEQ #10, D0 */
+    0x72, 0x0A,               /* MOVEQ #10, D1 */
+    0xB3, 0x80,               /* CMP.L D0, D1 - Z set (equal) */
+    0x57, 0xC0,               /* SEQ D0 - set D0=0xFF if equal */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* EXT.W D0: 0x80 -> 0xFF80. EXT.L D0: 0x8000 -> 0xFFFF8000. */
+static const uint8_t ext_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x10, 0x3C, 0x00, 0x80,   /* MOVE.B #0x80, D0 */
+    0x48, 0x80,               /* EXT.W D0 - 0x80 -> 0xFF80 */
+    0x30, 0x3C, 0x80, 0x00,   /* MOVE.W #0x8000, D0 */
+    0x48, 0xC0,               /* EXT.L D0 - 0x8000 -> 0xFFFF8000 */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* SWAP D0: 0x12345678 -> 0x56781234. */
+static const uint8_t swap_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x20, 0x3C, 0x12, 0x34, 0x56, 0x78,   /* MOVE.L #0x12345678, D0 */
+    0x48, 0x40,               /* SWAP D0 */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* LINK A6, #-8; UNLK A6. Verify A6 and SP restored. */
+static const uint8_t link_unlk_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x23, 0x8F,               /* MOVE.L A7, A6 - save SP in A6 */
+    0x4E, 0x56, 0xFF, 0xF8,               /* LINK A6, #-8 */
+    0x4E, 0x5E,               /* UNLK A6 */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
 static const uint8_t addq_test[] = {
     0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -1145,6 +1197,11 @@ static int check_test_result(size_t idx)
     case 88: return cpu.d[0] == 0x00000100;                                /* divu: 65536/256=256, r=0 */
     case 89: return cpu.d[0] == 0x0000FFFB;                                /* divs: -10/2=-5, r=0 */
     case 90: return cpu.d[2] == 0xDEAD;                                       /* div_by_zero: handler sets D2=0xDEAD */
+    case 91: return (cpu.d[0] & 0xFFFF) == 0xFFFF && cpu.d[1] == 4;           /* dbcc: D0=-1, D1=4 iterations */
+    case 92: return (cpu.d[0] & 0xFF) == 0xFF;                                /* scc: SEQ sets D0=0xFF */
+    case 93: return cpu.d[0] == 0xFFFF8000;                                   /* ext: EXT.W then EXT.L -> 0xFFFF8000 */
+    case 94: return cpu.d[0] == 0x56781234;                                   /* swap: 0x12345678 -> 0x56781234 */
+    case 95: return cpu.a[6] == 0x1000 && cpu.a[7] == 0x1000;                 /* link_unlk: A6 and SP restored */
     default: return 0;
     }
 }
@@ -1244,6 +1301,11 @@ static const builtin_test_t builtin_tests[] = {
     { "divu", divu_test, sizeof(divu_test), "Running DIVU.W test", 5 },
     { "divs", divs_test, sizeof(divs_test), "Running DIVS.W test", 5 },
     { "div_by_zero", div_by_zero_test, sizeof(div_by_zero_test), "Running DIV by zero test", 15 },
+    { "dbcc", dbcc_test, sizeof(dbcc_test), "Running DBRA loop test", 15 },
+    { "scc", scc_test, sizeof(scc_test), "Running Scc test", 10 },
+    { "ext", ext_test, sizeof(ext_test), "Running EXT test", 8 },
+    { "swap", swap_test, sizeof(swap_test), "Running SWAP test", 5 },
+    { "link_unlk", link_unlk_test, sizeof(link_unlk_test), "Running LINK/UNLK test", 10 },
 };
 
 #define NUM_BUILTIN_TESTS (sizeof(builtin_tests) / sizeof(builtin_tests[0]))

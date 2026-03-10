@@ -171,9 +171,73 @@ static int op_clr(uint16_t op)
     return clr_cycles(ea_mode, ea_reg, size);
 }
 
-/* 0x4xxx: JSR, JMP, TRAP, RTE, RTS, NOP, LEA, TST, CLR, NOT. */
+#define CYCLES_EXT_SWAP  4
+#define CYCLES_LINK      16
+#define CYCLES_UNLK      12
+
+/* EXT.W Dn: sign-extend byte to word. EXT.L Dn: sign-extend word to long. 0x4880-0x48FF. */
+static int op_ext(uint16_t op)
+{
+    int dn = op & 7;
+    int opmode = (op >> 6) & 3;
+    uint32_t result;
+
+    if (opmode == 2) {
+        /* EXT.W: byte -> word */
+        int8_t b = (int8_t)(cpu.d[dn] & 0xFF);
+        result = (uint32_t)(int32_t)(int16_t)b;
+    } else if (opmode == 3) {
+        /* EXT.L: word -> long */
+        int16_t w = (int16_t)(cpu.d[dn] & 0xFFFF);
+        result = (uint32_t)(int32_t)w;
+    } else {
+        return op_unimplemented(op);
+    }
+    cpu.d[dn] = result;
+    cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);
+    set_nz_from_val(result, opmode == 2 ? 2 : 4);
+    return CYCLES_EXT_SWAP;
+}
+
+/* SWAP Dn: exchange upper and lower 16 bits. 0x4840-0x4847. */
+static int op_swap(uint16_t op)
+{
+    int dn = op & 7;
+    uint32_t val = cpu.d[dn];
+    uint32_t result = ((val >> 16) & 0xFFFF) | ((val & 0xFFFF) << 16);
+    cpu.d[dn] = result;
+    cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);
+    set_nz_from_val(result, 4);
+    return CYCLES_EXT_SWAP;
+}
+
+/* LINK An, #disp: push An, An=SP, SP+=disp. 0x4E50-0x4E57. Word displacement. */
+static int op_link(uint16_t op)
+{
+    int an = op & 7;
+    int32_t disp = (int16_t)fetch16();
+    cpu.a[7] -= 4;
+    mem_write32(cpu.a[7], cpu.a[an]);
+    cpu.a[an] = cpu.a[7];
+    cpu.a[7] += disp;
+    return CYCLES_LINK;
+}
+
+/* UNLK An: SP=An, An=pop. 0x4E58-0x4E5F. */
+static int op_unlk(uint16_t op)
+{
+    int an = op & 7;
+    cpu.a[7] = cpu.a[an];
+    cpu.a[an] = mem_read32(cpu.a[7]);
+    cpu.a[7] += 4;
+    return CYCLES_UNLK;
+}
+
+/* 0x4xxx: LINK, UNLK, JSR, JMP, TRAP, RTE, RTS, NOP, LEA, EXT, SWAP, TST, CLR, NOT. */
 int dispatch_4xxx(uint16_t op)
 {
+    if ((op & 0xFFF8) == 0x4E50) return op_link(op);
+    if ((op & 0xFFF8) == 0x4E58) return op_unlk(op);
     if ((op & 0xFFC0) == 0x4E80) return op_jsr(op);
     if ((op & 0xFFC0) == 0x4EC0) return op_jmp(op);
     if ((op & 0xFFF0) == 0x4E40) return op_trap(op);
@@ -181,6 +245,8 @@ int dispatch_4xxx(uint16_t op)
     if (op == 0x4E75) return op_rts(op);
     if (op == 0x4E71) return op_nop(op);
     if ((op >> 8) >= 0x41 && (op >> 8) <= 0x4F && ((op >> 8) & 1)) return op_lea(op);  /* LEA */
+    if ((op & 0xFF80) == 0x4880) return op_ext(op);
+    if ((op & 0xFFF8) == 0x4840) return op_swap(op);
     if (op == 0x4AFC) return op_unimplemented(op);  /* ILLEGAL: force vector 4 */
     if ((op & 0xFF00) == 0x4A00) return op_tst(op);
     if ((op & 0xFF00) == 0x4200) return op_clr(op);

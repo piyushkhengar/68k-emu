@@ -209,6 +209,20 @@ int tst_cycles(int mode, int reg, int size)
     return 4 + ea_cycles(mode, reg, size);
 }
 
+/* DBcc: 10 not taken, 14 taken (Motorola MC68000). */
+int dbcc_cycles(int taken)
+{
+    return taken ? 14 : 10;
+}
+
+/* Scc: 4 for Dn, 8 + ea_cycles for memory (byte). */
+int scc_cycles(int ea_mode, int ea_reg)
+{
+    if (ea_mode == 0)
+        return 4;
+    return 8 + ea_cycles(ea_mode, ea_reg, 1);
+}
+
 /* CLR: Dn: 4(B), 4(W), 6(L). Memory: 8 + ea_cycles (read+write). */
 int clr_cycles(int mode, int reg, int size)
 {

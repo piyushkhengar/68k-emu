@@ -3,7 +3,7 @@
 #include "timing.h"
 
 /* Bcc condition codes: return true if condition met. 0=BRA,1=BSR,2=BHI,3=BLS,4=BCC,5=BCS,6=BNE,7=BEQ, etc. */
-static int bcc_condition_met(uint8_t cond)
+int branch_condition_met(uint8_t cond)
 {
     uint8_t negative_flag = (cpu.sr & SR_N) ? 1 : 0;
     uint8_t zero_flag = (cpu.sr & SR_Z) ? 1 : 0;
@@ -11,8 +11,8 @@ static int bcc_condition_met(uint8_t cond)
     uint8_t carry_flag = (cpu.sr & SR_C) ? 1 : 0;
 
     switch (cond) {
-        case 0x0: return 1;
-        case 0x1: return 1;
+        case 0x0: return 1;   /* T: always true */
+        case 0x1: return 0;   /* F: always false (DBcc DBF/DBRA; BSR handled separately) */
         case 0x2: return !carry_flag && !zero_flag;
         case 0x3: return carry_flag || zero_flag;
         case 0x4: return !carry_flag;
@@ -51,7 +51,7 @@ int op_bcc(uint16_t op)
         return CYCLES_BSR;
     }
     {
-        int taken = bcc_condition_met(cond);
+        int taken = branch_condition_met(cond);
         if (taken)
             cpu.pc += disp;
         return taken ? CYCLES_BCC_TAKEN : CYCLES_BCC_NOT;
