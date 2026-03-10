@@ -101,12 +101,15 @@ make test
         ├── branch.c/h      - Bcc (branch on condition) handlers
         ├── control.c/h     - NOP, RTS, RTE, TRAP, NOT handlers
         ├── immediate.c/h  - ADDI, SUBI, CMPI, ADDQ, SUBQ
-        └── logic.c/h       - AND, OR, EOR handlers
+        ├── logic.c/h       - AND, OR, EOR handlers
+        └── shift.c/h       - ASL, ASR, LSL, LSR, ROL, ROR, ROXL, ROXR
 ```
 
 ## Learning Roadmap
 
-### Phase 1: Foundation (current)
+Phases 1–4 complete. Phase 5 in progress.
+
+### Phase 1: Foundation
 - [x] CPU state (registers, SR, PC)
 - [x] Memory/bus interface
 - [x] Fetch-decode-execute loop
@@ -124,23 +127,23 @@ make test
 - [x] BSR (branch to subroutine), RTS (return from subroutine)
 
 ### Phase 2: Core Instructions
-- [ ] CMP variants (other sizes, addressing modes)
-- [ ] ADD/SUB variants (other sizes, addressing modes)
-- [ ] AND, OR, EOR, NOT
-- [ ] ASL, ASR, LSL, LSR, ROL, ROR
+- [x] CMP variants (other sizes, addressing modes)
+- [x] ADD/SUB variants (other sizes, addressing modes)
+- [x] AND, OR, EOR, NOT
+- [x] ASL, ASR, LSL, LSR, ROL, ROR, ROXL, ROXR
 
 ### Phase 3: Control Flow
 - [x] RTE (return from exception)
 - [x] TRAP, exceptions
 
-### Phase 4: Control Flow (partial)
+### Phase 4: Jumps & Utilities
 - [x] LEA (Load Effective Address)
 - [x] JMP (Jump)
 - [x] JSR (Jump to Subroutine)
 - [x] TST (Test)
 - [x] CLR (Clear)
 
-### Phase 5: Remaining ISA
+### Phase 5: Remaining ISA (current)
 - [ ] MULU, MULS, DIVU, DIVS
 - [ ] Addressing modes
 - [ ] 68K test suite (TomHarte/SingleStepTests) – pass all tests
