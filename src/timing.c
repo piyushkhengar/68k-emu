@@ -173,6 +173,21 @@ int jsr_cycles(int mode, int reg)
     }
 }
 
+/* Shift/rotate register: base 6 (B/W) or 8 (L) + 2 per count. Register count: 6+2n. */
+int shift_cycles_register(int size, int count, int is_reg_count)
+{
+    int base = (size == 4) ? 8 : 6;
+    if (is_reg_count)
+        return base + 2 * count;
+    return base + 2 * count;
+}
+
+/* Shift/rotate memory: 8 + ea_cycles (word). */
+int shift_cycles_memory(int ea_mode, int ea_reg)
+{
+    return 8 + ea_cycles(ea_mode, ea_reg, 2);
+}
+
 /* TST: base 4 + EA read. Dn/An: 4. Memory: 4 + ea_cycles. */
 int tst_cycles(int mode, int reg, int size)
 {

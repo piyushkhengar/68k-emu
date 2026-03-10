@@ -4,7 +4,7 @@ TARGET = 68k-emu
 
 SRCS = src/main.c src/core/cpu.c src/core/memory.c src/core/ea.c \
        src/isa/move.c src/isa/alu.c src/isa/branch.c src/isa/control.c \
-       src/isa/immediate.c src/isa/logic.c src/tests.c src/timing.c
+       src/isa/immediate.c src/isa/logic.c src/isa/shift.c src/tests.c src/timing.c
 OBJS = $(SRCS:.c=.o)
 
 .PHONY: all clean test

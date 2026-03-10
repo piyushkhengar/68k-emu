@@ -33,6 +33,10 @@ int addx_subx_cycles(int is_memory, int size);
 /* Exception processing cycles (stacking + vector fetch + handler prefetch). Motorola MC68000. */
 int exception_cycles(int vector_num);
 
+/* Shift/rotate: register (size 1/2/4, count, is_reg_count) and memory (ea_mode, ea_reg). */
+int shift_cycles_register(int size, int count, int is_reg_count);
+int shift_cycles_memory(int ea_mode, int ea_reg);
+
 /* LEA, JMP, JSR, TST, CLR cycle counts. */
 int lea_cycles(int mode, int reg);
 int jmp_cycles(int mode, int reg);

@@ -21,10 +21,11 @@ static int alu_size(int op)
     return (size_code == 0) ? 1 : (size_code == 1) ? 2 : 4;
 }
 
-/* Dn register: bits 11-9 encoded as (high_byte - base) >> 3. Base: ADD 0xD0/0xE0/0xF0, SUB 0x90, CMP 0xB0 */
+/* Dn register: bits 11-9 per 68K manual. Base unused (kept for decode_alu signature). */
 static int alu_dn_reg(uint16_t op, uint8_t base)
 {
-    return ((op >> 8) - base) >> 3;
+    (void)base;
+    return (op >> 9) & 7;
 }
 
 static uint32_t alu_size_mask(int size)

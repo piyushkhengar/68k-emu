@@ -6,6 +6,7 @@
 #include "control.h"
 #include "immediate.h"
 #include "logic.h"
+#include "shift.h"
 #include "memory.h"
 #include "timing.h"
 #include <setjmp.h>
@@ -227,7 +228,7 @@ static const op_handler_fn dispatch_top[16] = {
     [0xB] = dispatch_Bxxx,
     [0xC] = dispatch_Cxxx,
     [0xD] = dispatch_add,
-    [0xE] = dispatch_add,
+    [0xE] = dispatch_Exxx,
     [0xF] = dispatch_add,
 };
 
