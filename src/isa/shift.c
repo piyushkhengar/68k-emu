@@ -269,8 +269,8 @@ static int op_roxr_reg(uint16_t op, int count, int size, uint32_t mask)
 /* Memory shift: word only, count=1. EA in bits 5-0. */
 static int op_shift_memory(uint16_t op)
 {
-    int ea_mode = (op >> 3) & 7;
-    int ea_reg = op & 7;
+    int ea_mode = ea_mode_from_op(op);
+    int ea_reg = ea_reg_from_op(op);
 
     /* Reject Dn (0), An (1), #imm (7,4), d(PC) (7,2), (d8,PC,Xn) (7,3) */
     if (ea_mode == 0 || ea_mode == 1)

@@ -45,29 +45,11 @@ static int op_rte(uint16_t op)
     return CYCLES_RTE;
 }
 
-/* Size from op bits 7-6: 00=1, 01=2, 10=4. Used by TST, CLR, NOT. */
-static int decode_size_from_op(uint16_t op)
-{
-    int c = (op >> 6) & 3;
-    return (c == 0) ? 1 : (c == 1) ? 2 : 4;
-}
-
-/* Decoded fields for NOT. An not allowed. */
-typedef struct {
-    int ea_mode;
-    int ea_reg;
-    int size;
-    uint32_t mask;
-} not_decoded_t;
-
 /* Returns 0 if rejected, 1 if OK to proceed. */
-static int decode_not(uint16_t op, not_decoded_t *d)
+static int decode_not(uint16_t op, ea_decoded_t *d)
 {
-    d->ea_mode = (op >> 3) & 7;
-    d->ea_reg = op & 7;
-    d->size = decode_size_from_op(op);
-    d->mask = (d->size == 1) ? 0xFF : (d->size == 2) ? 0xFFFF : 0xFFFFFFFF;
-    if (d->ea_mode == 1) {
+    ea_decode_from_op(op, d);
+    if (ea_is_an(d->ea_mode)) {
         op_unimplemented(op);
         return 0;
     }
@@ -77,7 +59,7 @@ static int decode_not(uint16_t op, not_decoded_t *d)
 /* NOT <ea>: one's complement. 0x46xx. An not allowed. */
 static int op_not(uint16_t op)
 {
-    not_decoded_t d;
+    ea_decoded_t d;
     if (!decode_not(op, &d))
         return 0;
 
@@ -92,9 +74,9 @@ static int op_not(uint16_t op)
  * On invalid EA (Dn, An, #imm), calls op_unimplemented (does not return). */
 static void decode_ea_addr_jmp_jsr(uint16_t op, uint32_t *addr_out, int *ea_mode, int *ea_reg)
 {
-    *ea_mode = (op >> 3) & 7;
-    *ea_reg = op & 7;
-    if (*ea_mode == 0 || *ea_mode == 1 || (*ea_mode == 7 && *ea_reg == 4))
+    *ea_mode = ea_mode_from_op(op);
+    *ea_reg = ea_reg_from_op(op);
+    if (ea_invalid_for_jmp_jsr(*ea_mode, *ea_reg))
         op_unimplemented(op);
     if (!ea_address_no_fetch(*ea_mode, *ea_reg, addr_out))
         op_unimplemented(op);
@@ -104,12 +86,10 @@ static void decode_ea_addr_jmp_jsr(uint16_t op, uint32_t *addr_out, int *ea_mode
 static int op_lea(uint16_t op)
 {
     int an_reg = (op >> 9) & 7;
-    int ea_mode = (op >> 3) & 7;
-    int ea_reg = op & 7;
+    int ea_mode = ea_mode_from_op(op);
+    int ea_reg = ea_reg_from_op(op);
 
-    if (ea_mode == 0 || ea_mode == 1 || ea_mode == 3 || ea_mode == 4)
-        return op_unimplemented(op);
-    if (ea_mode == 7 && ea_reg == 4)
+    if (ea_invalid_for_lea(ea_mode, ea_reg))
         return op_unimplemented(op);
 
     uint32_t addr;
@@ -145,9 +125,9 @@ static int op_jsr(uint16_t op)
 /* TST <ea>. 0x4Axx. Compare with zero, set N,Z, clear V,C. */
 static int op_tst(uint16_t op)
 {
-    int ea_mode = (op >> 3) & 7;
-    int ea_reg = op & 7;
-    int size = decode_size_from_op(op);
+    int ea_mode = ea_mode_from_op(op);
+    int ea_reg = ea_reg_from_op(op);
+    int size = decode_size_bits_6_7(op);
 
     uint32_t val = ea_fetch_value(ea_mode, ea_reg, size);
     set_nz_from_val(val, size);
@@ -158,11 +138,11 @@ static int op_tst(uint16_t op)
 /* CLR <ea>. 0x42xx. Store 0, set Z, clear N,V,C. An+byte illegal. */
 static int op_clr(uint16_t op)
 {
-    int ea_mode = (op >> 3) & 7;
-    int ea_reg = op & 7;
-    int size = decode_size_from_op(op);
+    int ea_mode = ea_mode_from_op(op);
+    int ea_reg = ea_reg_from_op(op);
+    int size = decode_size_bits_6_7(op);
 
-    if (ea_mode == 1 && size == 1)
+    if (ea_reject_byte_an(ea_mode, size))
         return op_unimplemented(op);
 
     ea_store_value(ea_mode, ea_reg, size, 0);

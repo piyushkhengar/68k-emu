@@ -11,10 +11,10 @@
 
 static int op_move_generic(uint16_t op, int size)
 {
-    int src_mode = (op >> 3) & 7;
-    int src_reg = op & 7;
-    int dst_mode = (op >> 9) & 7;
-    int dst_reg = (op >> 6) & 7;
+    int src_mode = ea_mode_from_op(op);
+    int src_reg = ea_reg_from_op(op);
+    int dst_mode = ea_mode_from_op_dest(op);
+    int dst_reg = ea_reg_from_op_dest(op);
 
     uint32_t val = ea_fetch_value(src_mode, src_reg, size);
     ea_store_value(dst_mode, dst_reg, size, val);
@@ -25,7 +25,7 @@ static int op_move_generic(uint16_t op, int size)
 /* MOVE.L #imm, d(An): dest displacement comes before source immediate in extension words. */
 static int op_move_l_imm_disp_an(uint16_t op)
 {
-    int addr_reg = (op >> 6) & 7;
+    int addr_reg = ea_reg_from_op_dest(op);
     int32_t disp = (int16_t)fetch16();
     uint32_t addr = cpu.a[addr_reg] + disp;
     uint32_t val = fetch32();

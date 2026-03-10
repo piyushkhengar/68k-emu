@@ -15,22 +15,11 @@
  * Distinguish from ADD/SUB: (op & 0x130) == 0x100 (bit 8=1, bits 5-4=00).
  */
 
-static int alu_size(int op)
-{
-    int size_code = (op >> 6) & 3;
-    return (size_code == 0) ? 1 : (size_code == 1) ? 2 : 4;
-}
-
 /* Dn register: bits 11-9 per 68K manual. Base unused (kept for decode_alu signature). */
 static int alu_dn_reg(uint16_t op, uint8_t base)
 {
     (void)base;
     return (op >> 9) & 7;
-}
-
-static uint32_t alu_size_mask(int size)
-{
-    return (size == 1) ? 0xFF : (size == 2) ? 0xFFFF : 0xFFFFFFFF;
 }
 
 static void alu_store_dn(int reg, uint32_t result, int size)
@@ -51,7 +40,7 @@ static int alu_is_an_word_32bit(int ea_mode, int size)
 /* 68000: byte ops cannot use An (Address Register Direct) - illegal instruction. Returns 1 if invalid. */
 static int alu_reject_byte_an(uint16_t op, int ea_mode, int size)
 {
-    if (ea_mode == 1 && size == 1) {
+    if (ea_reject_byte_an(ea_mode, size)) {
         op_unimplemented(op);
         return 1;
     }
@@ -72,10 +61,7 @@ typedef struct {
 static int decode_alu(uint16_t op, uint8_t base, alu_decoded_t *d)
 {
     d->dn_reg = alu_dn_reg(op, base);
-    d->ea_mode = (op >> 3) & 7;
-    d->ea_reg = op & 7;
-    d->size = alu_size(op);
-    d->mask = alu_size_mask(d->size);
+    ea_decode_from_op(op, (ea_decoded_t *)&d->ea_mode);
     d->dir = (op >> 9) & 1;  /* 0 = <ea> to Dn, 1 = Dn to <ea> */
     return alu_reject_byte_an(op, d->ea_mode, d->size) ? 0 : 1;
 }
@@ -171,8 +157,8 @@ typedef struct {
 static void decode_adda(uint16_t op, adda_decoded_t *d)
 {
     d->an_reg = (op >> 9) & 7;
-    d->ea_mode = (op >> 3) & 7;
-    d->ea_reg = op & 7;
+    d->ea_mode = ea_mode_from_op(op);
+    d->ea_reg = ea_reg_from_op(op);
     d->size = ((op >> 6) & 7) == 7 ? 4 : 2;  /* 111=long, 011=word */
 }
 
@@ -237,9 +223,9 @@ static void decode_addx(uint16_t op, addx_decoded_t *d)
 {
     d->dest_reg = (op >> 9) & 7;
     d->src_reg = (op >> 0) & 7;
-    d->size = alu_size(op);
+    d->size = decode_size_bits_6_7(op);
     d->is_memory_mode = (op >> 3) & 1;
-    d->mask = alu_size_mask(d->size);
+    d->mask = size_mask(d->size);
 }
 
 /* ADDX/SUBX: dest = dest op src op X. Z: cleared if nonzero. */

@@ -21,49 +21,27 @@ static uint32_t fetch_imm(int size)
     return fetch32();
 }
 
-static int imm_alu_size(uint16_t op)
-{
-    int code = (op >> 6) & 3;
-    return (code == 0) ? 1 : (code == 1) ? 2 : 4;
-}
-
-static uint32_t imm_size_mask(int size)
-{
-    return (size == 1) ? 0xFF : (size == 2) ? 0xFFFF : 0xFFFFFFFF;
-}
-
 /* ADDI/SUBI/CMPI: An not allowed as destination. */
 static int imm_reject_an(uint16_t op, int ea_mode)
 {
-    if (ea_mode == 1) {
+    if (ea_is_an(ea_mode)) {
         op_unimplemented(op);
         return 1;
     }
     return 0;
 }
 
-/* Decoded fields for ADDI/SUBI/CMPI. */
-typedef struct {
-    int ea_mode;
-    int ea_reg;
-    int size;
-    uint32_t mask;
-} imm_decoded_t;
-
 /* Returns 0 if rejected, 1 if OK to proceed. */
-static int decode_imm(uint16_t op, imm_decoded_t *d)
+static int decode_imm(uint16_t op, ea_decoded_t *d)
 {
-    d->ea_mode = (op >> 3) & 7;
-    d->ea_reg = op & 7;
-    d->size = imm_alu_size(op);
-    d->mask = imm_size_mask(d->size);
+    ea_decode_from_op(op, d);
     return imm_reject_an(op, d->ea_mode) ? 0 : 1;
 }
 
 /* ADDI #imm, <ea>: dest = dest + imm. 0x06xx */
 static int op_addi(uint16_t op)
 {
-    imm_decoded_t d;
+    ea_decoded_t d;
     if (!decode_imm(op, &d))
         return 0;
 
@@ -79,7 +57,7 @@ static int op_addi(uint16_t op)
 /* SUBI #imm, <ea>: dest = dest - imm. 0x04xx */
 static int op_subi(uint16_t op)
 {
-    imm_decoded_t d;
+    ea_decoded_t d;
     if (!decode_imm(op, &d))
         return 0;
 
@@ -95,7 +73,7 @@ static int op_subi(uint16_t op)
 /* CMPI #imm, <ea>: compare, no store. 0x0Cxx. X not affected. */
 static int op_cmpi(uint16_t op)
 {
-    imm_decoded_t d;
+    ea_decoded_t d;
     if (!decode_imm(op, &d))
         return 0;
 
@@ -110,7 +88,7 @@ static int op_cmpi(uint16_t op)
 /* ORI #imm, <ea>: dest = dest | imm. 0x00xx. An not allowed. */
 static int op_ori(uint16_t op)
 {
-    imm_decoded_t d;
+    ea_decoded_t d;
     if (!decode_imm(op, &d))
         return 0;
 
@@ -127,7 +105,7 @@ static int op_ori(uint16_t op)
 /* ANDI #imm, <ea>: dest = dest & imm. 0x02xx. An not allowed. */
 static int op_andi(uint16_t op)
 {
-    imm_decoded_t d;
+    ea_decoded_t d;
     if (!decode_imm(op, &d))
         return 0;
 
@@ -144,7 +122,7 @@ static int op_andi(uint16_t op)
 /* EORI #imm, <ea>: dest = dest ^ imm. 0x0Axx. An not allowed. */
 static int op_eori(uint16_t op)
 {
-    imm_decoded_t d;
+    ea_decoded_t d;
     if (!decode_imm(op, &d))
         return 0;
 
@@ -240,10 +218,7 @@ static int decode_addq(uint16_t op, addq_decoded_t *d)
     d->data = (op >> 9) & 7;
     if (d->data == 0)
         d->data = 8;
-    d->ea_mode = (op >> 3) & 7;
-    d->ea_reg = op & 7;
-    d->size = imm_alu_size(op);
-    d->mask = imm_size_mask(d->size);
+    ea_decode_from_op(op, (ea_decoded_t *)&d->ea_mode);
     /* An + byte: illegal */
     if (d->ea_mode == 1 && d->size == 1) {
         op_unimplemented(op);
@@ -333,11 +308,11 @@ static int op_dbcc(uint16_t op)
 /* Scc: 0x5Cxx. Set byte to 0xFF if condition true, else 0x00. An (mode 1) not allowed. */
 static int op_scc(uint16_t op)
 {
-    int ea_mode = (op >> 3) & 7;
-    int ea_reg = op & 7;
+    int ea_mode = ea_mode_from_op(op);
+    int ea_reg = ea_reg_from_op(op);
     uint8_t cond = (op >> 8) & 0x0F;
 
-    if (ea_mode == 1) {
+    if (ea_is_an(ea_mode)) {
         op_unimplemented(op);
         return 0;
     }

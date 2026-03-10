@@ -11,21 +11,10 @@
 #include "logic.h"
 #include "timing.h"
 
-static int logic_size(int op)
-{
-    int code = (op >> 6) & 3;
-    return (code == 0) ? 1 : (code == 1) ? 2 : 4;
-}
-
-static uint32_t logic_size_mask(int size)
-{
-    return (size == 1) ? 0xFF : (size == 2) ? 0xFFFF : 0xFFFFFFFF;
-}
-
 /* Byte ops cannot use An (mode 1). */
 static int logic_reject_byte_an(uint16_t op, int ea_mode, int size)
 {
-    if (ea_mode == 1 && size == 1) {
+    if (ea_reject_byte_an(ea_mode, size)) {
         op_unimplemented(op);
         return 1;
     }
@@ -55,10 +44,7 @@ typedef struct {
 static int decode_logic(uint16_t op, logic_decoded_t *d)
 {
     d->dn_reg = (op >> 9) & 7;
-    d->ea_mode = (op >> 3) & 7;
-    d->ea_reg = op & 7;
-    d->size = logic_size(op);
-    d->mask = logic_size_mask(d->size);
+    ea_decode_from_op(op, (ea_decoded_t *)&d->ea_mode);
     return logic_reject_byte_an(op, d->ea_mode, d->size) ? 0 : 1;
 }
 
@@ -108,7 +94,7 @@ static int op_or_generic(uint16_t op)
 /* MUL/DIV: An (mode 1) not allowed as source. */
 static int mul_div_reject_an(uint16_t op, int ea_mode)
 {
-    if (ea_mode == 1) {
+    if (ea_is_an(ea_mode)) {
         op_unimplemented(op);
         return 1;
     }
@@ -126,8 +112,8 @@ typedef struct {
 static int decode_mul_div(uint16_t op, mul_div_decoded_t *d)
 {
     d->dn_reg = (op >> 9) & 7;
-    d->ea_mode = (op >> 3) & 7;
-    d->ea_reg = op & 7;
+    d->ea_mode = ea_mode_from_op(op);
+    d->ea_reg = ea_reg_from_op(op);
     return mul_div_reject_an(op, d->ea_mode) ? 0 : 1;
 }
 
