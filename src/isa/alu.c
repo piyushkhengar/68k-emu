@@ -68,7 +68,7 @@ typedef struct {
 } alu_decoded_t;
 
 /* Returns 0 if rejected, 1 if OK to proceed. */
-static int alu_decode(uint16_t op, uint8_t base, alu_decoded_t *d)
+static int decode_alu(uint16_t op, uint8_t base, alu_decoded_t *d)
 {
     d->dn_reg = alu_dn_reg(op, base);
     d->ea_mode = (op >> 3) & 7;
@@ -82,7 +82,7 @@ static int alu_decode(uint16_t op, uint8_t base, alu_decoded_t *d)
 static int op_add_sub_generic(uint16_t op, uint8_t base)
 {
     alu_decoded_t d;
-    if (!alu_decode(op, base, &d))
+    if (!decode_alu(op, base, &d))
         return 0;  /* unreachable - longjmps */
 
     int is_add = (base == 0xD0);
@@ -127,7 +127,7 @@ static int op_add_sub_generic(uint16_t op, uint8_t base)
 static int op_cmp_generic(uint16_t op)
 {
     alu_decoded_t d;
-    if (!alu_decode(op, 0xB0, &d))
+    if (!decode_alu(op, 0xB0, &d))
         return 0;  /* unreachable - longjmps */
 
     uint32_t dest_val = cpu.d[d.dn_reg] & d.mask;
@@ -167,7 +167,7 @@ typedef struct {
     int size;
 } adda_decoded_t;
 
-static void adda_decode(uint16_t op, adda_decoded_t *d)
+static void decode_adda(uint16_t op, adda_decoded_t *d)
 {
     d->an_reg = (op >> 9) & 7;
     d->ea_mode = (op >> 3) & 7;
@@ -178,7 +178,7 @@ static void adda_decode(uint16_t op, adda_decoded_t *d)
 static int op_adda(uint16_t op)
 {
     adda_decoded_t d;
-    adda_decode(op, &d);
+    decode_adda(op, &d);
 
     uint32_t src = ea_fetch_value(d.ea_mode, d.ea_reg, d.size);
     uint32_t dest = cpu.a[d.an_reg];
@@ -194,7 +194,7 @@ static int op_adda(uint16_t op)
 static int op_suba(uint16_t op)
 {
     adda_decoded_t d;
-    adda_decode(op, &d);
+    decode_adda(op, &d);
 
     uint32_t src = ea_fetch_value(d.ea_mode, d.ea_reg, d.size);
     uint32_t dest = cpu.a[d.an_reg];
@@ -210,7 +210,7 @@ static int op_suba(uint16_t op)
 static int op_cmpa(uint16_t op)
 {
     adda_decoded_t d;
-    adda_decode(op, &d);
+    decode_adda(op, &d);
 
     uint32_t dest = cpu.a[d.an_reg];
     uint32_t src = ea_fetch_value(d.ea_mode, d.ea_reg, d.size);
@@ -232,7 +232,7 @@ typedef struct {
     uint32_t mask;
 } addx_decoded_t;
 
-static void addx_decode(uint16_t op, addx_decoded_t *d)
+static void decode_addx(uint16_t op, addx_decoded_t *d)
 {
     d->dest_reg = (op >> 9) & 7;
     d->src_reg = (op >> 0) & 7;
@@ -245,7 +245,7 @@ static void addx_decode(uint16_t op, addx_decoded_t *d)
 static int op_addx_subx(uint16_t op, int is_add)
 {
     addx_decoded_t d;
-    addx_decode(op, &d);
+    decode_addx(op, &d);
     uint32_t xbit = (cpu.sr & SR_X) ? 1 : 0;
 
     if (d.is_memory_mode == 0) {
@@ -282,7 +282,7 @@ typedef struct {
     int32_t imm;
 } moveq_decoded_t;
 
-static void moveq_decode(uint16_t op, moveq_decoded_t *d)
+static void decode_moveq(uint16_t op, moveq_decoded_t *d)
 {
     d->dest_reg = (op >> 9) & 7;
     d->imm = (int8_t)(op & 0xFF);
@@ -292,7 +292,7 @@ static void moveq_decode(uint16_t op, moveq_decoded_t *d)
 int op_moveq(uint16_t op)
 {
     moveq_decoded_t d;
-    moveq_decode(op, &d);
+    decode_moveq(op, &d);
     uint32_t result = (uint32_t)d.imm;
     cpu.d[d.dest_reg] = result;
     set_nz_from_val(result, 4);

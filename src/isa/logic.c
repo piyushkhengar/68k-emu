@@ -52,7 +52,7 @@ typedef struct {
 } logic_decoded_t;
 
 /* Returns 0 if rejected, 1 if OK to proceed. */
-static int logic_decode(uint16_t op, logic_decoded_t *d)
+static int decode_logic(uint16_t op, logic_decoded_t *d)
 {
     d->dn_reg = (op >> 9) & 7;
     d->ea_mode = (op >> 3) & 7;
@@ -71,7 +71,7 @@ static uint32_t logic_or(uint32_t a, uint32_t b) { return a | b; }
 static int op_logic_binop(uint16_t op, logic_binop_fn fn)
 {
     logic_decoded_t d;
-    if (!logic_decode(op, &d))
+    if (!decode_logic(op, &d))
         return 0;
 
     int dir = (op >> 8) & 1;  /* bit 8: 0=Dn to EA, 1=EA to Dn */
@@ -109,7 +109,7 @@ static int op_or_generic(uint16_t op)
 int op_eor(uint16_t op)
 {
     logic_decoded_t d;
-    if (!logic_decode(op, &d))
+    if (!decode_logic(op, &d))
         return 0;
 
     uint32_t ea_val = ea_fetch_value(d.ea_mode, d.ea_reg, d.size) & d.mask;

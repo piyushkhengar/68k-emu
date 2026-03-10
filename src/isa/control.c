@@ -46,7 +46,7 @@ static int op_rte(uint16_t op)
 }
 
 /* Size from op bits 7-6: 00=1, 01=2, 10=4. Used by TST, CLR, NOT. */
-static int size_from_op(uint16_t op)
+static int decode_size_from_op(uint16_t op)
 {
     int c = (op >> 6) & 3;
     return (c == 0) ? 1 : (c == 1) ? 2 : 4;
@@ -61,11 +61,11 @@ typedef struct {
 } not_decoded_t;
 
 /* Returns 0 if rejected, 1 if OK to proceed. */
-static int not_decode(uint16_t op, not_decoded_t *d)
+static int decode_not(uint16_t op, not_decoded_t *d)
 {
     d->ea_mode = (op >> 3) & 7;
     d->ea_reg = op & 7;
-    d->size = size_from_op(op);
+    d->size = decode_size_from_op(op);
     d->mask = (d->size == 1) ? 0xFF : (d->size == 2) ? 0xFFFF : 0xFFFFFFFF;
     if (d->ea_mode == 1) {
         op_unimplemented(op);
@@ -78,7 +78,7 @@ static int not_decode(uint16_t op, not_decoded_t *d)
 static int op_not(uint16_t op)
 {
     not_decoded_t d;
-    if (!not_decode(op, &d))
+    if (!decode_not(op, &d))
         return 0;
 
     uint32_t val = ea_fetch_value(d.ea_mode, d.ea_reg, d.size) & d.mask;
@@ -147,7 +147,7 @@ static int op_tst(uint16_t op)
 {
     int ea_mode = (op >> 3) & 7;
     int ea_reg = op & 7;
-    int size = size_from_op(op);
+    int size = decode_size_from_op(op);
 
     uint32_t val = ea_fetch_value(ea_mode, ea_reg, size);
     set_nz_from_val(val, size);
@@ -160,7 +160,7 @@ static int op_clr(uint16_t op)
 {
     int ea_mode = (op >> 3) & 7;
     int ea_reg = op & 7;
-    int size = size_from_op(op);
+    int size = decode_size_from_op(op);
 
     if (ea_mode == 1 && size == 1)
         return op_unimplemented(op);

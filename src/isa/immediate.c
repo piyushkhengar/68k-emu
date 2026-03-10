@@ -50,7 +50,7 @@ typedef struct {
 } imm_decoded_t;
 
 /* Returns 0 if rejected, 1 if OK to proceed. */
-static int imm_decode(uint16_t op, imm_decoded_t *d)
+static int decode_imm(uint16_t op, imm_decoded_t *d)
 {
     d->ea_mode = (op >> 3) & 7;
     d->ea_reg = op & 7;
@@ -63,7 +63,7 @@ static int imm_decode(uint16_t op, imm_decoded_t *d)
 static int op_addi(uint16_t op)
 {
     imm_decoded_t d;
-    if (!imm_decode(op, &d))
+    if (!decode_imm(op, &d))
         return 0;
 
     uint32_t imm = fetch_imm(d.size);
@@ -79,7 +79,7 @@ static int op_addi(uint16_t op)
 static int op_subi(uint16_t op)
 {
     imm_decoded_t d;
-    if (!imm_decode(op, &d))
+    if (!decode_imm(op, &d))
         return 0;
 
     uint32_t imm = fetch_imm(d.size);
@@ -95,7 +95,7 @@ static int op_subi(uint16_t op)
 static int op_cmpi(uint16_t op)
 {
     imm_decoded_t d;
-    if (!imm_decode(op, &d))
+    if (!decode_imm(op, &d))
         return 0;
 
     uint32_t imm = fetch_imm(d.size);
@@ -116,7 +116,7 @@ typedef struct {
 } addq_decoded_t;
 
 /* Returns 0 if rejected, 1 if OK to proceed. */
-static int addq_decode(uint16_t op, addq_decoded_t *d)
+static int decode_addq(uint16_t op, addq_decoded_t *d)
 {
     d->data = (op >> 9) & 7;
     if (d->data == 0)
@@ -137,7 +137,7 @@ static int addq_decode(uint16_t op, addq_decoded_t *d)
 static int op_addq_subq(uint16_t op, int is_sub)
 {
     addq_decoded_t d;
-    if (!addq_decode(op, &d))
+    if (!decode_addq(op, &d))
         return 0;
 
     if (d.ea_mode == 1) {
