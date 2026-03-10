@@ -114,6 +114,82 @@ int addx_subx_cycles(int is_memory, int size)
     return (size == 1) ? 18 : 30;
 }
 
+/* LEA: (An)=4, d(An)=8, (d8,An,Xn)=12, abs.w=8, abs.l=12, d(PC)=8, (d8,PC,Xn)=12 */
+int lea_cycles(int mode, int reg)
+{
+    switch (mode) {
+    case 2: return 4;
+    case 5: return 8;
+    case 6: return 12;
+    case 7:
+        switch (reg) {
+        case 0: return 8;
+        case 1: return 12;
+        case 2: return 8;
+        case 3: return 12;
+        default: return 8;
+        }
+    default: return 4;
+    }
+}
+
+/* JMP: (An)=8, d(An)=10, (d8,An,Xn)=14, abs.w=10, abs.l=12, d(PC)=10, (d8,PC,Xn)=14, (An)+/-(An)=10 */
+int jmp_cycles(int mode, int reg)
+{
+    switch (mode) {
+    case 2: return 8;
+    case 3: case 4: return 10;
+    case 5: return 10;
+    case 6: return 14;
+    case 7:
+        switch (reg) {
+        case 0: return 10;
+        case 1: return 12;
+        case 2: return 10;
+        case 3: return 14;
+        default: return 10;
+        }
+    default: return 8;
+    }
+}
+
+/* JSR: (An)=16, d(An)=18, (d8,An,Xn)=22, abs.w=18, abs.l=20, d(PC)=18, (d8,PC,Xn)=22, (An)+/-(An)=18 */
+int jsr_cycles(int mode, int reg)
+{
+    switch (mode) {
+    case 2: return 16;
+    case 3: case 4: return 18;
+    case 5: return 18;
+    case 6: return 22;
+    case 7:
+        switch (reg) {
+        case 0: return 18;
+        case 1: return 20;
+        case 2: return 18;
+        case 3: return 22;
+        default: return 18;
+        }
+    default: return 16;
+    }
+}
+
+/* TST: base 4 + EA read. Dn/An: 4. Memory: 4 + ea_cycles. */
+int tst_cycles(int mode, int reg, int size)
+{
+    if (mode <= 1)
+        return 4;
+    return 4 + ea_cycles(mode, reg, size);
+}
+
+/* CLR: Dn: 4(B), 4(W), 6(L). Memory: 8 + ea_cycles (read+write). */
+int clr_cycles(int mode, int reg, int size)
+{
+    if (mode == 0) {
+        return (size == 4) ? 6 : 4;
+    }
+    return 8 + ea_cycles(mode, reg, size);
+}
+
 /* Exception processing: stacking + vector fetch + first 2 words of handler. Motorola MC68000. */
 int exception_cycles(int vector_num)
 {

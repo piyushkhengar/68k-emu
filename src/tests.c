@@ -807,6 +807,63 @@ static const uint8_t trap_rte_test[] = {
     0x4E, 0x73,               /* RTE */
 };
 
+/* LEA test: MOVE.L #0x1000, A0; LEA (A0), A1; A1 = 0x1000 */
+static const uint8_t lea_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x22, 0x3C, 0x00, 0x00, 0x10, 0x00,   /* 0x10: MOVE.L #0x1000, A0 (0x223C = MOVE.L #imm, A0) */
+    0x43, 0xD0,               /* 0x16: LEA (A0), A1 */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* JMP test: MOVE.L #0x20, A0; JMP (A0) jumps to 0x20 */
+static const uint8_t jmp_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x22, 0x3C, 0x00, 0x00, 0x00, 0x20,   /* 0x10: MOVE.L #0x20, A0 */
+    0x4E, 0xD0,               /* 0x16: JMP (A0) */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x74, 0x2A,               /* 0x20: MOVEQ #42, D2 (target) */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* JSR/RTS test: JSR (A0) calls subroutine at 0x20, RTS returns */
+static const uint8_t jsr_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x22, 0x3C, 0x00, 0x00, 0x00, 0x20,   /* 0x10: MOVE.L #0x20, A0 */
+    0x4E, 0x90,               /* 0x16: JSR (A0) */
+    0x4E, 0x71, 0x60, 0xFC,   /* 0x18: NOP, BRA (loop after return) */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x74, 0x2A,               /* 0x20: MOVEQ #42, D2 (subroutine) */
+    0x4E, 0x75,               /* 0x22: RTS */
+};
+
+/* TST test: TST.L D0 with D0=0 sets Z; TST.L D0 with D0 negative sets N */
+static const uint8_t tst_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x70, 0x00,               /* 0x10: MOVEQ #0, D0 */
+    0x4A, 0x80,               /* 0x12: TST.L D0 (Z set) */
+    0x67, 0x04,               /* 0x14: BEQ.S +4 (skip if Z) */
+    0x74, 0x00, 0x60, 0xFC,   /* fail path */
+    0x70, 0xFF,               /* 0x1A: MOVEQ #-1, D0 */
+    0x4A, 0x80,               /* 0x1C: TST.L D0 (N set) */
+    0x6B, 0x04,               /* 0x1E: BMI.S +4 (skip if N) */
+    0x74, 0x00, 0x60, 0xFC,   /* fail path */
+    0x74, 0x01,               /* 0x24: MOVEQ #1, D2 (pass) */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* CLR test: CLR.L D0; D0=0, Z=1 */
+static const uint8_t clr_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x70, 0x2A,               /* 0x10: MOVEQ #42, D0 */
+    0x42, 0x80,               /* 0x12: CLR.L D0 */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
 /* RTE privilege violation: handler at 0x30, code at 0x34. RTE at 0x46, second RTE at 0x48 -> priv viol. */
 static const uint8_t rte_priv_test[] = {
     0x00, 0x00, 0x00, 0x34,   /* Reset: PC = 0x34 */
@@ -931,6 +988,11 @@ static int check_test_result(size_t idx)
     case 69: return cpu.d[2] == 4;                                      /* illegal */
     case 70: return cpu.d[0] == 0xFFFFFFAB;                             /* trap_rte (MOVEQ #0xAB sign-extends) */
     case 71: return cpu.d[2] == 8;                                       /* rte_priv */
+    case 72: return cpu.a[1] == 0x1000;                                 /* lea (A1=0x1000) */
+    case 73: return cpu.d[2] == 0x2A;                                    /* jmp */
+    case 74: return cpu.d[2] == 0x2A;                                    /* jsr */
+    case 75: return cpu.d[2] == 1;                                        /* tst */
+    case 76: return cpu.d[0] == 0 && (cpu.sr & SR_Z);                    /* clr */
     default: return 0;
     }
 }
@@ -1011,6 +1073,11 @@ static const builtin_test_t builtin_tests[] = {
     { "illegal", illegal_test, sizeof(illegal_test), "Running illegal instruction test", 0 },
     { "trap_rte", trap_rte_test, sizeof(trap_rte_test), "Running TRAP #0 / RTE test", 200 },
     { "rte_priv", rte_priv_test, sizeof(rte_priv_test), "Running RTE privilege violation test", 150 },
+    { "lea", lea_test, sizeof(lea_test), "Running LEA test", 0 },
+    { "jmp", jmp_test, sizeof(jmp_test), "Running JMP test", 0 },
+    { "jsr", jsr_test, sizeof(jsr_test), "Running JSR test", 0 },
+    { "tst", tst_test, sizeof(tst_test), "Running TST test", 0 },
+    { "clr", clr_test, sizeof(clr_test), "Running CLR test", 0 },
 };
 
 #define NUM_BUILTIN_TESTS (sizeof(builtin_tests) / sizeof(builtin_tests[0]))

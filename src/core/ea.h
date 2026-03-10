@@ -19,4 +19,9 @@ uint32_t ea_fetch_value(int mode, int reg, int size);
 /* Store value to effective address. Value is truncated to size. */
 void ea_store_value(int mode, int reg, int size, uint32_t value);
 
+/* Compute effective address to 32-bit address (no fetch). Returns 1 if valid, 0 if invalid.
+ * Used by LEA, JMP, JSR, PEA. Invalid: Dn (0), An (1), #imm (7,4).
+ * For (An)+ and -(An), uses size 4 (long) for step. */
+int ea_address_no_fetch(int mode, int reg, uint32_t *addr_out);
+
 #endif /* EA_H */

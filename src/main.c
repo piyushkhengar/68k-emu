@@ -121,7 +121,14 @@ int main(int argc, char *argv[])
         printf("Running at %.2f MHz\n", speed_mhz);
 
     int steps = 0;
-    int max_steps = test && test->max_steps ? test->max_steps : 100;
+    int max_steps;
+    if (test) {
+        max_steps = test->max_steps ? test->max_steps : 100;
+    } else if (rom_or_test) {
+        max_steps = 10000000;  /* ROM file: allow long execution */
+    } else {
+        max_steps = 100;       /* nop_loop default */
+    }
     uint64_t cycles_this_frame = 0;
     double frame_start = get_monotonic_sec();
 

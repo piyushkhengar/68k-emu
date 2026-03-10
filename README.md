@@ -10,7 +10,7 @@ make
 
 ## Testing
 
-Run all regression tests (verifies nop, move, move_mem, move_w, move_b, move_w_mem, move_b_mem, move_imm, move_imm_mem, move_anp, move_disp, moveq, add, sub, cmp, bcc, bcc_all, bsr_rts):
+Run all regression tests (verifies nop, move, move_mem, move_w, move_b, move_w_mem, move_b_mem, move_imm, move_imm_mem, move_anp, move_disp, moveq, add, sub, cmp, bcc, bcc_all, bsr_rts, lea, jmp, jsr, tst, clr):
 
 ```bash
 make test
@@ -69,6 +69,13 @@ make test
 # Run BSR/RTS test (subroutine call and return)
 ./68k-emu bsr_rts
 
+# Run LEA, JMP, JSR, TST, CLR tests
+./68k-emu lea
+./68k-emu jmp
+./68k-emu jsr
+./68k-emu tst
+./68k-emu clr
+
 # Run a ROM file (e.g. 68K test suite binary)
 ./68k-emu path/to/rom.bin
 ```
@@ -123,15 +130,22 @@ make test
 - [ ] ASL, ASR, LSL, LSR, ROL, ROR
 
 ### Phase 3: Control Flow
-- [ ] RTE (return from exception)
-- [ ] TRAP, exceptions
+- [x] RTE (return from exception)
+- [x] TRAP, exceptions
 
-### Phase 4: Remaining ISA
+### Phase 4: Control Flow (partial)
+- [x] LEA (Load Effective Address)
+- [x] JMP (Jump)
+- [x] JSR (Jump to Subroutine)
+- [x] TST (Test)
+- [x] CLR (Clear)
+
+### Phase 5: Remaining ISA
 - [ ] MULU, MULS, DIVU, DIVS
 - [ ] Addressing modes
 - [ ] 68K test suite (TomHarte/SingleStepTests) – pass all tests
 
-### Phase 5: Amiga (future)
+### Phase 6: Amiga (future)
 - [ ] Add custom chips (Paula, Denise, Agnus)
 - [ ] Disk support (ADF)
 - [ ] Display, audio

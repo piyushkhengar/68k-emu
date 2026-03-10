@@ -83,6 +83,16 @@ static int ea_resolve_addr(int mode, int reg, int size, uint32_t *addr)
     }
 }
 
+/* Public: compute EA to address only (for LEA, JMP, JSR, PEA). Uses size 4 for (An)+/-(An). */
+int ea_address_no_fetch(int mode, int reg, uint32_t *addr_out)
+{
+    if (mode == 0 || mode == 1)
+        return 0;
+    if (mode == 7 && reg == 4)
+        return 0;
+    return ea_resolve_addr(mode, reg, 4, addr_out);
+}
+
 uint32_t ea_fetch_value(int mode, int reg, int size)
 {
     uint32_t addr;
