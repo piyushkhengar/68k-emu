@@ -181,6 +181,7 @@ int dispatch_4xxx(uint16_t op)
     if (op == 0x4E75) return op_rts(op);
     if (op == 0x4E71) return op_nop(op);
     if ((op >> 8) >= 0x41 && (op >> 8) <= 0x4F && ((op >> 8) & 1)) return op_lea(op);  /* LEA */
+    if (op == 0x4AFC) return op_unimplemented(op);  /* ILLEGAL: force vector 4 */
     if ((op & 0xFF00) == 0x4A00) return op_tst(op);
     if ((op & 0xFF00) == 0x4200) return op_clr(op);
     if ((op & 0xFF00) == 0x4600) return op_not(op);
