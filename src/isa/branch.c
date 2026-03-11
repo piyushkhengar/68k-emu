@@ -32,29 +32,32 @@ int branch_condition_met(uint8_t cond)
 }
 
 /* Bcc: branch on condition. 0x6xxx, cond in bits 11-8. 8-bit disp in low byte; if 0, fetch 16-bit. BSR pushes return addr.
- * E.g. BEQ.S label  (branch if equal, short disp); BNE.W far_label  (word disp); BSR.S sub  (call subroutine). */
+ * Base PC for displacement: 8-bit = addr of opcode+2 (PC on entry); 16-bit = addr of extension word (PC before fetch16).
+ * After fetch16() for 16-bit, PC points past extension; target = (PC-2) + disp. */
 int op_bcc(uint16_t op)
 {
     uint8_t cond = (op >> 8) & 0x0F;
     int32_t disp;
+    int is_16bit = 0;
 
     if ((op & 0xFF) != 0) {
         disp = (int8_t)(op & 0xFF);
     } else {
         disp = (int16_t)fetch16();
+        is_16bit = 1;
     }
 
     if (cond == 0x1) {
         uint32_t sp = cpu_sp() - 4;
         mem_write32(sp, cpu.pc);
         cpu_sp_set(sp);
-        cpu.pc += disp;
+        cpu.pc += disp - (is_16bit ? 2 : 0);
         return CYCLES_BSR;
     }
     {
         int taken = branch_condition_met(cond);
         if (taken)
-            cpu.pc += disp;
+            cpu.pc += disp - (is_16bit ? 2 : 0);
         return taken ? CYCLES_BCC_TAKEN : CYCLES_BCC_NOT;
     }
 }

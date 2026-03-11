@@ -298,7 +298,8 @@ int dispatch_0xxx(uint16_t op)
     return op_unimplemented(op);
 }
 
-/* DBcc: 0x50C0-0x50FF. Decrement Dn (word); if condition false and Dn != -1, branch. */
+/* DBcc: 0x50C0-0x50FF. Decrement Dn (word); if condition false and Dn != -1, branch.
+ * 16-bit displacement: base = addr of extension word; after fetch16, target = (PC-2) + disp. */
 static int op_dbcc(uint16_t op)
 {
     uint8_t cond = (op >> 8) & 0x0F;
@@ -313,7 +314,7 @@ static int op_dbcc(uint16_t op)
     cpu.d[dn] = (cpu.d[dn] & 0xFFFF0000) | ((uint32_t)(uint16_t)new_val & 0xFFFF);
 
     if (new_val != -1) {
-        cpu.pc += disp;
+        cpu.pc += disp - 2;   /* 16-bit disp: base = extension word addr = PC-2 */
         return dbcc_cycles(1);
     }
     return dbcc_cycles(0);

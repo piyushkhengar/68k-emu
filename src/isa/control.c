@@ -340,13 +340,14 @@ static int op_move_from_sr(uint16_t op)
     return move_cycles(0, 0, ea_mode, ea_reg, 2);
 }
 
-/* MOVE.W <ea>, CCR. 0x42C0-0x43FF. Source EA in bits 5-0. */
+/* MOVE.W <ea>, CCR. 0x42C0-0x43FF. Source EA in bits 5-0.
+ * 68000: only lower 5 bits (X,N,Z,V,C) are implemented; mask to 0x1F. */
 static int op_move_ccr(uint16_t op)
 {
     int ea_mode = ea_mode_from_op(op);
     int ea_reg = ea_reg_from_op(op);
     uint16_t val = (uint16_t)(ea_fetch_value(ea_mode, ea_reg, 2) & 0xFFFF);
-    cpu.sr = (cpu.sr & 0xFF00) | (val & 0xFF);
+    cpu.sr = (cpu.sr & 0xFF00) | (val & 0x1F);
     return move_cycles(ea_mode, ea_reg, 0, 0, 2);
 }
 

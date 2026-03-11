@@ -38,7 +38,7 @@
 | **JSR** | 5029 | Same + stack push |
 | **BSR** | 3995 | Same |
 | **RTS** | 4057 | Stack pop; A7/ssp sync |
-| **Bcc** | 6178 | Branch offset; extension word |
+| **Bcc** | 4164 | 16-bit disp base = extension addr – **DONE** (11966 pass); remaining ssp |
 
 **Actions:** Verify PC used for `(d16,PC)` is PC *after* opcode+extension; check instruction length accounting.
 
@@ -103,4 +103,6 @@ make processor-tests 2>&1 | tee results.txt
 - [ ] `shift.c`: size/count bit extraction – reverted (bits 8-7 caused regressions; needs opcode-specific decode)
 - [x] `control.c`: RTE – SR mask 0xA7 (high byte) + 0x1F (CCR); only implemented bits restored – **DONE** (4011 pass)
 - [x] `control.c`: MOVEtoSR – same SR mask 0xA7/0x1F – **DONE** (4938 pass)
+- [x] `control.c`: MOVEtoCCR – CCR mask 0x1F (only X,N,Z,V,C) – **DONE** (4958 pass)
+- [x] `branch.c` + `immediate.c`: Bcc/DBcc 16-bit disp – base = extension word addr; target = (PC-2)+disp – **DONE**
 - [ ] `move.c`: MOVEA – verify word source sign-extended to 32 bits
