@@ -398,7 +398,8 @@ static int op_ext(uint16_t op)
     }
     cpu.d[dn] = result;
     cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);
-    set_nz_from_val(result, opmode == 2 ? 2 : 4);
+    /* N,Z reflect the sign-extended operand (word for EXT.W, long for EXT.L) */
+    set_nz_from_val(opmode == 2 ? (result & 0xFFFF) : result, opmode == 2 ? 2 : 4);
     return CYCLES_EXT_SWAP;
 }
 
