@@ -18,7 +18,7 @@
 | **RTR** | 7539 | Stack layout: CCR then PC; pop order |
 | **EORItoSR** | 8038 | Privilege (already added S=1 for ORI/ANDI; verify EORI) |
 | **EXT.w** | ~34 | SR flags (Z/N) on edge cases – mostly fixed |
-| **MOVEtoSR** | 7969 | Privilege; tests may expect trap or success |
+| **MOVEtoSR** | 3127 | SR mask 0xA7/0x1F – **DONE** (4938 pass); remaining ssp delta |
 | **MOVEA.l/w** | 8017/8024 | Address register handling; sign-extension |
 | **ASL/LSL.b/l** | 8000+ | Shift size/count extraction (bits 7-6 vs 8-7) |
 
@@ -102,4 +102,5 @@ make processor-tests 2>&1 | tee results.txt
 - [x] `control.c`: RTR – CCR restore: only lower 5 bits (X,N,Z,V,C); `(ccr & 0x1F)` – **DONE** (4038 pass)
 - [ ] `shift.c`: size/count bit extraction – reverted (bits 8-7 caused regressions; needs opcode-specific decode)
 - [x] `control.c`: RTE – SR mask 0xA7 (high byte) + 0x1F (CCR); only implemented bits restored – **DONE** (4011 pass)
+- [x] `control.c`: MOVEtoSR – same SR mask 0xA7/0x1F – **DONE** (4938 pass)
 - [ ] `move.c`: MOVEA – verify word source sign-extended to 32 bits

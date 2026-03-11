@@ -350,7 +350,8 @@ static int op_move_ccr(uint16_t op)
     return move_cycles(ea_mode, ea_reg, 0, 0, 2);
 }
 
-/* MOVE.W <ea>, SR. 0x46C0-0x47FF. Privileged. Source EA in bits 5-0. */
+/* MOVE.W <ea>, SR. 0x46C0-0x47FF. Privileged. Source EA in bits 5-0.
+ * 68000: only implemented SR bits are written (same mask as RTE: 0xA7 high, 0x1F CCR). */
 static int op_move_sr(uint16_t op)
 {
     if (!require_supervisor())
@@ -358,7 +359,7 @@ static int op_move_sr(uint16_t op)
     int ea_mode = ea_mode_from_op(op);
     int ea_reg = ea_reg_from_op(op);
     uint16_t val = (uint16_t)(ea_fetch_value(ea_mode, ea_reg, 2) & 0xFFFF);
-    cpu.sr = val;
+    cpu.sr = ((val >> 8) & 0xA7) << 8 | (val & 0x1F);
     return move_cycles(ea_mode, ea_reg, 0, 0, 2);
 }
 
