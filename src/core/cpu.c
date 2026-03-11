@@ -27,9 +27,11 @@ void cpu_init(void)
 
 void cpu_reset(void)
 {
-    /* 68K fetches reset vector at 0x000000: PC, then SP */
+    /* 68K fetches reset vector at 0x000000: PC, then SP (SSP) */
     cpu.pc = mem_read32(0);
-    cpu.a[7] = mem_read32(4);  /* A7 = stack pointer */
+    cpu.ssp = mem_read32(4);
+    cpu.usp = 0;
+    cpu.a[7] = cpu.ssp;
     cpu.sr = 0x2700;           /* Supervisor mode, interrupts disabled */
     cpu.halted = 0;
     cpu.cycles = 0;
@@ -179,20 +181,25 @@ void set_nzvc_sub_sized(uint32_t result, uint32_t dest_val, uint32_t source_val,
  */
 void cpu_take_exception(int vector_num, int cycles_before_fault)
 {
-    uint32_t sp = cpu.a[7];
     uint16_t saved_sr = cpu.sr;
+
+    /* If user mode, save USP before switching */
+    if (!(saved_sr & 0x2000))
+        cpu.usp = cpu.a[7];
+
+    /* Switch to supervisor mode (S bit) */
+    cpu.sr |= 0x2000;
 
     exception_cycles_result = cycles_before_fault + exception_cycles(vector_num);
 
-    /* Push PC (4 bytes), then SR (2 bytes). Stack grows downward. SR at (A7), PC at (A7)+2 for RTE. */
+    /* Push PC (4 bytes), then SR (2 bytes) to SSP. Stack grows downward. */
+    uint32_t sp = cpu.ssp;
     sp -= 4;
     mem_write32(sp, cpu.pc);
     sp -= 2;
     mem_write16(sp, saved_sr);
+    cpu.ssp = sp;
     cpu.a[7] = sp;
-
-    /* Switch to supervisor mode (S bit) */
-    cpu.sr |= 0x2000;
 
     /* Load handler address from vector table */
     cpu.pc = mem_read32((unsigned)vector_num * 4);
@@ -233,7 +240,24 @@ static int op_line1010(uint16_t op)
     return 0;  /* unreachable */
 }
 
+/* Line 1111 (0xF4xx-0xFFxx): unimplemented line, vector 11. Valid ADD in 0xF is 0xF0xx-0xF3xx only. */
+static int op_line1111(uint16_t op)
+{
+    (void)op;
+    cpu.pc -= 2;
+    cpu_take_exception(LINE1111_VECTOR, 4);
+    return 0;  /* unreachable */
+}
+
 typedef int (*op_handler_fn)(uint16_t op);
+
+/* Dispatch for 0xFxxx: 0xF0-F3 = ADD, 0xF4-FF = Line 1111. */
+static int dispatch_Fxxx(uint16_t op)
+{
+    if (((op >> 8) & 0x0F) >= 4)
+        return op_line1111(op);
+    return dispatch_add(op);
+}
 
 /* Top-nibble dispatch table. Index = op >> 12. */
 static const op_handler_fn dispatch_top[16] = {
@@ -252,7 +276,7 @@ static const op_handler_fn dispatch_top[16] = {
     [0xC] = dispatch_Cxxx,
     [0xD] = dispatch_add,
     [0xE] = dispatch_Exxx,
-    [0xF] = dispatch_add,
+    [0xF] = dispatch_Fxxx,
 };
 
 static int execute(uint16_t op)

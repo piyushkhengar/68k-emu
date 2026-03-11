@@ -2,3 +2,6 @@
 68k-emu
 68k-emu.exe
 *.o
+
+# Cursor IDE
+.cursor/

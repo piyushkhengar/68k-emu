@@ -41,6 +41,12 @@ static int op_move_l_imm_disp_an(uint16_t op)
  * MOVE.L #imm,d(An) is special-cased: dest ext word (disp) comes before source (imm).
  */
 
+/* MOVE.L #imm, d(An): source EA 0x3C (#imm), dest EA mode 5 (d(An)) in bits 11-9. */
+static int is_move_l_imm_to_disp_an(uint16_t op)
+{
+    return (op & 0x003F) == 0x3C && (op & 0x0E00) == 0x0A00;
+}
+
 int dispatch_move_b(uint16_t op)
 {
     return op_move_generic(op, 1);
@@ -53,7 +59,7 @@ int dispatch_move_w(uint16_t op)
 
 int dispatch_move_l(uint16_t op)
 {
-    if ((op & 0x003F) == 0x3C && (op & 0x0E00) == 0x0A00)
+    if (is_move_l_imm_to_disp_an(op))
         return op_move_l_imm_disp_an(op);
     return op_move_generic(op, 4);
 }

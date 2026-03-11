@@ -66,6 +66,9 @@ static inline int ea_invalid_for_lea(int ea_mode, int ea_reg)
     return ea_mode == 0 || ea_mode == 1 || ea_mode == 3 || ea_mode == 4 || (ea_mode == 7 && ea_reg == 4);
 }
 
+/* Resolve EA to memory address. Returns 1 if memory EA, 0 for Dn/An/#imm. May fetch extension words. */
+int ea_resolve_addr(int mode, int reg, int size, uint32_t *addr);
+
 /* Step for (An)+/-(An): A7 uses 2 for byte (word align). */
 int ea_step(int reg, int size);
 

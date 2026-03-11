@@ -3,6 +3,7 @@
 #include "ea.h"
 #include "logic.h"
 #include "memory.h"
+#include "movem.h"
 #include "timing.h"
 
 #define CYCLES_STOP  4
@@ -64,6 +65,28 @@ static int op_chk(uint16_t op)
     return chk_cycles(ea_mode, ea_reg);
 }
 
+/* MOVE USP, An: 0x4E60-0x4E67. Supervisor only. */
+static int op_move_usp_to_an(uint16_t op)
+{
+    if (!require_supervisor())
+        return 0;
+    int an = op & 7;
+    cpu.a[an] = cpu.usp;
+    return 4;
+}
+
+/* MOVE An, USP: 0x4E68-0x4E6F. Supervisor only. */
+static int op_move_an_to_usp(uint16_t op)
+{
+    if (!require_supervisor())
+        return 0;
+    int an = op & 7;
+    cpu.usp = cpu.a[an];
+    if (!(cpu.sr & 0x2000))
+        cpu.a[7] = cpu.usp;  /* If user mode (shouldn't happen), sync a[7] */
+    return 4;
+}
+
 /* NOP: no operation. 0x4E71. */
 static int op_nop(uint16_t op)
 {
@@ -71,12 +94,25 @@ static int op_nop(uint16_t op)
     return CYCLES_NOP;
 }
 
+/* RTR: pop CCR (low byte of SR), then pop PC. 0x4E77. */
+static int op_rtr(uint16_t op)
+{
+    (void)op;
+    uint32_t sp = cpu_sp();
+    uint8_t ccr = (uint8_t)(mem_read16(sp) & 0xFF);
+    cpu.sr = (cpu.sr & 0xFF00) | ccr;
+    cpu.pc = mem_read32(sp + 2);
+    cpu_sp_set(sp + 6);
+    return 20;  /* Motorola: RTR = 20 cycles */
+}
+
 /* RTS: pop return address from stack, jump to it. 0x4E75. */
 static int op_rts(uint16_t op)
 {
     (void)op;
-    cpu.pc = mem_read32(cpu.a[7]);
-    cpu.a[7] += 4;
+    uint32_t sp = cpu_sp();
+    cpu.pc = mem_read32(sp);
+    cpu_sp_set(sp + 4);
     return CYCLES_RTS;
 }
 
@@ -96,10 +132,11 @@ static int op_rte(uint16_t op)
     (void)op;
     if (!require_supervisor())
         return 0;
-    uint32_t sp = cpu.a[7];
+    uint32_t sp = cpu.ssp;
     cpu.sr = mem_read16(sp);
     cpu.pc = mem_read32(sp + 2);
-    cpu.a[7] = sp + 6;
+    cpu.ssp = sp + 6;
+    cpu.a[7] = (cpu.sr & 0x2000) ? cpu.ssp : cpu.usp;
     return CYCLES_RTE;
 }
 
@@ -152,8 +189,9 @@ static int op_pea(uint16_t op)
     if (!ea_address_no_fetch(ea_mode, ea_reg, &addr))
         return op_unimplemented(op);
 
-    cpu.a[7] -= 4;
-    mem_write32(cpu.a[7], addr);
+    uint32_t sp = cpu_sp() - 4;
+    mem_write32(sp, addr);
+    cpu_sp_set(sp);
     return pea_cycles(ea_mode, ea_reg);
 }
 
@@ -191,10 +229,29 @@ static int op_jsr(uint16_t op)
     uint32_t addr;
     int ea_mode, ea_reg;
     decode_ea_addr_jmp_jsr(op, &addr, &ea_mode, &ea_reg);
-    cpu.a[7] -= 4;
-    mem_write32(cpu.a[7], cpu.pc);
+    uint32_t sp = cpu_sp() - 4;
+    mem_write32(sp, cpu.pc);
+    cpu_sp_set(sp);
     cpu.pc = addr;
     return jsr_cycles(ea_mode, ea_reg);
+}
+
+/* TAS <ea>: test and set byte. 0x4AC0-0x4AFF. Read-modify-write: test (set N,Z), set bit 7, store. An not allowed. */
+static int op_tas(uint16_t op)
+{
+    int ea_mode = ea_mode_from_op(op);
+    int ea_reg = ea_reg_from_op(op);
+    if (ea_mode == 1)
+        return op_unimplemented(op);
+    uint8_t val = (uint8_t)(ea_fetch_value(ea_mode, ea_reg, 1) & 0xFF);
+    cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);
+    if (val == 0)
+        cpu.sr |= SR_Z;
+    if (val & 0x80)
+        cpu.sr |= SR_N;
+    uint8_t result = val | 0x80;
+    ea_store_value(ea_mode, ea_reg, 1, result);
+    return 4 + ea_cycles(ea_mode, ea_reg, 1) * 2;  /* read + write */
 }
 
 /* TST <ea>. 0x4Axx. Compare with zero, set N,Z, clear V,C. */
@@ -208,6 +265,71 @@ static int op_tst(uint16_t op)
     set_nz_from_val(val, size);
     cpu.sr &= ~(SR_V | SR_C);
     return tst_cycles(ea_mode, ea_reg, size);
+}
+
+/* NEG <ea>: dest = 0 - dest. 0x44xx. Data alterable. Sets N,Z,V,C,X. */
+static int op_neg(uint16_t op)
+{
+    ea_decoded_t d;
+    ea_decode_from_op(op, &d);
+    if (ea_is_an(d.ea_mode))
+        return op_unimplemented(op);
+    uint32_t dest = ea_fetch_value(d.ea_mode, d.ea_reg, d.size) & d.mask;
+    uint32_t result = (0 - dest) & d.mask;
+    ea_store_value(d.ea_mode, d.ea_reg, d.size, result);
+    set_nzvc_sub_sized(result, 0, dest, d.size);
+    return add_sub_cycles(d.ea_mode, d.ea_reg, d.size, 1);
+}
+
+/* NEGX <ea>: dest = 0 - dest - X. 0x40xx (excl. 0x40C0-0x43FF MOVE from SR). Z: cleared if result nonzero, else unchanged. */
+static int op_negx(uint16_t op)
+{
+    ea_decoded_t d;
+    ea_decode_from_op(op, &d);
+    if (ea_is_an(d.ea_mode))
+        return op_unimplemented(op);
+    uint8_t x_in = (cpu.sr & SR_X) ? 1 : 0;
+    uint32_t dest = ea_fetch_value(d.ea_mode, d.ea_reg, d.size) & d.mask;
+    uint32_t result = (0 - dest - x_in) & d.mask;
+    ea_store_value(d.ea_mode, d.ea_reg, d.size, result);
+    cpu.sr &= ~(SR_N | SR_V | SR_C | SR_X);
+    if (result != 0)
+        cpu.sr &= ~SR_Z;
+    if (d.size == 1 && (result & 0x80))
+        cpu.sr |= SR_N;
+    else if (d.size == 2 && (result & 0x8000))
+        cpu.sr |= SR_N;
+    else if (d.size == 4 && (result & 0x80000000))
+        cpu.sr |= SR_N;
+    if (dest != 0 || x_in)
+        cpu.sr |= SR_C | SR_X;
+    /* V: overflow when 0 - dest - X overflows */
+    if (d.size == 1) {
+        int32_t r = (int32_t)(int8_t)result, dest_s = (int32_t)(int8_t)dest;
+        if ((dest_s > 0 && r < 0) || (dest_s == 0 && x_in && r != 0))
+            cpu.sr |= SR_V;
+    } else if (d.size == 2) {
+        int32_t r = (int32_t)(int16_t)result, dest_s = (int32_t)(int16_t)dest;
+        if ((dest_s > 0 && r < 0) || (dest_s == 0 && x_in && r != 0))
+            cpu.sr |= SR_V;
+    } else {
+        int32_t r = (int32_t)result, dest_s = (int32_t)dest;
+        if ((dest_s > 0 && r < 0) || (dest_s == 0 && x_in && r != 0))
+            cpu.sr |= SR_V;
+    }
+    return add_sub_cycles(d.ea_mode, d.ea_reg, d.size, 1);
+}
+
+/* MOVE.W SR, <ea>. 0x40C0-0x43FF. Dest EA in bits 5-0. Data alterable only. Unprivileged on 68000. */
+static int op_move_from_sr(uint16_t op)
+{
+    int ea_mode = ea_mode_from_op(op);
+    int ea_reg = ea_reg_from_op(op);
+    /* Data alterable: Dn, (An), (An)+, -(An), d(An), (d8,An,Xn), abs.w, abs.l. Reject An, #imm, d(PC), (d8,PC,Xn). */
+    if (ea_mode == 1 || (ea_mode == 7 && ea_reg >= 2 && ea_reg <= 4))
+        return op_unimplemented(op);
+    ea_store_value(ea_mode, ea_reg, 2, (uint32_t)cpu.sr & 0xFFFF);
+    return move_cycles(0, 0, ea_mode, ea_reg, 2);
 }
 
 /* MOVE.W <ea>, CCR. 0x42C0-0x43FF. Source EA in bits 5-0. */
@@ -293,10 +415,11 @@ static int op_link(uint16_t op)
 {
     int an = op & 7;
     int32_t disp = (int16_t)fetch16();
-    cpu.a[7] -= 4;
-    mem_write32(cpu.a[7], cpu.a[an]);
-    cpu.a[an] = cpu.a[7];
-    cpu.a[7] += disp;
+    uint32_t sp = cpu_sp() - 4;
+    mem_write32(sp, cpu.a[an]);
+    cpu_sp_set(sp);
+    cpu.a[an] = sp;
+    cpu_sp_set(sp + disp);
     return CYCLES_LINK;
 }
 
@@ -304,9 +427,10 @@ static int op_link(uint16_t op)
 static int op_unlk(uint16_t op)
 {
     int an = op & 7;
-    cpu.a[7] = cpu.a[an];
-    cpu.a[an] = mem_read32(cpu.a[7]);
-    cpu.a[7] += 4;
+    uint32_t sp = cpu.a[an];
+    cpu_sp_set(sp);
+    cpu.a[an] = mem_read32(sp);
+    cpu_sp_set(sp + 4);
     return CYCLES_UNLK;
 }
 
@@ -316,21 +440,32 @@ int dispatch_4xxx(uint16_t op)
     if (op == 0x4E70) return op_reset(op);
     if (op == 0x4E72) return op_stop(op);
     if (op == 0x4E76) return op_trapv(op);
+    if ((op & 0xFFF8) >= 0x4E60 && (op & 0xFFF8) <= 0x4E67) return op_move_usp_to_an(op);  /* MOVE USP, An */
+    if ((op & 0xFFF8) >= 0x4E68 && (op & 0xFFF8) <= 0x4E6F) return op_move_an_to_usp(op);  /* MOVE An, USP */
     if ((op & 0xFFF8) == 0x4E50) return op_link(op);
     if ((op & 0xFFF8) == 0x4E58) return op_unlk(op);
     if ((op & 0xFFC0) == 0x4E80) return op_jsr(op);
     if ((op & 0xFFC0) == 0x4EC0) return op_jmp(op);
     if ((op & 0xFFF0) == 0x4E40) return op_trap(op);
     if (op == 0x4E73) return op_rte(op);
+    if (op == 0x4E77) return op_rtr(op);
     if (op == 0x4E75) return op_rts(op);
     if (op == 0x4E71) return op_nop(op);
+    if ((op & 0xFF00) == 0x4400) return op_neg(op);   /* NEG 0x44xx */
+    if ((op & 0xFF00) == 0x4000 && (op & 0x00C0) != 0x00C0) return op_negx(op);  /* NEGX 0x40xx, excl. MOVE from SR */
+    if ((op & 0xFFC0) == 0x40C0) return op_move_from_sr(op);  /* MOVE from SR before CHK */
     if ((op & 0xF1C0) == 0x4180) return op_chk(op);  /* CHK before LEA */
     if ((op >> 8) >= 0x41 && (op >> 8) <= 0x4F && ((op >> 8) & 1)) return op_lea(op);  /* LEA */
+    if ((op & 0xFFC0) == 0x4880 && movem_store_ea_valid((op >> 3) & 7, op & 7))
+        return op_movem_store(op);
+    if ((op & 0xFFC0) == 0x4C80 && movem_load_ea_valid((op >> 3) & 7, op & 7))
+        return op_movem_load(op);
     if ((op & 0xFF80) == 0x4880) return op_ext(op);
     if ((op & 0xFFF8) == 0x4848) return op_pea(op);
     if ((op & 0xFFF8) == 0x4840) return op_swap(op);
     if ((op & 0xFFC0) == 0x4800) return op_nbcd(op);
     if (op == 0x4AFC) return op_unimplemented(op);  /* ILLEGAL: force vector 4 */
+    if ((op & 0xFFC0) == 0x4AC0) return op_tas(op);  /* TAS before TST */
     if ((op & 0xFF00) == 0x4A00) return op_tst(op);
     if ((op & 0xFFC0) == 0x42C0) return op_move_ccr(op);  /* MOVE to CCR before CLR */
     if ((op & 0xFF00) == 0x4200 && (op & 0x00C0) != 0x00C0) return op_clr(op);  /* CLR: 0x4200, 0x4240, 0x4280 */

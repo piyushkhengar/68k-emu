@@ -45,8 +45,9 @@ int op_bcc(uint16_t op)
     }
 
     if (cond == 0x1) {
-        cpu.a[7] -= 4;
-        mem_write32(cpu.a[7], cpu.pc);
+        uint32_t sp = cpu_sp() - 4;
+        mem_write32(sp, cpu.pc);
+        cpu_sp_set(sp);
         cpu.pc += disp;
         return CYCLES_BSR;
     }

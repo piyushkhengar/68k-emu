@@ -13,6 +13,7 @@
 #define TRAPV_VECTOR     7
 #define PRIVILEGE_VECTOR 8
 #define LINE1010_VECTOR  10
+#define LINE1111_VECTOR  11
 
 /* Shared CPU state (defined in cpu.c) */
 extern CPU cpu;
@@ -41,5 +42,19 @@ void cpu_take_exception(int vector_num, int cycles_before_fault);
 
 /* Returns 0 if privilege violation (takes exception); 1 if OK to proceed. */
 int require_supervisor(void);
+
+/* Stack pointer helpers: use active SP (ssp when supervisor, usp when user). Always keep a[7] in sync. */
+static inline uint32_t cpu_sp(void)
+{
+    return (cpu.sr & 0x2000) ? cpu.ssp : cpu.usp;
+}
+static inline void cpu_sp_set(uint32_t v)
+{
+    if (cpu.sr & 0x2000)
+        cpu.ssp = v;
+    else
+        cpu.usp = v;
+    cpu.a[7] = v;
+}
 
 #endif /* CPU_INTERNAL_H */

@@ -36,7 +36,7 @@ static uint32_t decode_indexed_addr(uint32_t base)
 }
 
 /* Returns 1 if addr was resolved (memory EA), 0 otherwise. */
-static int ea_resolve_addr(int mode, int reg, int size, uint32_t *addr)
+int ea_resolve_addr(int mode, int reg, int size, uint32_t *addr)
 {
     switch (mode) {
     case 0: /* Dn */

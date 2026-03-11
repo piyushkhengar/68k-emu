@@ -13,8 +13,10 @@
 typedef struct {
     /* Data registers D0-D7 */
     uint32_t d[8];
-    /* Address registers A0-A7 (A7 = USP or SSP depending on mode) */
+    /* Address registers A0-A7 (A7 = active stack; ssp/usp hold the two stacks) */
     uint32_t a[8];
+    uint32_t ssp;   /* Supervisor stack pointer (A7 when S=1) */
+    uint32_t usp;   /* User stack pointer (A7 when S=0) */
     /* Program Counter */
     uint32_t pc;
     /* Status Register (16-bit) */

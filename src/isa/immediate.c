@@ -4,6 +4,7 @@
  * ADDQ/SUBQ: 0x50xx, 0x51xx. Data 1-8 in bits 11-9 (0=8).
  */
 
+#include "bit.h"
 #include "cpu_internal.h"
 #include "branch.h"
 #include "ea.h"
@@ -269,11 +270,21 @@ int dispatch_0xxx(uint16_t op)
         return op_unimplemented(op);  /* SUBI/ADDI/CMPI to SR invalid */
     }
 
+    if (high == 0x01) return op_bit_dn(op);   /* BTST/BCHG/BCLR/BSET Dn */
+    /* Bit ops #imm: 0x08xx, 0x09xx, 0x0Bxx. 0x0Axx: bit 8 set -> EORI, bit 8 clear -> BCLR #imm */
+    if (high == 0x08 || high == 0x09 || high == 0x0B)
+        return op_bit_imm(op);
+    if (high == 0x0A) {
+        /* EORI has size in bits 7-6 (00=B, 01=W, 10=L). BCLR #imm has bits 7-6=00 (0x0A00-0x0A3F).
+         * EORI.W/L (0x0A40-0x0ABF) -> op_eori; 0x0A00-0x0A3F -> BCLR #imm. */
+        if ((op & 0x00C0) != 0)
+            return op_eori(op);
+        return op_bit_imm(op);
+    }
     if (high == 0x00) return op_ori(op);
     if (high == 0x02) return op_andi(op);
     if (high == 0x04) return op_subi(op);
     if (high == 0x06) return op_addi(op);
-    if (high == 0x0A) return op_eori(op);
     if (high == 0x0C) return op_cmpi(op);
     return op_unimplemented(op);
 }
