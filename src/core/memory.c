@@ -3,8 +3,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define MEM_SIZE (16 * 1024 * 1024)  /* 16MB - enough for test ROMs */
-
 static uint8_t *ram;
 
 void mem_init(void)

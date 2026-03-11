@@ -9,6 +9,7 @@
 
 #include "cpu.h"
 #include "memory.h"
+#include "processor_tests.h"
 #include "tests.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -37,12 +38,15 @@ static void print_cpu_state(void)
            cpu.d[0], cpu.d[1], cpu.d[2], cpu.a[7], cpu.sr);
 }
 
-/* Parse argv; returns speed_mhz (0 = unlimited), sets *rom_or_test, *run_all. */
-static double parse_args(int argc, char *argv[], const char **rom_or_test, int *run_all)
+/* Parse argv; returns speed_mhz (0 = unlimited), sets *rom_or_test, *run_all, *processor_tests, *processor_tests_filter. */
+static double parse_args(int argc, char *argv[], const char **rom_or_test, int *run_all,
+                         const char **processor_tests, const char **processor_tests_filter)
 {
     double speed_mhz = 0;
     *rom_or_test = NULL;
     *run_all = 0;
+    *processor_tests = NULL;
+    *processor_tests_filter = NULL;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--speed") == 0) {
@@ -54,6 +58,15 @@ static double parse_args(int argc, char *argv[], const char **rom_or_test, int *
             }
         } else if (strcmp(argv[i], "--run-all-tests") == 0) {
             *run_all = 1;
+        } else if (strcmp(argv[i], "--processor-tests") == 0) {
+            if (i + 1 < argc) {
+                *processor_tests = argv[i + 1];
+                i++;
+                if (i + 1 < argc && argv[i + 1][0] != '-') {
+                    *processor_tests_filter = argv[i + 1];
+                    i++;
+                }
+            }
         } else if (*rom_or_test == NULL) {
             *rom_or_test = argv[i];
         }
@@ -91,8 +104,13 @@ int main(int argc, char *argv[])
 
     const char *rom_or_test = NULL;
     int run_all = 0;
-    double speed_mhz = parse_args(argc, argv, &rom_or_test, &run_all);
+    const char *processor_tests = NULL;
+    const char *processor_tests_filter = NULL;
+    double speed_mhz = parse_args(argc, argv, &rom_or_test, &run_all, &processor_tests, &processor_tests_filter);
 
+    if (processor_tests) {
+        return run_processor_tests(processor_tests, processor_tests_filter);
+    }
     if (run_all) {
         return run_all_tests(speed_mhz);
     }

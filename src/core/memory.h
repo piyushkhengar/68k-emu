@@ -4,6 +4,8 @@
 #include <stdint.h>
 #include <stddef.h>
 
+#define MEM_SIZE (16 * 1024 * 1024)  /* 16MB - enough for test ROMs */
+
 /* Bus interface: CPU reads/writes through these. */
 uint8_t  mem_read8(uint32_t addr);
 uint16_t mem_read16(uint32_t addr);
