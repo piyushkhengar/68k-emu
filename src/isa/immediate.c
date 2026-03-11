@@ -170,10 +170,8 @@ static int op_eori_ccr(uint16_t op)
 static int op_ori_sr(uint16_t op)
 {
     (void)op;
-    if (!(cpu.sr & 0x2000)) {
-        cpu_take_exception(PRIVILEGE_VECTOR, 4);
+    if (!require_supervisor())
         return 0;
-    }
     uint16_t imm = fetch16();
     cpu.sr = (cpu.sr | imm) & 0xFFFF;
     return CYCLES_ORI_ANDI_EORI_CCR_SR;
@@ -182,10 +180,8 @@ static int op_ori_sr(uint16_t op)
 static int op_andi_sr(uint16_t op)
 {
     (void)op;
-    if (!(cpu.sr & 0x2000)) {
-        cpu_take_exception(PRIVILEGE_VECTOR, 4);
+    if (!require_supervisor())
         return 0;
-    }
     uint16_t imm = fetch16();
     cpu.sr = (cpu.sr & imm) & 0xFFFF;
     return CYCLES_ORI_ANDI_EORI_CCR_SR;
@@ -194,10 +190,8 @@ static int op_andi_sr(uint16_t op)
 static int op_eori_sr(uint16_t op)
 {
     (void)op;
-    if (!(cpu.sr & 0x2000)) {
-        cpu_take_exception(PRIVILEGE_VECTOR, 4);
+    if (!require_supervisor())
         return 0;
-    }
     uint16_t imm = fetch16();
     cpu.sr = (cpu.sr ^ imm) & 0xFFFF;
     return CYCLES_ORI_ANDI_EORI_CCR_SR;

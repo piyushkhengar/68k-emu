@@ -38,4 +38,7 @@ int op_unimplemented(uint16_t op);
  * cycles_before_fault: cycles consumed by aborted instruction (e.g. 4 for illegal opcode fetch). */
 void cpu_take_exception(int vector_num, int cycles_before_fault);
 
+/* Returns 0 if privilege violation (takes exception); 1 if OK to proceed. */
+int require_supervisor(void);
+
 #endif /* CPU_INTERNAL_H */

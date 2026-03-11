@@ -62,22 +62,23 @@ static uint8_t bcd_sub_byte(uint8_t dest, uint8_t src, uint8_t x_in, uint8_t *bo
     return (uint8_t)((hi << 4) | lo);
 }
 
-/* ABCD: BCD add. RM=0: Dy,Dx. RM=1: -(Ay),-(Ax). */
-static int op_abcd(uint16_t op)
+/* ABCD/SBCD: shared decode and structure. RM=0: Dy,Dx. RM=1: -(Ay),-(Ax). */
+static int op_bcd_math(uint16_t op, int is_add)
 {
     int rm = (op >> 3) & 1;
     int rx = (op >> 9) & 7;
     int ry = op & 7;
     uint8_t x_in = (cpu.sr & SR_X) ? 1 : 0;
-    uint8_t carry;
+    uint8_t carry_borrow;
 
     if (rm == 0) {
         uint8_t src = (uint8_t)(cpu.d[ry] & 0xFF);
         uint8_t dest = (uint8_t)(cpu.d[rx] & 0xFF);
-        uint8_t result = bcd_add_byte(dest, src, x_in, &carry);
+        uint8_t result = is_add ? bcd_add_byte(dest, src, x_in, &carry_borrow)
+                               : bcd_sub_byte(dest, src, x_in, &carry_borrow);
         cpu.d[rx] = (cpu.d[rx] & 0xFFFFFF00) | result;
         cpu.sr &= ~(SR_N | SR_V | SR_C | SR_X);
-        if (carry) cpu.sr |= SR_C | SR_X;
+        if (carry_borrow) cpu.sr |= SR_C | SR_X;
         if (result != 0) cpu.sr &= ~SR_Z;
         return abcd_sbcd_cycles(0);
     } else {
@@ -85,46 +86,18 @@ static int op_abcd(uint16_t op)
         cpu.a[rx] -= ea_step(rx, 1);
         uint8_t src = (uint8_t)mem_read8(cpu.a[ry]);
         uint8_t dest = (uint8_t)mem_read8(cpu.a[rx]);
-        uint8_t result = bcd_add_byte(dest, src, x_in, &carry);
+        uint8_t result = is_add ? bcd_add_byte(dest, src, x_in, &carry_borrow)
+                               : bcd_sub_byte(dest, src, x_in, &carry_borrow);
         mem_write8(cpu.a[rx], result);
         cpu.sr &= ~(SR_N | SR_V | SR_C | SR_X);
-        if (carry) cpu.sr |= SR_C | SR_X;
+        if (carry_borrow) cpu.sr |= SR_C | SR_X;
         if (result != 0) cpu.sr &= ~SR_Z;
         return abcd_sbcd_cycles(1);
     }
 }
 
-/* SBCD: BCD subtract. RM=0: Dy,Dx. RM=1: -(Ay),-(Ax). */
-static int op_sbcd(uint16_t op)
-{
-    int rm = (op >> 3) & 1;
-    int rx = (op >> 9) & 7;
-    int ry = op & 7;
-    uint8_t x_in = (cpu.sr & SR_X) ? 1 : 0;
-    uint8_t borrow;
-
-    if (rm == 0) {
-        uint8_t src = (uint8_t)(cpu.d[ry] & 0xFF);
-        uint8_t dest = (uint8_t)(cpu.d[rx] & 0xFF);
-        uint8_t result = bcd_sub_byte(dest, src, x_in, &borrow);
-        cpu.d[rx] = (cpu.d[rx] & 0xFFFFFF00) | result;
-        cpu.sr &= ~(SR_N | SR_V | SR_C | SR_X);
-        if (borrow) cpu.sr |= SR_C | SR_X;
-        if (result != 0) cpu.sr &= ~SR_Z;
-        return abcd_sbcd_cycles(0);
-    } else {
-        cpu.a[ry] -= ea_step(ry, 1);
-        cpu.a[rx] -= ea_step(rx, 1);
-        uint8_t src = (uint8_t)mem_read8(cpu.a[ry]);
-        uint8_t dest = (uint8_t)mem_read8(cpu.a[rx]);
-        uint8_t result = bcd_sub_byte(dest, src, x_in, &borrow);
-        mem_write8(cpu.a[rx], result);
-        cpu.sr &= ~(SR_N | SR_V | SR_C | SR_X);
-        if (borrow) cpu.sr |= SR_C | SR_X;
-        if (result != 0) cpu.sr &= ~SR_Z;
-        return abcd_sbcd_cycles(1);
-    }
-}
+static int op_abcd(uint16_t op) { return op_bcd_math(op, 1); }
+static int op_sbcd(uint16_t op) { return op_bcd_math(op, 0); }
 
 /* Byte ops cannot use An (mode 1). */
 static int logic_reject_byte_an(uint16_t op, int ea_mode, int size)

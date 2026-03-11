@@ -11,10 +11,8 @@
 static int op_reset(uint16_t op)
 {
     (void)op;
-    if (!(cpu.sr & 0x2000)) {
-        cpu_take_exception(PRIVILEGE_VECTOR, 4);
+    if (!require_supervisor())
         return 0;
-    }
     return CYCLES_RESET;
 }
 
@@ -95,11 +93,8 @@ static int op_trap(uint16_t op)
 static int op_rte(uint16_t op)
 {
     (void)op;
-    /* Privilege violation if not in supervisor mode (SR bit 13) */
-    if (!(cpu.sr & 0x2000)) {
-        cpu_take_exception(PRIVILEGE_VECTOR, 4);
+    if (!require_supervisor())
         return 0;
-    }
     uint32_t sp = cpu.a[7];
     cpu.sr = mem_read16(sp);
     cpu.pc = mem_read32(sp + 2);

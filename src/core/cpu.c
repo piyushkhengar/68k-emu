@@ -206,6 +206,15 @@ void cpu_take_exception(int vector_num, int cycles_before_fault)
 #endif
 }
 
+int require_supervisor(void)
+{
+    if (!(cpu.sr & 0x2000)) {
+        cpu_take_exception(PRIVILEGE_VECTOR, 4);
+        return 0;
+    }
+    return 1;
+}
+
 int op_unimplemented(uint16_t op)
 {
     (void)op;
