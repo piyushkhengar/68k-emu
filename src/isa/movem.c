@@ -62,6 +62,8 @@ int op_movem_store(uint16_t op)
             }
         }
         cpu.a[ea_reg] = addr;
+        if (ea_reg == 7)
+            sync_a7_to_sp();
     } else {
         /* Control mode: D0-D7, A0-A7. Increment after each store. */
         if (!ea_resolve_addr(ea_mode, ea_reg, 4, &addr))
@@ -80,8 +82,11 @@ int op_movem_store(uint16_t op)
                 addr += step;
             }
         }
-        if (ea_mode == 3)
+        if (ea_mode == 3) {
             cpu.a[ea_reg] = addr;
+            if (ea_reg == 7)
+                sync_a7_to_sp();
+        }
     }
     return 12 + 4 * (int)__builtin_popcount(mask);  /* Approximate */
 }
@@ -118,7 +123,10 @@ int op_movem_load(uint16_t op)
             addr += step;
         }
     }
-    if (ea_mode == 3)
+    if (ea_mode == 3) {
         cpu.a[ea_reg] = addr;
+        if (ea_reg == 7)
+            sync_a7_to_sp();
+    }
     return 12 + 4 * (int)__builtin_popcount(mask);  /* Approximate */
 }

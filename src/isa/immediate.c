@@ -235,6 +235,8 @@ static int op_addq_subq(uint16_t op, int is_sub)
         uint32_t dest = cpu.a[d.ea_reg];
         uint32_t result = is_sub ? dest - d.data : dest + d.data;
         cpu.a[d.ea_reg] = result;
+        if (d.ea_reg == 7)
+            sync_a7_to_sp();
         return 8;
     }
 

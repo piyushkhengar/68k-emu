@@ -28,6 +28,8 @@ static int op_exg(uint16_t op)
         tmp = cpu.a[rx];
         cpu.a[rx] = cpu.a[ry];
         cpu.a[ry] = tmp;
+        if (rx == 7 || ry == 7)
+            sync_a7_to_sp();
     } else if (opmode == 0x11) {
         tmp = cpu.d[rx];
         cpu.d[rx] = cpu.a[ry];
@@ -84,6 +86,8 @@ static int op_bcd_math(uint16_t op, int is_add)
     } else {
         cpu.a[ry] -= ea_step(ry, 1);
         cpu.a[rx] -= ea_step(rx, 1);
+        if (rx == 7 || ry == 7)
+            sync_a7_to_sp();
         uint8_t src = (uint8_t)mem_read8(cpu.a[ry]);
         uint8_t dest = (uint8_t)mem_read8(cpu.a[rx]);
         uint8_t result = is_add ? bcd_add_byte(dest, src, x_in, &carry_borrow)
@@ -117,6 +121,8 @@ int op_nbcd(uint16_t op)
         return nbcd_cycles(0);
     } else if (ea_mode == 4) {
         cpu.a[ea_reg] -= ea_step(ea_reg, 1);
+        if (ea_reg == 7)
+            sync_a7_to_sp();
         uint8_t dest = (uint8_t)mem_read8(cpu.a[ea_reg]);
         uint8_t result = bcd_sub_byte(0, dest, x_in, &borrow);
         mem_write8(cpu.a[ea_reg], result);

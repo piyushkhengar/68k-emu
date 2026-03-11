@@ -212,6 +212,8 @@ static int op_lea(uint16_t op)
         return op_unimplemented(op);
 
     cpu.a[an_reg] = addr;
+    if (an_reg == 7)
+        sync_a7_to_sp();
     return lea_cycles(ea_mode, ea_reg);
 }
 

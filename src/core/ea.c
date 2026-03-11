@@ -148,6 +148,8 @@ void ea_store_value(int mode, int reg, int size, uint32_t value)
     case 1: /* An */
         if (size == 2) cpu.a[reg] = (uint32_t)(int32_t)(int16_t)(value & 0xFFFF);  /* sign-extend word */
         else cpu.a[reg] = value;
+        if (reg == 7)
+            sync_a7_to_sp();
         break;
     default:
         break;

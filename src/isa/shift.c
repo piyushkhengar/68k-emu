@@ -369,9 +369,13 @@ static int dispatch_shift(uint16_t op)
     int size = shift_size(op);
     int count;
     int is_reg_count = (op >> 5) & 1;
-    if (is_reg_count)
+    if (is_reg_count) {
         count = shift_count_reg(op);
-    else
+        /* 68000: register count is modulo 8/16/32 for byte/word/long; 0 means 8/16/32 */
+        if (size == 1) count = (count & 7) ? (count & 7) : 8;
+        else if (size == 2) count = (count & 15) ? (count & 15) : 16;
+        else count = (count & 31) ? (count & 31) : 32;
+    } else
         count = shift_count_imm(op);
 
     uint32_t mask = shift_mask(size);
@@ -396,10 +400,8 @@ static int dispatch_shift(uint16_t op)
     }
 }
 
-/* 0xExxx: route to shift or ADD. Second nibble 0-7 -> shift (ASL/ASR/LSL/LSR/ROL/ROR/ROXL/ROXR). */
+/* 0xExxx: route to shift or ADD. 0xE is shift/rotate space; ADD uses 0xD. Route all 0xExxx to shift. */
 int dispatch_Exxx(uint16_t op)
 {
-    int second = (op >> 8) & 0x0F;
-    if (second >= 0 && second <= 7) return dispatch_shift(op);
-    return dispatch_add(op);
+    return dispatch_shift(op);
 }

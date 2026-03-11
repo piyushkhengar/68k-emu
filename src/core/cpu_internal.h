@@ -59,5 +59,13 @@ static inline void cpu_sp_set(uint32_t v)
         cpu.usp = v;
     cpu.a[7] = v;
 }
+/* Call after any direct write to cpu.a[7] to keep ssp/usp in sync. */
+static inline void sync_a7_to_sp(void)
+{
+    if (cpu.sr & 0x2000)
+        cpu.ssp = cpu.a[7];
+    else
+        cpu.usp = cpu.a[7];
+}
 
 #endif /* CPU_INTERNAL_H */
