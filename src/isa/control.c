@@ -456,10 +456,10 @@ int dispatch_4xxx(uint16_t op)
     if ((op & 0xFFC0) == 0x40C0) return op_move_from_sr(op);  /* MOVE from SR before CHK */
     if ((op & 0xF1C0) == 0x4180) return op_chk(op);  /* CHK before LEA */
     if ((op >> 8) >= 0x41 && (op >> 8) <= 0x4F && ((op >> 8) & 1)) return op_lea(op);  /* LEA */
-    if ((op & 0xFFC0) == 0x4880 && movem_store_ea_valid((op >> 3) & 7, op & 7))
-        return op_movem_store(op);
-    if ((op & 0xFFC0) == 0x4C80 && movem_load_ea_valid((op >> 3) & 7, op & 7))
-        return op_movem_load(op);
+    if (((op & 0xFFC0) == 0x4880 || (op & 0xFFC0) == 0x48C0) && movem_store_ea_valid((op >> 3) & 7, op & 7))
+        return op_movem_store(op);   /* MOVEM.w 0x4880-0x48BF, MOVEM.l 0x48C0-0x48FF */
+    if (((op & 0xFFC0) == 0x4C80 || (op & 0xFFC0) == 0x4CC0) && movem_load_ea_valid((op >> 3) & 7, op & 7))
+        return op_movem_load(op);   /* MOVEM.w 0x4C80-0x4CBF, MOVEM.l 0x4CC0-0x4CFF */
     if ((op & 0xFF80) == 0x4880) return op_ext(op);
     if ((op & 0xFFF8) == 0x4840) return op_swap(op);   /* SWAP before PEA: 0x4840-0x4847 */
     if ((op & 0xFFC0) == 0x4840) return op_pea(op);    /* PEA: 0x4848-0x487F */
