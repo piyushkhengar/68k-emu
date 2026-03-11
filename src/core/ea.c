@@ -22,13 +22,14 @@ static void mem_write_sized(uint32_t addr, int size, uint32_t value)
     else mem_write32(addr, value);
 }
 
+/* 68K extension word for (d8,An,Xn): bits 15-8=disp, 7=0, 6=DA, 5=WL, 4-0=reg (use 2-0 for 0-7) */
 static uint32_t decode_indexed_addr(uint32_t base)
 {
     uint16_t ext = fetch16();
     int32_t disp = (int8_t)(ext >> 8);
-    int idx_reg = ext & 0x0F;
+    int idx_reg = (ext >> 0) & 7;
     int idx_is_addr = (ext >> 6) & 1;
-    int idx_long = (ext >> 4) & 1;
+    int idx_long = (ext >> 5) & 1;
     uint32_t idx_val = idx_is_addr ? cpu.a[idx_reg] : cpu.d[idx_reg];
     if (!idx_long)
         idx_val = (uint32_t)(int32_t)(int16_t)(idx_val & 0xFFFF);
@@ -48,10 +49,18 @@ int ea_resolve_addr(int mode, int reg, int size, uint32_t *addr)
     case 3: /* (An)+ */
         *addr = cpu.a[reg];
         cpu.a[reg] += ea_step(reg, size);
+        if (reg == 7) {
+            if (cpu.sr & 0x2000) cpu.ssp = cpu.a[7];
+            else cpu.usp = cpu.a[7];
+        }
         return 1;
     case 4: /* -(An) */
         cpu.a[reg] -= ea_step(reg, size);
         *addr = cpu.a[reg];
+        if (reg == 7) {
+            if (cpu.sr & 0x2000) cpu.ssp = cpu.a[7];
+            else cpu.usp = cpu.a[7];
+        }
         return 1;
     case 5: /* d(An) */
         *addr = cpu.a[reg] + (int32_t)(int16_t)fetch16();
@@ -127,9 +136,9 @@ void ea_store_value(int mode, int reg, int size, uint32_t value)
     }
 
     switch (mode) {
-    case 0: /* Dn - MOVE zero-extends byte/word to long */
-        if (size == 1) cpu.d[reg] = value & 0xFF;
-        else if (size == 2) cpu.d[reg] = value & 0xFFFF;
+    case 0: /* Dn - upper bits unchanged for byte/word per 68K */
+        if (size == 1) cpu.d[reg] = (cpu.d[reg] & 0xFFFFFF00) | (value & 0xFF);
+        else if (size == 2) cpu.d[reg] = (cpu.d[reg] & 0xFFFF0000) | (value & 0xFFFF);
         else cpu.d[reg] = value;
         break;
     case 1: /* An */

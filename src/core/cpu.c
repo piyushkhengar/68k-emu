@@ -31,6 +31,11 @@ void cpu_reset(void)
     cpu.pc = mem_read32(0);
     cpu.ssp = mem_read32(4);
     cpu.usp = 0;
+    /* Clear D0-D7 and A0-A6 for consistent test baseline (A7 set from SSP) */
+    for (int i = 0; i < 8; i++)
+        cpu.d[i] = 0;
+    for (int i = 0; i < 7; i++)
+        cpu.a[i] = 0;
     cpu.a[7] = cpu.ssp;
     cpu.sr = 0x2700;           /* Supervisor mode, interrupts disabled */
     cpu.halted = 0;

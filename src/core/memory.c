@@ -24,8 +24,12 @@ void mem_load_rom(const uint8_t *data, size_t size)
     memcpy(ram, data, copy);
 }
 
+/* 68000 has 24-bit address bus; mask to 24 bits for memory access */
+#define ADDR_MASK24(addr) ((addr) & 0xFFFFFF)
+
 uint8_t mem_read8(uint32_t addr)
 {
+    addr = ADDR_MASK24(addr);
     if (addr >= MEM_SIZE)
         return 0;
     return ram[addr];
@@ -33,6 +37,7 @@ uint8_t mem_read8(uint32_t addr)
 
 uint16_t mem_read16(uint32_t addr)
 {
+    addr = ADDR_MASK24(addr);
     if (addr & 1) {
         cpu_take_exception(ADDR_ERR_VECTOR, 0);
         return 0;  /* unreachable */
@@ -44,6 +49,7 @@ uint16_t mem_read16(uint32_t addr)
 
 uint32_t mem_read32(uint32_t addr)
 {
+    addr = ADDR_MASK24(addr);
     if (addr & 1) {
         cpu_take_exception(ADDR_ERR_VECTOR, 0);
         return 0;  /* unreachable */
@@ -55,12 +61,14 @@ uint32_t mem_read32(uint32_t addr)
 
 void mem_write8(uint32_t addr, uint8_t val)
 {
+    addr = ADDR_MASK24(addr);
     if (addr < MEM_SIZE)
         ram[addr] = val;
 }
 
 void mem_write16(uint32_t addr, uint16_t val)
 {
+    addr = ADDR_MASK24(addr);
     if (addr & 1) {
         cpu_take_exception(ADDR_ERR_VECTOR, 0);
         return;
@@ -73,6 +81,7 @@ void mem_write16(uint32_t addr, uint16_t val)
 
 void mem_write32(uint32_t addr, uint32_t val)
 {
+    addr = ADDR_MASK24(addr);
     if (addr & 1) {
         cpu_take_exception(ADDR_ERR_VECTOR, 0);
         return;
