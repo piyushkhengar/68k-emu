@@ -256,6 +256,11 @@ static int op_addq_subq(uint16_t op, int is_sub)
  * ORI/ANDI/EORI to CCR (0x3C) and SR (0x7C). */
 int dispatch_0xxx(uint16_t op)
 {
+    /* MOVEP: 0x0108, 0x0148, 0x0188, 0x01C8 (and Dn/An variants). Check before high-nibble dispatch. */
+    {
+        int c = op_movep(op);
+        if (c) return c;
+    }
     int ea_field = op & 0x003F;
     int high = (op >> 8) & 0x0F;
     if (ea_field == 0x003C) {
@@ -271,11 +276,8 @@ int dispatch_0xxx(uint16_t op)
         return op_unimplemented(op);  /* SUBI/ADDI/CMPI to SR invalid */
     }
 
-    if (high == 0x01) {
-        int c = op_movep(op);
-        if (c) return c;
-        return op_bit_dn(op);   /* BTST/BCHG/BCLR/BSET Dn */
-    }
+    if (high == 0x01)
+        return op_bit_dn(op);   /* BTST/BCHG/BCLR/BSET Dn (MOVEP checked above) */
     /* Bit ops #imm: 0x08xx, 0x09xx, 0x0Bxx. 0x0Axx: bit 8 set -> EORI, bit 8 clear -> BCLR #imm */
     if (high == 0x08 || high == 0x09 || high == 0x0B)
         return op_bit_imm(op);

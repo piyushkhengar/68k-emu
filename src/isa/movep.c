@@ -25,7 +25,8 @@ int op_movep(uint16_t op)
 
     int dn = (op >> 9) & 7;
     int an = op & 7;
-    int is_load = (op & 0x0100) != 0;   /* bit 8: 0=store (0x0108/0x0148), 1=load (0x0188/0x01C8) */
+    /* OpMode bits 8-6: 100/101=load, 110/111=store. 0x0108=load W, 0x0188=store W. */
+    int is_load = ((op >> 6) & 2) == 0;   /* bit 7: 0=load (0x0108/0x0148), 1=store (0x0188/0x01C8) */
     int is_long = (op & 0x0040) != 0;   /* bit 6: 0=word, 1=long */
     int size = is_long ? 4 : 2;
 
@@ -42,8 +43,9 @@ int op_movep(uint16_t op)
     }
     if (is_load) {
         if (size == 2)
-            val = (uint32_t)(int32_t)(int16_t)(val & 0xFFFF);  /* sign-extend word */
-        cpu.d[dn] = val;
+            cpu.d[dn] = (cpu.d[dn] & 0xFFFF0000) | (val & 0xFFFF);  /* word: preserve high word */
+        else
+            cpu.d[dn] = val;
     }
     return movep_cycles(size);
 }

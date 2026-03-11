@@ -65,25 +65,27 @@ static int op_chk(uint16_t op)
     return chk_cycles(ea_mode, ea_reg);
 }
 
-/* MOVE USP, An: 0x4E60-0x4E67. Supervisor only. */
+/* MOVE USP, An: 0x4E68-0x4E6F (ProcessorTests: MOVEfromUSP). Supervisor only. */
 static int op_move_usp_to_an(uint16_t op)
 {
     if (!require_supervisor())
         return 0;
     int an = op & 7;
     cpu.a[an] = cpu.usp;
+    if (an == 7 && (cpu.sr & 0x2000))
+        cpu.ssp = cpu.a[7];  /* A7 = SSP in supervisor mode */
     return 4;
 }
 
-/* MOVE An, USP: 0x4E68-0x4E6F. Supervisor only. */
+/* MOVE An, USP: 0x4E60-0x4E67 (ProcessorTests: MOVEtoUSP). Supervisor only. */
 static int op_move_an_to_usp(uint16_t op)
 {
     if (!require_supervisor())
         return 0;
     int an = op & 7;
     cpu.usp = cpu.a[an];
-    if (!(cpu.sr & 0x2000))
-        cpu.a[7] = cpu.usp;  /* If user mode (shouldn't happen), sync a[7] */
+    if (an == 7 && !(cpu.sr & 0x2000))
+        cpu.a[7] = cpu.usp;  /* User mode: A7 = USP */
     return 4;
 }
 
@@ -440,8 +442,9 @@ int dispatch_4xxx(uint16_t op)
     if (op == 0x4E70) return op_reset(op);
     if (op == 0x4E72) return op_stop(op);
     if (op == 0x4E76) return op_trapv(op);
-    if ((op & 0xFFF8) >= 0x4E60 && (op & 0xFFF8) <= 0x4E67) return op_move_usp_to_an(op);  /* MOVE USP, An */
-    if ((op & 0xFFF8) >= 0x4E68 && (op & 0xFFF8) <= 0x4E6F) return op_move_an_to_usp(op);  /* MOVE An, USP */
+    /* ProcessorTests map: 0x4E60-0x4E67 = MOVEtoUSP (An->USP), 0x4E68-0x4E6F = MOVEfromUSP (USP->An) */
+    if ((op & 0xFFF8) >= 0x4E60 && (op & 0xFFF8) <= 0x4E67) return op_move_an_to_usp(op);  /* MOVE An, USP */
+    if ((op & 0xFFF8) >= 0x4E68 && (op & 0xFFF8) <= 0x4E6F) return op_move_usp_to_an(op);  /* MOVE USP, An */
     if ((op & 0xFFF8) == 0x4E50) return op_link(op);
     if ((op & 0xFFF8) == 0x4E58) return op_unlk(op);
     if ((op & 0xFFC0) == 0x4E80) return op_jsr(op);
@@ -451,7 +454,8 @@ int dispatch_4xxx(uint16_t op)
     if (op == 0x4E77) return op_rtr(op);
     if (op == 0x4E75) return op_rts(op);
     if (op == 0x4E71) return op_nop(op);
-    if ((op & 0xFF00) == 0x4400) return op_neg(op);   /* NEG 0x44xx */
+    if ((op & 0xFFC0) == 0x44C0 || (op & 0xFFC0) == 0x42C0) return op_move_ccr(op);  /* MOVE to CCR: 0x44C0 (ProcessorTests), 0x42C0 (Motorola) */
+    if ((op & 0xFF00) == 0x4400) return op_neg(op);   /* NEG 0x4400-0x44BF */
     if ((op & 0xFF00) == 0x4000 && (op & 0x00C0) != 0x00C0) return op_negx(op);  /* NEGX 0x40xx, excl. MOVE from SR */
     if ((op & 0xFFC0) == 0x40C0) return op_move_from_sr(op);  /* MOVE from SR before CHK */
     if ((op & 0xF1C0) == 0x4180) return op_chk(op);  /* CHK before LEA */
@@ -467,7 +471,6 @@ int dispatch_4xxx(uint16_t op)
     if (op == 0x4AFC) return op_illegal(op);  /* ILLEGAL: explicit vector 4 */
     if ((op & 0xFFC0) == 0x4AC0) return op_tas(op);  /* TAS before TST */
     if ((op & 0xFF00) == 0x4A00) return op_tst(op);
-    if ((op & 0xFFC0) == 0x42C0) return op_move_ccr(op);  /* MOVE to CCR before CLR */
     if ((op & 0xFF00) == 0x4200 && (op & 0x00C0) != 0x00C0) return op_clr(op);  /* CLR: 0x4200, 0x4240, 0x4280 */
     if ((op & 0xFFC0) == 0x46C0) return op_move_sr(op);   /* MOVE to SR before NOT */
     if ((op & 0xFFC0) == 0x4600 || (op & 0xFFC0) == 0x4640 || (op & 0xFFC0) == 0x4680)
