@@ -35,9 +35,8 @@ static uint32_t decode_indexed_addr(uint32_t base)
     uint32_t idx_val = idx_is_addr ? cpu.a[idx_reg] : cpu.d[idx_reg];
     if (!idx_long)
         idx_val = (uint32_t)(int32_t)(int16_t)(idx_val & 0xFFFF);
-    /* 68000: 24-bit address bus */
-    uint32_t base24 = base & 0xFFFFFF;
-    return (base24 + disp + idx_val) & 0xFFFFFF;
+    /* 68000: full 32-bit address calculation; 24-bit mask for memory access is in mem_* */
+    return base + disp + idx_val;
 }
 
 /* Returns 1 if addr was resolved (memory EA), 0 otherwise. */

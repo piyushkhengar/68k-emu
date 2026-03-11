@@ -99,6 +99,7 @@ make processor-tests 2>&1 | tee results.txt
 
 - [x] `apply_initial()`: Ensure 0x0A7C (EORI to SR) in privilege override – **DONE**
 - [x] `control.c`: EXT.w – N/Z flags must reflect sign-extended word, not full 32-bit – **DONE** (8065 pass)
-- [ ] `shift.c`: size/count bit extraction – reverted (caused regressions)
-- [ ] `control.c`: RTE/RTR – compare with 68000 PRM stack format
+- [x] `control.c`: RTR – CCR restore: only lower 5 bits (X,N,Z,V,C); `(ccr & 0x1F)` – **DONE** (4038 pass)
+- [ ] `shift.c`: size/count bit extraction – reverted (bits 8-7 caused regressions; needs opcode-specific decode)
+- [x] `control.c`: RTE – SR mask 0xA7 (high byte) + 0x1F (CCR); only implemented bits restored – **DONE** (4011 pass)
 - [ ] `move.c`: MOVEA – verify word source sign-extended to 32 bits

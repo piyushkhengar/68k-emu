@@ -96,13 +96,14 @@ static int op_nop(uint16_t op)
     return CYCLES_NOP;
 }
 
-/* RTR: pop CCR (low byte of SR), then pop PC. 0x4E77. */
+/* RTR: pop CCR (low byte of SR), then pop PC. 0x4E77.
+ * Only the lower 5 bits (X,N,Z,V,C) are restored; bits 5-7 are unused. */
 static int op_rtr(uint16_t op)
 {
     (void)op;
     uint32_t sp = cpu_sp();
     uint8_t ccr = (uint8_t)(mem_read16(sp) & 0xFF);
-    cpu.sr = (cpu.sr & 0xFF00) | ccr;
+    cpu.sr = (cpu.sr & 0xFF00) | (ccr & 0x1F);
     cpu.pc = mem_read32(sp + 2);
     cpu_sp_set(sp + 6);
     return 20;  /* Motorola: RTR = 20 cycles */
@@ -128,14 +129,17 @@ static int op_trap(uint16_t op)
     return 0;  /* unreachable */
 }
 
-/* RTE: return from exception. 0x4E73. Supervisor only. */
+/* RTE: return from exception. 0x4E73. Supervisor only.
+ * 68000: only implemented SR bits are restored. High byte: mask 0xA7 (T1,S,I2,I1,I0);
+ * low byte (CCR): mask 0x1F (X,N,Z,V,C). Unimplemented bits read as 0. */
 static int op_rte(uint16_t op)
 {
     (void)op;
     if (!require_supervisor())
         return 0;
     uint32_t sp = cpu.ssp;
-    cpu.sr = mem_read16(sp);
+    uint16_t sr = mem_read16(sp);
+    cpu.sr = ((sr >> 8) & 0xA7) << 8 | (sr & 0x1F);
     cpu.pc = mem_read32(sp + 2);
     cpu.ssp = sp + 6;
     cpu.a[7] = (cpu.sr & 0x2000) ? cpu.ssp : cpu.usp;
