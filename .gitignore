@@ -5,6 +5,3 @@
 
 # Cursor IDE
 .cursor/
-
-# ProcessorTests (clone from https://github.com/SingleStepTests/680x0)
-ProcessorTests/
