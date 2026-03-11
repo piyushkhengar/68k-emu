@@ -10,10 +10,10 @@
 #include "memory.h"
 #include "timing.h"
 
-/* Register format: 1110 Ctt Ss dr i/r 0 oo rrr. Ss in bits 8-7. */
+/* Register format: 1110 Ctt Ss dr i/r 0 oo rrr. Size in bits 7-6 (00=byte, 01=word, 10=long). */
 static int shift_size(int op)
 {
-    int c = (op >> 7) & 3;
+    int c = (op >> 6) & 3;
     return (c == 0) ? 1 : (c == 1) ? 2 : 4;
 }
 

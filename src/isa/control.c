@@ -384,9 +384,9 @@ static int op_ext(uint16_t op)
     uint32_t result;
 
     if (opmode == 2) {
-        /* EXT.W: byte -> word */
+        /* EXT.W: byte -> word, preserve high word of Dn */
         int8_t b = (int8_t)(cpu.d[dn] & 0xFF);
-        result = (uint32_t)(int32_t)(int16_t)b;
+        result = (cpu.d[dn] & 0xFFFF0000u) | ((uint32_t)(int32_t)(int16_t)b & 0xFFFF);
     } else if (opmode == 3) {
         /* EXT.L: word -> long */
         int16_t w = (int16_t)(cpu.d[dn] & 0xFFFF);
