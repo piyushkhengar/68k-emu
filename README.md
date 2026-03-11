@@ -144,11 +144,20 @@ Phases 1–4 complete. Phase 5 in progress.
 - [x] CLR (Clear)
 
 ### Phase 5: Remaining ISA (current)
-- [ ] MULU, MULS, DIVU, DIVS
-- [ ] Addressing modes
+- [x] MULU, MULS, DIVU, DIVS
+- [x] Addressing modes
 - [ ] 68K test suite (TomHarte/SingleStepTests) – pass all tests
 
-### Phase 6: Amiga (future)
+### Phase 6: Extended ISA
+- [x] EXG, ABCD, SBCD
+- [x] STOP, TRAPV, CHK, RESET
+- [x] MOVE to CCR, MOVE to SR
+- [x] PEA (Push Effective Address)
+- [x] NBCD (Negate BCD)
+- [x] ROL/ROR/ROXL/ROXR memory form
+- [x] Line 1010 (0xAxxx) vector 10 handler
+
+### Phase 7: Amiga (future)
 - [ ] Add custom chips (Paula, Denise, Agnus)
 - [ ] Disk support (ADF)
 - [ ] Display, audio

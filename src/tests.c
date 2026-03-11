@@ -5,6 +5,7 @@
 
 #include "tests.h"
 #include "cpu.h"
+#include "cpu_internal.h"
 #include "memory.h"
 #include <stdio.h>
 #include <string.h>
@@ -1123,6 +1124,73 @@ static const uint8_t chk_test[] = {
     0x4E, 0x71, 0x60, 0xFC,
 };
 
+/* Line 1010: 0xA000 at 0x30 triggers vector 10; handler sets D2=10, skips faulting insn, RTE.
+ * Vector table: 0-3=PC, 4-7=SP, 8-39=vec2-9 (32 bytes), 40-43=vec10. */
+static const uint8_t line1010_test[] = {
+    0x00, 0x00, 0x00, 0x30,   /* 0: Reset PC = 0x30 */
+    0x00, 0x00, 0x10, 0x00,   /* 4: Reset SP = 0x1000 */
+    0x00, 0x00, 0x00, 0x00,   /* 8: vec2 */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  /* 12-19: vec3,4 */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  /* 20-27: vec5,6 */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  /* 28-35: vec7,8 */
+    0x00, 0x00, 0x00, 0x00,   /* 36-39: vec9 */
+    0x00, 0x00, 0x00, 0x38,   /* 40-43: vec10 -> handler at 0x38 */
+    0x00, 0x00, 0x00, 0x00,   /* 44-47: padding */
+    0xA0, 0x00,               /* 48 (0x30): Line 1010 (0xA000) */
+    0x4E, 0x71, 0x60, 0xFC,   /* 50 (0x32): NOP, BRA (loop after RTE) */
+    0x00, 0x00,               /* 54-55: padding */
+    /* 56 (0x38): Handler: MOVEQ #10,D2; BRA -2 (loop forever) */
+    0x74, 0x0A, 0x60, 0xFE,
+};
+
+/* MOVE.W D0, CCR: D0=0x1F -> CCR low byte = 0x1F */
+static const uint8_t move_ccr_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x70, 0x1F,               /* MOVEQ #0x1F, D0 */
+    0x42, 0xC0,               /* MOVE.W D0, CCR (0x42C0) */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* MOVE.W D0, SR: privileged; start in supervisor, D0=0x2700, then MOVE to SR */
+static const uint8_t move_sr_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x20, 0x3C, 0x00, 0x00, 0x27, 0x00,   /* MOVE.L #0x2700, D0 (0x203C) */
+    0x46, 0xC0,               /* MOVE.W D0, SR (0x46C0) - supervisor mode */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* PEA (A0): A0=0x1234, push address, D1=popped value */
+static const uint8_t pea_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x20, 0x7C, 0x00, 0x00, 0x12, 0x34,   /* MOVE.L #0x1234, A0 */
+    0x48, 0x50,               /* PEA (A0) - 0x4850 */
+    0x22, 0x5F,               /* MOVE.L (A7)+, D1 - pop into D1 */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* NBCD D0: D0=0x25 (BCD 25), X=0 -> 0x75 (100-25=75 BCD) */
+static const uint8_t nbcd_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x70, 0x25,               /* MOVEQ #0x25, D0 (BCD 25) */
+    0x48, 0x00,               /* NBCD D0 (0x4800) */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* ROL.W (A0): store 0x8000 at (A0), ROL.W (A0) -> 0x0001, C=1 */
+static const uint8_t rol_mem_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x22, 0x7C, 0x00, 0x00, 0x10, 0x00,   /* MOVE.L #0x1000, A0 (0x227C) */
+    0x34, 0x3C, 0x80, 0x00,               /* MOVE.W #0x8000, (A0) (0x343C) */
+    0xE4, 0xD0,               /* ROL.W (A0) - 0xE4D0: ROL left, 0x8000->0x0001 */
+    0x30, 0x10,               /* MOVE.W (A0), D0 - load result */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
 /* RTE privilege violation: handler at 0x30, code at 0x34. RTE at 0x46, second RTE at 0x48 -> priv viol. */
 static const uint8_t rte_priv_test[] = {
     0x00, 0x00, 0x00, 0x34,   /* Reset: PC = 0x34 */
@@ -1289,6 +1357,12 @@ static int check_test_result(size_t idx)
     case 99: return cpu.halted && (cpu.sr == 0x2700);                        /* stop: halted, SR=0x2700 */
     case 100: return cpu.d[2] == 7 || (cpu.a[7] == 0x0FFA && (cpu.sr & 0x02)); /* trapv: D2=7 or exception taken (V set) */
     case 101: return (cpu.d[0] == 5) && (cpu.d[1] == 10) && !(cpu.sr & SR_N); /* chk: in bounds, N=0 */
+    case 102: return cpu.d[2] == 10 || cpu.pc != 0x30;                         /* line1010: D2=10 or exception taken */
+    case 103: return (cpu.sr & 0xFF) == 0x1F;                                  /* move_ccr: CCR=0x1F */
+    case 104: return cpu.sr == 0x2700;                                        /* move_sr: SR=0x2700 */
+    case 105: return cpu.d[1] == 0x1234;                                      /* pea: D1=popped 0x1234 */
+    case 106: return (cpu.d[0] & 0xFF) == 0x75;                                /* nbcd: 25->75 BCD */
+    case 107: return (cpu.d[0] & 0xFFFF) == 0x0001;                            /* rol_mem: 0x8000->0x0001 */
     default: return 0;
     }
 }
@@ -1399,6 +1473,12 @@ static const builtin_test_t builtin_tests[] = {
     { "stop", stop_test, sizeof(stop_test), "Running STOP test", 0 },
     { "trapv", trapv_test, sizeof(trapv_test), "Running TRAPV test", 150 },
     { "chk", chk_test, sizeof(chk_test), "Running CHK test", 0 },
+    { "line1010", line1010_test, sizeof(line1010_test), "Running Line 1010 test", 0 },
+    { "move_ccr", move_ccr_test, sizeof(move_ccr_test), "Running MOVE to CCR test", 0 },
+    { "move_sr", move_sr_test, sizeof(move_sr_test), "Running MOVE to SR test", 0 },
+    { "pea", pea_test, sizeof(pea_test), "Running PEA test", 0 },
+    { "nbcd", nbcd_test, sizeof(nbcd_test), "Running NBCD test", 0 },
+    { "rol_mem", rol_mem_test, sizeof(rol_mem_test), "Running ROL.W memory test", 0 },
 };
 
 #define NUM_BUILTIN_TESTS (sizeof(builtin_tests) / sizeof(builtin_tests[0]))

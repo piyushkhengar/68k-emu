@@ -45,12 +45,14 @@ int div_cycles(int ea_mode, int ea_reg, int is_signed);
 int dbcc_cycles(int taken);
 int scc_cycles(int ea_mode, int ea_reg);
 
-/* EXG, ABCD/SBCD, CHK cycle counts. */
+/* EXG, ABCD/SBCD, NBCD, CHK cycle counts. */
 int exg_cycles(void);
 int abcd_sbcd_cycles(int is_memory);
+int nbcd_cycles(int is_memory);
 int chk_cycles(int ea_mode, int ea_reg);
 
-/* LEA, JMP, JSR, TST, CLR cycle counts. */
+/* LEA, PEA, JMP, JSR, TST, CLR cycle counts. */
+int pea_cycles(int mode, int reg);
 int lea_cycles(int mode, int reg);
 int jmp_cycles(int mode, int reg);
 int jsr_cycles(int mode, int reg);

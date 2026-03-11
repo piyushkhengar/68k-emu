@@ -12,6 +12,7 @@
 #define CHK_VECTOR       6
 #define TRAPV_VECTOR     7
 #define PRIVILEGE_VECTOR 8
+#define LINE1010_VECTOR  10
 
 /* Shared CPU state (defined in cpu.c) */
 extern CPU cpu;

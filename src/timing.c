@@ -114,6 +114,12 @@ int addx_subx_cycles(int is_memory, int size)
     return (size == 1) ? 18 : 30;
 }
 
+/* PEA: 8 + LEA cycles (push + EA calc). */
+int pea_cycles(int mode, int reg)
+{
+    return 8 + lea_cycles(mode, reg);
+}
+
 /* LEA: (An)=4, d(An)=8, (d8,An,Xn)=12, abs.w=8, abs.l=12, d(PC)=8, (d8,PC,Xn)=12 */
 int lea_cycles(int mode, int reg)
 {
@@ -231,6 +237,12 @@ int exg_cycles(void)
 
 /* ABCD/SBCD: 6 reg-reg, 18 mem-mem (Motorola). */
 int abcd_sbcd_cycles(int is_memory)
+{
+    return is_memory ? 18 : 6;
+}
+
+/* NBCD: same as ABCD/SBCD. */
+int nbcd_cycles(int is_memory)
 {
     return is_memory ? 18 : 6;
 }

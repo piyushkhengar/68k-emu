@@ -1,6 +1,7 @@
 #include "cpu_internal.h"
 #include "control.h"
 #include "ea.h"
+#include "logic.h"
 #include "memory.h"
 #include "timing.h"
 
@@ -139,6 +140,23 @@ static void decode_ea_addr_jmp_jsr(uint16_t op, uint32_t *addr_out, int *ea_mode
         op_unimplemented(op);
 }
 
+/* PEA <ea>: push effective address. 0x4848-0x484F. Invalid: Dn, An, #imm. */
+static int op_pea(uint16_t op)
+{
+    int ea_mode = ea_mode_from_op(op);
+    int ea_reg = ea_reg_from_op(op);
+
+    if (ea_invalid_for_lea(ea_mode, ea_reg))
+        return op_unimplemented(op);
+    uint32_t addr;
+    if (!ea_address_no_fetch(ea_mode, ea_reg, &addr))
+        return op_unimplemented(op);
+
+    cpu.a[7] -= 4;
+    mem_write32(cpu.a[7], addr);
+    return pea_cycles(ea_mode, ea_reg);
+}
+
 /* LEA <ea>, An. 0x41xx. Invalid: Dn, An, (An)+, -(An), #imm. */
 static int op_lea(uint16_t op)
 {
@@ -192,7 +210,29 @@ static int op_tst(uint16_t op)
     return tst_cycles(ea_mode, ea_reg, size);
 }
 
-/* CLR <ea>. 0x42xx. Store 0, set Z, clear N,V,C. An+byte illegal. */
+/* MOVE.W <ea>, CCR. 0x42C0-0x43FF. Source EA in bits 5-0. */
+static int op_move_ccr(uint16_t op)
+{
+    int ea_mode = ea_mode_from_op(op);
+    int ea_reg = ea_reg_from_op(op);
+    uint16_t val = (uint16_t)(ea_fetch_value(ea_mode, ea_reg, 2) & 0xFFFF);
+    cpu.sr = (cpu.sr & 0xFF00) | (val & 0xFF);
+    return move_cycles(ea_mode, ea_reg, 0, 0, 2);
+}
+
+/* MOVE.W <ea>, SR. 0x46C0-0x47FF. Privileged. Source EA in bits 5-0. */
+static int op_move_sr(uint16_t op)
+{
+    if (!require_supervisor())
+        return 0;
+    int ea_mode = ea_mode_from_op(op);
+    int ea_reg = ea_reg_from_op(op);
+    uint16_t val = (uint16_t)(ea_fetch_value(ea_mode, ea_reg, 2) & 0xFFFF);
+    cpu.sr = val;
+    return move_cycles(ea_mode, ea_reg, 0, 0, 2);
+}
+
+/* CLR <ea>. 0x4200, 0x4240, 0x4280. Store 0, set Z, clear N,V,C. An+byte illegal. */
 static int op_clr(uint16_t op)
 {
     int ea_mode = ea_mode_from_op(op);
@@ -287,10 +327,14 @@ int dispatch_4xxx(uint16_t op)
     if ((op & 0xF1C0) == 0x4180) return op_chk(op);  /* CHK before LEA */
     if ((op >> 8) >= 0x41 && (op >> 8) <= 0x4F && ((op >> 8) & 1)) return op_lea(op);  /* LEA */
     if ((op & 0xFF80) == 0x4880) return op_ext(op);
+    if ((op & 0xFFF8) == 0x4848) return op_pea(op);
     if ((op & 0xFFF8) == 0x4840) return op_swap(op);
+    if ((op & 0xFFC0) == 0x4800) return op_nbcd(op);
     if (op == 0x4AFC) return op_unimplemented(op);  /* ILLEGAL: force vector 4 */
     if ((op & 0xFF00) == 0x4A00) return op_tst(op);
-    if ((op & 0xFF00) == 0x4200) return op_clr(op);
-    if ((op & 0xFF00) == 0x4600) return op_not(op);
+    if ((op & 0xFFC0) == 0x42C0) return op_move_ccr(op);  /* MOVE to CCR before CLR */
+    if ((op & 0xFF00) == 0x4200 && (op & 0x00C0) != 0x00C0) return op_clr(op);  /* CLR: 0x4200, 0x4240, 0x4280 */
+    if ((op & 0xFFC0) == 0x46C0) return op_move_sr(op);   /* MOVE to SR before NOT */
+    if ((op & 0xFFC0) == 0x4600) return op_not(op);
     return op_unimplemented(op);
 }

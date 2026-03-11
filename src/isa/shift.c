@@ -314,14 +314,55 @@ static int op_shift_memory(uint16_t op)
     return shift_cycles_memory(ea_mode, ea_reg);
 }
 
+/* Memory rotate: ROL, ROR, ROXL, ROXR. Word only, count=1. Bits 11-8: 0100=ROL, 0101=ROR, 0110=ROXL, 0111=ROXR. */
+static int op_shift_memory_rotate(uint16_t op)
+{
+    int ea_mode = ea_mode_from_op(op);
+    int ea_reg = ea_reg_from_op(op);
+
+    if (ea_mode == 0 || ea_mode == 1)
+        return op_unimplemented(op);
+    if (ea_mode == 7 && (ea_reg == 2 || ea_reg == 3 || ea_reg == 4))
+        return op_unimplemented(op);
+
+    int rot_type = (op >> 8) & 3;  /* 0=ROL, 1=ROR, 2=ROXL, 3=ROXR */
+    int dir = (op >> 8) & 1;       /* 0=left (ROL/ROXL), 1=right (ROR/ROXR) */
+    uint32_t val = ea_fetch_value(ea_mode, ea_reg, 2) & 0xFFFF;
+    uint32_t result;
+    int last_out;
+    uint32_t xbit = (cpu.sr & SR_X) ? 1 : 0;
+
+    if (dir == 0) {
+        /* Left: ROL or ROXL */
+        last_out = (val >> 15) & 1;
+        if (rot_type == 2)  /* ROXL */
+            result = ((val << 1) | xbit) & 0xFFFF;
+        else                /* ROL */
+            result = ((val << 1) | (val >> 15)) & 0xFFFF;
+    } else {
+        /* Right: ROR or ROXR */
+        last_out = val & 1;
+        if (rot_type == 3)  /* ROXR */
+            result = ((val >> 1) | (xbit << 15)) & 0xFFFF;
+        else                /* ROR */
+            result = ((val >> 1) | (val << 15)) & 0xFFFF;
+    }
+
+    ea_store_value(ea_mode, ea_reg, 2, result);
+    set_nz_from_val(result, 2);
+    cpu.sr &= ~(SR_V | SR_C | SR_X);
+    if (last_out) cpu.sr |= SR_C | SR_X;
+    return shift_cycles_memory(ea_mode, ea_reg);
+}
+
 /* Register shift/rotate dispatcher */
 static int dispatch_shift(uint16_t op)
 {
     if (is_memory_shift(op)) {
-        /* Memory: bits 7-6 = 11. Bits 11-8: 0000/0001=ASL/ASR, 0010/0011=LSL/LSR. */
+        /* Memory: bits 7-6 = 11. Bits 11-8: 0000/0001=ASL/ASR, 0010/0011=LSL/LSR, 0100-0111=ROL/ROR/ROXL/ROXR. */
         if (((op >> 8) & 0x0C) == 0)
             return op_shift_memory(op);
-        return op_unimplemented(op);  /* ROL/ROR/ROXL/ROXR memory */
+        return op_shift_memory_rotate(op);
     }
 
     /* Register format */
@@ -355,11 +396,10 @@ static int dispatch_shift(uint16_t op)
     }
 }
 
-/* 0xExxx: route to shift or ADD. Plan: second nibble 0-3 or 5-7 -> shift. */
+/* 0xExxx: route to shift or ADD. Second nibble 0-7 -> shift (ASL/ASR/LSL/LSR/ROL/ROR/ROXL/ROXR). */
 int dispatch_Exxx(uint16_t op)
 {
     int second = (op >> 8) & 0x0F;
-    if (second >= 0x0 && second <= 0x3) return dispatch_shift(op);
-    if (second >= 0x5 && second <= 0x7) return dispatch_shift(op);
+    if (second >= 0 && second <= 7) return dispatch_shift(op);
     return dispatch_add(op);
 }

@@ -184,7 +184,7 @@ void cpu_take_exception(int vector_num, int cycles_before_fault)
 
     exception_cycles_result = cycles_before_fault + exception_cycles(vector_num);
 
-    /* Push PC (4 bytes), then SR (2 bytes). Stack grows downward. */
+    /* Push PC (4 bytes), then SR (2 bytes). Stack grows downward. SR at (A7), PC at (A7)+2 for RTE. */
     sp -= 4;
     mem_write32(sp, cpu.pc);
     sp -= 2;
@@ -224,6 +224,15 @@ int op_unimplemented(uint16_t op)
     return 0;  /* unreachable */
 }
 
+/* Line 1010 (0xAxxx): unimplemented line, vector 10. */
+static int op_line1010(uint16_t op)
+{
+    (void)op;
+    cpu.pc -= 2;
+    cpu_take_exception(LINE1010_VECTOR, 4);
+    return 0;  /* unreachable */
+}
+
 typedef int (*op_handler_fn)(uint16_t op);
 
 /* Top-nibble dispatch table. Index = op >> 12. */
@@ -238,7 +247,7 @@ static const op_handler_fn dispatch_top[16] = {
     [0x7] = op_moveq,
     [0x8] = dispatch_8xxx,
     [0x9] = dispatch_9xxx,
-    [0xA] = op_unimplemented,
+    [0xA] = op_line1010,
     [0xB] = dispatch_Bxxx,
     [0xC] = dispatch_Cxxx,
     [0xD] = dispatch_add,

@@ -99,6 +99,36 @@ static int op_bcd_math(uint16_t op, int is_add)
 static int op_abcd(uint16_t op) { return op_bcd_math(op, 1); }
 static int op_sbcd(uint16_t op) { return op_bcd_math(op, 0); }
 
+/* NBCD <ea>: 0 - dest - X (BCD). 0x4800-0x483F. EA in bits 5-0: Dn (mode 0) or -(An) (mode 4). */
+int op_nbcd(uint16_t op)
+{
+    int ea_mode = ea_mode_from_op(op);
+    int ea_reg = ea_reg_from_op(op);
+    uint8_t x_in = (cpu.sr & SR_X) ? 1 : 0;
+    uint8_t borrow;
+
+    if (ea_mode == 0) {
+        uint8_t dest = (uint8_t)(cpu.d[ea_reg] & 0xFF);
+        uint8_t result = bcd_sub_byte(0, dest, x_in, &borrow);
+        cpu.d[ea_reg] = (cpu.d[ea_reg] & 0xFFFFFF00) | result;
+        cpu.sr &= ~(SR_N | SR_V | SR_C | SR_X);
+        if (borrow) cpu.sr |= SR_C | SR_X;
+        if (result != 0) cpu.sr &= ~SR_Z;
+        return nbcd_cycles(0);
+    } else if (ea_mode == 4) {
+        cpu.a[ea_reg] -= ea_step(ea_reg, 1);
+        uint8_t dest = (uint8_t)mem_read8(cpu.a[ea_reg]);
+        uint8_t result = bcd_sub_byte(0, dest, x_in, &borrow);
+        mem_write8(cpu.a[ea_reg], result);
+        cpu.sr &= ~(SR_N | SR_V | SR_C | SR_X);
+        if (borrow) cpu.sr |= SR_C | SR_X;
+        if (result != 0) cpu.sr &= ~SR_Z;
+        return nbcd_cycles(1);
+    } else {
+        return op_unimplemented(op);
+    }
+}
+
 /* Byte ops cannot use An (mode 1). */
 static int logic_reject_byte_an(uint16_t op, int ea_mode, int size)
 {
