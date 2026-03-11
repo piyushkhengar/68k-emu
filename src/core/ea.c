@@ -22,18 +22,22 @@ static void mem_write_sized(uint32_t addr, int size, uint32_t value)
     else mem_write32(addr, value);
 }
 
-/* 68K extension word for (d8,An,Xn): bits 15-8=disp, 7=0, 6=DA, 5=WL, 4-0=reg (use 2-0 for 0-7) */
+/* 68K brief extension word for (d8,An,Xn). Per Musashi/M68000:
+ * Bits 15-12: D/A (bit 15) + register (14-12). Bits 11-9: W/L (11) + scale (10-9).
+ * Bit 8: 0 (brief). Bits 7-0: 8-bit displacement (sign-extended). */
 static uint32_t decode_indexed_addr(uint32_t base)
 {
     uint16_t ext = fetch16();
-    int32_t disp = (int8_t)(ext >> 8);
-    int idx_reg = (ext >> 0) & 7;
-    int idx_is_addr = (ext >> 6) & 1;
-    int idx_long = (ext >> 5) & 1;
+    int32_t disp = (int8_t)(ext & 0xFF);
+    int idx_reg = (ext >> 12) & 7;
+    int idx_is_addr = (ext >> 15) & 1;
+    int idx_long = (ext >> 11) & 1;
     uint32_t idx_val = idx_is_addr ? cpu.a[idx_reg] : cpu.d[idx_reg];
     if (!idx_long)
         idx_val = (uint32_t)(int32_t)(int16_t)(idx_val & 0xFFFF);
-    return base + disp + idx_val;
+    /* 68000: 24-bit address bus */
+    uint32_t base24 = base & 0xFFFFFF;
+    return (base24 + disp + idx_val) & 0xFFFFFF;
 }
 
 /* Returns 1 if addr was resolved (memory EA), 0 otherwise. */

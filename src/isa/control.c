@@ -177,7 +177,7 @@ static void decode_ea_addr_jmp_jsr(uint16_t op, uint32_t *addr_out, int *ea_mode
         op_unimplemented(op);
 }
 
-/* PEA <ea>: push effective address. 0x4848-0x484F. Invalid: Dn, An, #imm. */
+/* PEA <ea>: push effective address. 0x4848-0x487F. Invalid: Dn, An, #imm. */
 static int op_pea(uint16_t op)
 {
     int ea_mode = ea_mode_from_op(op);
@@ -461,8 +461,8 @@ int dispatch_4xxx(uint16_t op)
     if ((op & 0xFFC0) == 0x4C80 && movem_load_ea_valid((op >> 3) & 7, op & 7))
         return op_movem_load(op);
     if ((op & 0xFF80) == 0x4880) return op_ext(op);
-    if ((op & 0xFFF8) == 0x4848) return op_pea(op);
-    if ((op & 0xFFF8) == 0x4840) return op_swap(op);
+    if ((op & 0xFFF8) == 0x4840) return op_swap(op);   /* SWAP before PEA: 0x4840-0x4847 */
+    if ((op & 0xFFC0) == 0x4840) return op_pea(op);    /* PEA: 0x4848-0x487F */
     if ((op & 0xFFC0) == 0x4800) return op_nbcd(op);
     if (op == 0x4AFC) return op_illegal(op);  /* ILLEGAL: explicit vector 4 */
     if ((op & 0xFFC0) == 0x4AC0) return op_tas(op);  /* TAS before TST */
@@ -470,6 +470,7 @@ int dispatch_4xxx(uint16_t op)
     if ((op & 0xFFC0) == 0x42C0) return op_move_ccr(op);  /* MOVE to CCR before CLR */
     if ((op & 0xFF00) == 0x4200 && (op & 0x00C0) != 0x00C0) return op_clr(op);  /* CLR: 0x4200, 0x4240, 0x4280 */
     if ((op & 0xFFC0) == 0x46C0) return op_move_sr(op);   /* MOVE to SR before NOT */
-    if ((op & 0xFFC0) == 0x4600) return op_not(op);
+    if ((op & 0xFFC0) == 0x4600 || (op & 0xFFC0) == 0x4640 || (op & 0xFFC0) == 0x4680)
+        return op_not(op);   /* NOT.b, NOT.w, NOT.l */
     return op_unimplemented(op);
 }
