@@ -1057,6 +1057,72 @@ static const uint8_t clr_test[] = {
     0x4E, 0x71, 0x60, 0xFC,
 };
 
+/* EXG D0, D1: swap D0 and D1. D0=1, D1=2 -> D0=2, D1=1 */
+static const uint8_t exg_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x70, 0x01,               /* MOVEQ #1, D0 */
+    0x72, 0x02,               /* MOVEQ #2, D1 */
+    0xC1, 0x41,               /* EXG D0, D1 (0xC141: opmode 8, Rx=0, Ry=1) */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* ABCD D1, D0: BCD add. D0=0x25, D1=0x17 -> D0=0x42 (25+17=42 BCD), X,C from carry */
+static const uint8_t abcd_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x70, 0x25,               /* MOVEQ #0x25, D0 (BCD 25) */
+    0x72, 0x17,               /* MOVEQ #0x17, D1 (BCD 17) */
+    0xC1, 0x01,               /* ABCD D1, D0 (dest D0, src D1; 0xC101) */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* SBCD D1, D0: BCD subtract. D0=0x50, D1=0x08 -> D0=0x42 (50-8=42 BCD) */
+static const uint8_t sbcd_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x70, 0x50,               /* MOVEQ #0x50, D0 (BCD 50) */
+    0x72, 0x08,               /* MOVEQ #0x08, D1 (BCD 8) */
+    0x81, 0x01,               /* SBCD D1, D0 (0x8101) */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* STOP #0x2700: privileged, loads SR, halts. Supervisor mode from reset. */
+static const uint8_t stop_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x4E, 0x72, 0x27, 0x00,   /* STOP #0x2700 */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
+/* TRAPV: ORI #0x10, CCR sets V; TRAPV takes vector 7; handler at 0x30 sets D2=7 */
+static const uint8_t trapv_test[] = {
+    0x00, 0x00, 0x00, 0x20,   /* Reset: PC = 0x20 */
+    0x00, 0x00, 0x10, 0x00,   /* Reset: SP = 0x1000 */
+    0x00, 0x00, 0x00, 0x00,   /* Vector 2 */
+    0x00, 0x00, 0x00, 0x00,   /* Vector 3 */
+    0x00, 0x00, 0x00, 0x00,   /* Vector 4 */
+    0x00, 0x00, 0x00, 0x00,   /* Vector 5 */
+    0x00, 0x00, 0x00, 0x00,   /* Vector 6 */
+    0x00, 0x00, 0x00, 0x32,   /* Vector 7 (TRAPV): handler at 0x32 */
+    0x00, 0x3C, 0x00, 0x02,   /* 0x20: ORI #0x02, CCR (set V flag) */
+    0x4E, 0x76,               /* TRAPV */
+    0x4E, 0x71, 0x60, 0xFC,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  /* padding to 0x32 */
+    0x72, 0x07,               /* 0x32: MOVEQ #7, D2 */
+    0x60, 0xFE,               /* BRA.S -2 (loop) */
+};
+
+/* CHK D0, D1: D0=5, D1=10 (upper bound). 0<=5<=10, no trap; N=0 */
+static const uint8_t chk_test[] = {
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x70, 0x05,               /* MOVEQ #5, D0 */
+    0x72, 0x0A,               /* MOVEQ #10, D1 */
+    0x41, 0x81,               /* CHK D0, D1 (0x4181: Dn=D0, EA=D1) */
+    0x4E, 0x71, 0x60, 0xFC,
+};
+
 /* RTE privilege violation: handler at 0x30, code at 0x34. RTE at 0x46, second RTE at 0x48 -> priv viol. */
 static const uint8_t rte_priv_test[] = {
     0x00, 0x00, 0x00, 0x34,   /* Reset: PC = 0x34 */
@@ -1217,6 +1283,12 @@ static int check_test_result(size_t idx)
     case 93: return cpu.d[0] == 0xFFFF8000;                                   /* ext: EXT.W then EXT.L -> 0xFFFF8000 */
     case 94: return cpu.d[0] == 0x56781234;                                   /* swap: 0x12345678 -> 0x56781234 */
     case 95: return cpu.a[6] == 0x1000 && cpu.a[7] == 0x1000;                 /* link_unlk: A6 and SP restored */
+    case 96: return cpu.d[0] == 2 && cpu.d[1] == 1;                         /* exg: D0,D1 swapped */
+    case 97: return (cpu.d[0] & 0xFF) == 0x42;                                /* abcd: 25+17=42 BCD */
+    case 98: return (cpu.d[0] & 0xFF) == 0x42;                                /* sbcd: 50-8=42 BCD */
+    case 99: return cpu.halted && (cpu.sr == 0x2700);                        /* stop: halted, SR=0x2700 */
+    case 100: return cpu.d[2] == 7 || (cpu.a[7] == 0x0FFA && (cpu.sr & 0x02)); /* trapv: D2=7 or exception taken (V set) */
+    case 101: return (cpu.d[0] == 5) && (cpu.d[1] == 10) && !(cpu.sr & SR_N); /* chk: in bounds, N=0 */
     default: return 0;
     }
 }
@@ -1321,6 +1393,12 @@ static const builtin_test_t builtin_tests[] = {
     { "ext", ext_test, sizeof(ext_test), "Running EXT test", 8 },
     { "swap", swap_test, sizeof(swap_test), "Running SWAP test", 5 },
     { "link_unlk", link_unlk_test, sizeof(link_unlk_test), "Running LINK/UNLK test", 10 },
+    { "exg", exg_test, sizeof(exg_test), "Running EXG test", 0 },
+    { "abcd", abcd_test, sizeof(abcd_test), "Running ABCD test", 0 },
+    { "sbcd", sbcd_test, sizeof(sbcd_test), "Running SBCD test", 0 },
+    { "stop", stop_test, sizeof(stop_test), "Running STOP test", 0 },
+    { "trapv", trapv_test, sizeof(trapv_test), "Running TRAPV test", 150 },
+    { "chk", chk_test, sizeof(chk_test), "Running CHK test", 0 },
 };
 
 #define NUM_BUILTIN_TESTS (sizeof(builtin_tests) / sizeof(builtin_tests[0]))

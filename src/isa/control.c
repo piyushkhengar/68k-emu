@@ -1,7 +1,69 @@
 #include "cpu_internal.h"
 #include "control.h"
 #include "ea.h"
+#include "memory.h"
 #include "timing.h"
+
+#define CYCLES_STOP  4
+#define CYCLES_RESET 132
+
+/* RESET: 0x4E70. Privileged. Assert external RESET (no-op in emulator). */
+static int op_reset(uint16_t op)
+{
+    (void)op;
+    if (!(cpu.sr & 0x2000)) {
+        cpu_take_exception(PRIVILEGE_VECTOR, 4);
+        return 0;
+    }
+    return CYCLES_RESET;
+}
+
+/* STOP: 0x4E72. Privileged. Load SR from immediate, then halt. */
+static int op_stop(uint16_t op)
+{
+    (void)op;
+    uint16_t imm = fetch16();
+    if (!(imm & 0x2000)) {  /* S-bit clear = user mode */
+        cpu_take_exception(PRIVILEGE_VECTOR, 4);
+        return 0;
+    }
+    cpu.sr = imm;
+    cpu.halted = 1;
+    return CYCLES_STOP;
+}
+
+/* TRAPV: 0x4E76. Trap on overflow (vector 7). */
+static int op_trapv(uint16_t op)
+{
+    (void)op;
+    if (cpu.sr & SR_V) {
+        cpu_take_exception(TRAPV_VECTOR, 4);
+        return 0;
+    }
+    return 4;
+}
+
+/* CHK Dn, <ea>: 0x4180-0x41BF. Bounds check; trap vector 6 if Dn < 0 or Dn > (EA). */
+static int op_chk(uint16_t op)
+{
+    int dn = (op >> 9) & 7;
+    int ea_mode = ea_mode_from_op(op);
+    int ea_reg = ea_reg_from_op(op);
+
+    int32_t dn_val = (int32_t)(int16_t)(cpu.d[dn] & 0xFFFF);
+    int32_t bound = (int32_t)(int16_t)(ea_fetch_value(ea_mode, ea_reg, 2) & 0xFFFF);
+
+    if (dn_val < 0 || dn_val > bound) {
+        cpu.sr &= ~SR_N;
+        if (dn_val < 0)
+            cpu.sr |= SR_N;  /* N=1 if Dn < 0 */
+        /* N=0 if Dn > bound */
+        cpu_take_exception(CHK_VECTOR, 4);
+        return 0;
+    }
+    cpu.sr &= ~SR_N;  /* In bounds: N=0 */
+    return chk_cycles(ea_mode, ea_reg);
+}
 
 /* NOP: no operation. 0x4E71. */
 static int op_nop(uint16_t op)
@@ -213,9 +275,12 @@ static int op_unlk(uint16_t op)
     return CYCLES_UNLK;
 }
 
-/* 0x4xxx: LINK, UNLK, JSR, JMP, TRAP, RTE, RTS, NOP, LEA, EXT, SWAP, TST, CLR, NOT. */
+/* 0x4xxx: RESET, STOP, TRAPV, LINK, UNLK, JSR, JMP, TRAP, RTE, RTS, NOP, CHK, LEA, EXT, SWAP, TST, CLR, NOT. */
 int dispatch_4xxx(uint16_t op)
 {
+    if (op == 0x4E70) return op_reset(op);
+    if (op == 0x4E72) return op_stop(op);
+    if (op == 0x4E76) return op_trapv(op);
     if ((op & 0xFFF8) == 0x4E50) return op_link(op);
     if ((op & 0xFFF8) == 0x4E58) return op_unlk(op);
     if ((op & 0xFFC0) == 0x4E80) return op_jsr(op);
@@ -224,6 +289,7 @@ int dispatch_4xxx(uint16_t op)
     if (op == 0x4E73) return op_rte(op);
     if (op == 0x4E75) return op_rts(op);
     if (op == 0x4E71) return op_nop(op);
+    if ((op & 0xF1C0) == 0x4180) return op_chk(op);  /* CHK before LEA */
     if ((op >> 8) >= 0x41 && (op >> 8) <= 0x4F && ((op >> 8) & 1)) return op_lea(op);  /* LEA */
     if ((op & 0xFF80) == 0x4880) return op_ext(op);
     if ((op & 0xFFF8) == 0x4840) return op_swap(op);

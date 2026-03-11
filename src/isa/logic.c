@@ -9,7 +9,122 @@
 #include "cpu_internal.h"
 #include "ea.h"
 #include "logic.h"
+#include "memory.h"
 #include "timing.h"
+
+/* EXG: swap two 32-bit registers. Opmode 8=Dx,Dy 9=Ax,Ay 17=Dx,Ay. */
+static int op_exg(uint16_t op)
+{
+    int opmode = (op >> 3) & 0x1F;
+    int rx = (op >> 9) & 7;
+    int ry = op & 7;
+    uint32_t tmp;
+
+    if (opmode == 0x08) {
+        tmp = cpu.d[rx];
+        cpu.d[rx] = cpu.d[ry];
+        cpu.d[ry] = tmp;
+    } else if (opmode == 0x09) {
+        tmp = cpu.a[rx];
+        cpu.a[rx] = cpu.a[ry];
+        cpu.a[ry] = tmp;
+    } else if (opmode == 0x11) {
+        tmp = cpu.d[rx];
+        cpu.d[rx] = cpu.a[ry];
+        cpu.a[ry] = tmp;
+    } else {
+        return op_unimplemented(op);
+    }
+    return exg_cycles();
+}
+
+/* BCD add: dest + src + X. Returns result, sets *carry_out. */
+static uint8_t bcd_add_byte(uint8_t dest, uint8_t src, uint8_t x_in, uint8_t *carry_out)
+{
+    uint8_t lo = (dest & 0x0F) + (src & 0x0F) + x_in;
+    uint8_t hi_carry = (lo >= 10) ? 1 : 0;
+    if (lo >= 10) lo -= 10;
+    uint8_t hi = (dest >> 4) + (src >> 4) + hi_carry;
+    *carry_out = (hi >= 10) ? 1 : 0;
+    if (hi >= 10) hi -= 10;
+    return (hi << 4) | lo;
+}
+
+/* BCD subtract: dest - src - X. Returns result, sets *borrow_out. */
+static uint8_t bcd_sub_byte(uint8_t dest, uint8_t src, uint8_t x_in, uint8_t *borrow_out)
+{
+    int lo = (int)(dest & 0x0F) - (int)(src & 0x0F) - (int)x_in;
+    uint8_t hi_borrow = (lo < 0) ? 1 : 0;
+    if (lo < 0) lo += 10;
+    int hi = (int)(dest >> 4) - (int)(src >> 4) - (int)hi_borrow;
+    *borrow_out = (hi < 0) ? 1 : 0;
+    if (hi < 0) hi += 10;
+    return (uint8_t)((hi << 4) | lo);
+}
+
+/* ABCD: BCD add. RM=0: Dy,Dx. RM=1: -(Ay),-(Ax). */
+static int op_abcd(uint16_t op)
+{
+    int rm = (op >> 3) & 1;
+    int rx = (op >> 9) & 7;
+    int ry = op & 7;
+    uint8_t x_in = (cpu.sr & SR_X) ? 1 : 0;
+    uint8_t carry;
+
+    if (rm == 0) {
+        uint8_t src = (uint8_t)(cpu.d[ry] & 0xFF);
+        uint8_t dest = (uint8_t)(cpu.d[rx] & 0xFF);
+        uint8_t result = bcd_add_byte(dest, src, x_in, &carry);
+        cpu.d[rx] = (cpu.d[rx] & 0xFFFFFF00) | result;
+        cpu.sr &= ~(SR_N | SR_V | SR_C | SR_X);
+        if (carry) cpu.sr |= SR_C | SR_X;
+        if (result != 0) cpu.sr &= ~SR_Z;
+        return abcd_sbcd_cycles(0);
+    } else {
+        cpu.a[ry] -= ea_step(ry, 1);
+        cpu.a[rx] -= ea_step(rx, 1);
+        uint8_t src = (uint8_t)mem_read8(cpu.a[ry]);
+        uint8_t dest = (uint8_t)mem_read8(cpu.a[rx]);
+        uint8_t result = bcd_add_byte(dest, src, x_in, &carry);
+        mem_write8(cpu.a[rx], result);
+        cpu.sr &= ~(SR_N | SR_V | SR_C | SR_X);
+        if (carry) cpu.sr |= SR_C | SR_X;
+        if (result != 0) cpu.sr &= ~SR_Z;
+        return abcd_sbcd_cycles(1);
+    }
+}
+
+/* SBCD: BCD subtract. RM=0: Dy,Dx. RM=1: -(Ay),-(Ax). */
+static int op_sbcd(uint16_t op)
+{
+    int rm = (op >> 3) & 1;
+    int rx = (op >> 9) & 7;
+    int ry = op & 7;
+    uint8_t x_in = (cpu.sr & SR_X) ? 1 : 0;
+    uint8_t borrow;
+
+    if (rm == 0) {
+        uint8_t src = (uint8_t)(cpu.d[ry] & 0xFF);
+        uint8_t dest = (uint8_t)(cpu.d[rx] & 0xFF);
+        uint8_t result = bcd_sub_byte(dest, src, x_in, &borrow);
+        cpu.d[rx] = (cpu.d[rx] & 0xFFFFFF00) | result;
+        cpu.sr &= ~(SR_N | SR_V | SR_C | SR_X);
+        if (borrow) cpu.sr |= SR_C | SR_X;
+        if (result != 0) cpu.sr &= ~SR_Z;
+        return abcd_sbcd_cycles(0);
+    } else {
+        cpu.a[ry] -= ea_step(ry, 1);
+        cpu.a[rx] -= ea_step(rx, 1);
+        uint8_t src = (uint8_t)mem_read8(cpu.a[ry]);
+        uint8_t dest = (uint8_t)mem_read8(cpu.a[rx]);
+        uint8_t result = bcd_sub_byte(dest, src, x_in, &borrow);
+        mem_write8(cpu.a[rx], result);
+        cpu.sr &= ~(SR_N | SR_V | SR_C | SR_X);
+        if (borrow) cpu.sr |= SR_C | SR_X;
+        if (result != 0) cpu.sr &= ~SR_Z;
+        return abcd_sbcd_cycles(1);
+    }
+}
 
 /* Byte ops cannot use An (mode 1). */
 static int logic_reject_byte_an(uint16_t op, int ea_mode, int size)
@@ -231,9 +346,11 @@ int op_eor(uint16_t op)
     return add_sub_cycles(d.ea_mode, d.ea_reg, d.size, 1);
 }
 
-/* 0x8xxx: OR. DIVU (opmode 3), DIVS (opmode 7). */
+/* 0x8xxx: OR. SBCD, DIVU (opmode 3), DIVS (opmode 7). */
 int dispatch_8xxx(uint16_t op)
 {
+    if ((op & 0xF1F0) == 0x8100)
+        return op_sbcd(op);
     int opmode = (op >> 6) & 7;
     if (opmode == 3)
         return op_divu(op);
@@ -242,13 +359,18 @@ int dispatch_8xxx(uint16_t op)
     return op_or_generic(op);
 }
 
-/* 0xCxxx: AND. MULU (opmode 3), MULS (opmode 7). */
+/* 0xCxxx: EXG, ABCD, AND. MULU (opmode 3), MULS (opmode 7). */
 int dispatch_Cxxx(uint16_t op)
 {
-    int opmode = (op >> 6) & 7;
-    if (opmode == 3)
+    int opmode = (op >> 3) & 0x1F;
+    if ((op & 0xF100) == 0xC100 && (opmode == 0x08 || opmode == 0x09 || opmode == 0x11))
+        return op_exg(op);
+    if ((op & 0xF1F0) == 0xC100)
+        return op_abcd(op);
+    int om = (op >> 6) & 7;
+    if (om == 3)
         return op_mulu(op);
-    if (opmode == 7)
+    if (om == 7)
         return op_muls(op);
     return op_and_generic(op);
 }

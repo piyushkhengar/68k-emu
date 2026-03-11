@@ -223,6 +223,24 @@ int scc_cycles(int ea_mode, int ea_reg)
     return 8 + ea_cycles(ea_mode, ea_reg, 1);
 }
 
+/* EXG: 6 cycles (Motorola). */
+int exg_cycles(void)
+{
+    return 6;
+}
+
+/* ABCD/SBCD: 6 reg-reg, 18 mem-mem (Motorola). */
+int abcd_sbcd_cycles(int is_memory)
+{
+    return is_memory ? 18 : 6;
+}
+
+/* CHK: 10 + ea_cycles (word). Motorola MC68000. */
+int chk_cycles(int ea_mode, int ea_reg)
+{
+    return 10 + ea_cycles(ea_mode, ea_reg, 2);
+}
+
 /* CLR: Dn: 4(B), 4(W), 6(L). Memory: 8 + ea_cycles (read+write). */
 int clr_cycles(int mode, int reg, int size)
 {
@@ -239,6 +257,7 @@ int exception_cycles(int vector_num)
     case 3:  return 50;  /* Address Error / Bus Error */
     case 4:  return 34;  /* Illegal Instruction / Trace */
     case 5:  return 34;  /* Divide by Zero */
+    case 6:  return 34;  /* CHK (bounds violation) */
     case 7:  return 34;  /* TRAPV (trap taken) */
     case 8:  return 34;  /* Privilege Violation */
     case 9:  return 38;  /* Trace */
