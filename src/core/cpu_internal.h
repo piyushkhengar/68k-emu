@@ -36,6 +36,9 @@ void set_nzvc_subx_sized(uint32_t result, uint32_t dest_val, uint32_t source_val
 /* Fallback for unimplemented opcodes (never returns; longjmps). Returns int for dispatch compatibility. */
 int op_unimplemented(uint16_t op);
 
+/* ILLEGAL instruction (0x4AFC): explicit vector 4. Same effect as op_unimplemented. */
+int op_illegal(uint16_t op);
+
 /* Take exception: push PC and SR, set supervisor mode, load handler from vector.
  * cycles_before_fault: cycles consumed by aborted instruction (e.g. 4 for illegal opcode fetch). */
 void cpu_take_exception(int vector_num, int cycles_before_fault);

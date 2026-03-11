@@ -83,6 +83,12 @@ int move_cycles(int src_mode, int src_reg, int dst_mode, int dst_reg, int size)
     return move_bw[di][si];
 }
 
+/* MOVEP: 16 (word) or 24 (long). Motorola MC68000 d(An) form. */
+int movep_cycles(int size)
+{
+    return (size == 4) ? 24 : 16;
+}
+
 /* ADD/SUB: base + EA. dir=0: <ea> to Dn, dir=1: Dn to <ea>. */
 int add_sub_cycles(int ea_mode, int ea_reg, int size, int dir)
 {

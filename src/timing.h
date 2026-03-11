@@ -21,6 +21,9 @@ int ea_cycles(int mode, int reg, int size);
 /* MOVE cycles: full instruction time. size=1,2,4 for B,W,L. */
 int move_cycles(int src_mode, int src_reg, int dst_mode, int dst_reg, int size);
 
+/* MOVEP: 16 (word) or 24 (long). Motorola MC68000. */
+int movep_cycles(int size);
+
 /* ADD/SUB base + EA. dir=0: <ea> to Dn, dir=1: Dn to <ea>. */
 int add_sub_cycles(int ea_mode, int ea_reg, int size, int dir);
 

@@ -231,6 +231,15 @@ int op_unimplemented(uint16_t op)
     return 0;  /* unreachable */
 }
 
+/* ILLEGAL (0x4AFC): intentional trap to vector 4. Same as op_unimplemented. */
+int op_illegal(uint16_t op)
+{
+    (void)op;
+    cpu.pc -= 2;
+    cpu_take_exception(ILLEGAL_VECTOR, 4);
+    return 0;  /* unreachable */
+}
+
 /* Line 1010 (0xAxxx): unimplemented line, vector 10. */
 static int op_line1010(uint16_t op)
 {

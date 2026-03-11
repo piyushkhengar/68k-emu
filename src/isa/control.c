@@ -464,7 +464,7 @@ int dispatch_4xxx(uint16_t op)
     if ((op & 0xFFF8) == 0x4848) return op_pea(op);
     if ((op & 0xFFF8) == 0x4840) return op_swap(op);
     if ((op & 0xFFC0) == 0x4800) return op_nbcd(op);
-    if (op == 0x4AFC) return op_unimplemented(op);  /* ILLEGAL: force vector 4 */
+    if (op == 0x4AFC) return op_illegal(op);  /* ILLEGAL: explicit vector 4 */
     if ((op & 0xFFC0) == 0x4AC0) return op_tas(op);  /* TAS before TST */
     if ((op & 0xFF00) == 0x4A00) return op_tst(op);
     if ((op & 0xFFC0) == 0x42C0) return op_move_ccr(op);  /* MOVE to CCR before CLR */
