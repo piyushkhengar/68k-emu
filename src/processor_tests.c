@@ -22,7 +22,8 @@ static uint32_t get_num(cJSON *item)
     if (!item || !cJSON_IsNumber(item))
         return 0;
     double d = item->valuedouble;
-    return (uint32_t)(int32_t)d;  /* Handle sign for 32-bit */
+    /* Use int64_t to avoid overflow: values 0..2^32-1 map correctly to uint32_t */
+    return (uint32_t)(int64_t)d;
 }
 
 static void apply_ram(cJSON *ram)
@@ -249,7 +250,7 @@ static char *load_json(const char *path, size_t *out_size)
     return load_file(path, out_size);
 }
 
-static int run_file(const char *path, int *passed, int *failed, int verbose)
+static int run_file(const char *path, int *passed, int *failed, int verbose, int test_index)
 {
     size_t json_size;
     char *json = load_json(path, &json_size);
@@ -275,6 +276,9 @@ static int run_file(const char *path, int *passed, int *failed, int verbose)
     int file_passed = 0, file_failed = 0;
 
     for (int i = 0; i < count; i++) {
+        if (test_index >= 0 && i != test_index)
+            continue;
+
         cJSON *test = cJSON_GetArrayItem(root, i);
         if (!test || !cJSON_IsObject(test))
             continue;
@@ -293,7 +297,16 @@ static int run_file(const char *path, int *passed, int *failed, int verbose)
 
         mem_reset();
         apply_initial(initial);
+        if (test_index >= 0) {
+            printf("Before: pc=0x%08X a6=0x%08X d0=0x%08X\n", (unsigned)cpu.pc, (unsigned)cpu.a[6], (unsigned)cpu.d[0]);
+        }
         cpu_step();
+        if (test_index >= 0) {
+            printf("After:  pc=0x%08X a6=0x%08X d0=0x%08X\n", (unsigned)cpu.pc, (unsigned)cpu.a[6], (unsigned)cpu.d[0]);
+            cJSON *exp_a6 = cJSON_GetObjectItem(final, "a6");
+            if (exp_a6)
+                printf("Expected a6=0x%08X\n", (unsigned)get_num(exp_a6));
+        }
 
         int first = 0;
         if (check_final(final, name, &first)) {
@@ -301,6 +314,8 @@ static int run_file(const char *path, int *passed, int *failed, int verbose)
         } else {
             file_failed++;
         }
+        if (test_index >= 0)
+            break;
     }
 
     cJSON_Delete(root);
@@ -316,7 +331,7 @@ static int name_matches_filter(const char *name, const char *filter)
     return strstr(name, filter) != NULL;
 }
 
-static int run_directory(const char *dir, const char *filter, int *passed, int *failed, int verbose)
+static int run_directory(const char *dir, const char *filter, int *passed, int *failed, int verbose, int test_index)
 {
     DIR *d = opendir(dir);
     if (!d) {
@@ -358,7 +373,7 @@ static int run_directory(const char *dir, const char *filter, int *passed, int *
 
         char path[512];
         snprintf(path, sizeof(path), "%s/%s", dir, ent->d_name);
-        if (run_file(path, passed, failed, verbose) == 0)
+        if (run_file(path, passed, failed, verbose, test_index) == 0)
             files++;
     }
     closedir(d);
@@ -367,14 +382,19 @@ static int run_directory(const char *dir, const char *filter, int *passed, int *
 
 int run_processor_tests(const char *dir, const char *filter)
 {
+    int test_index = -1;
+    const char *env = getenv("PROCESSOR_TEST_INDEX");
+    if (env && *env)
+        test_index = atoi(env);
+
     printf("ProcessorTests: %s%s%s%s\n", dir,
            filter && *filter ? " (filter: " : "",
            filter && *filter ? filter : "",
            filter && *filter ? ")" : "");
     int passed = 0, failed = 0;
-    int verbose = 0;  /* Set to 1 for per-test output */
+    int verbose = test_index >= 0 ? 1 : 0;
 
-    if (run_directory(dir, filter, &passed, &failed, verbose) < 0)
+    if (run_directory(dir, filter, &passed, &failed, verbose, test_index) < 0)
         return 1;
 
     printf("Passed: %d  Failed: %d\n", passed, failed);
