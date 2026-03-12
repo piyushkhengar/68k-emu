@@ -27,9 +27,9 @@ void cpu_init(void)
 
 void cpu_reset(void)
 {
-    /* 68K fetches reset vector at 0x000000: PC, then SP (SSP) */
-    cpu.pc = mem_read32(0);
-    cpu.ssp = mem_read32(4);
+    /* 68K fetches reset vector at 0x000000: SP (SSP), then PC (per Motorola spec) */
+    cpu.ssp = mem_read32(0);
+    cpu.pc = mem_read32(4);
     cpu.usp = 0;
     /* Clear D0-D7 and A0-A6 for consistent test baseline (A7 set from SSP) */
     for (int i = 0; i < 8; i++)

@@ -78,7 +78,33 @@ make test
 
 # Run a ROM file (e.g. 68K test suite binary)
 ./68k-emu path/to/rom.bin
+
+# Run MicroCore Labs 68K opcode test (after building - see below)
+./68k-emu mcl68_test.bin
 ```
+
+## Building the MicroCore Labs Test ROM
+
+The [MicroCore Labs MC68000 test](https://github.com/MicroCoreLabs/Projects/tree/master/MCL68/MC68000_Test_Code) exercises all 68000 opcodes. To build and run:
+
+1. **Install vasm** (68K Motorola syntax assembler):
+   ```bash
+   git clone https://github.com/dbuchwald/vasm /tmp/vasm-src
+   cd /tmp/vasm-src && make CPU=m68k SYNTAX=mot
+   ```
+
+2. **Download and prepare the source** (fixes Easy68K→vasm syntax):
+   ```bash
+   curl -sL "https://raw.githubusercontent.com/MicroCoreLabs/Projects/master/MCL68/MC68000_Test_Code/MC68000_test_all_opcodes.X68" -o MC68000_test_all_opcodes.X68
+   python3 -c "import re; c=open('MC68000_test_all_opcodes.X68').read(); c=re.sub(r'\s*,\s*', ',', c); open('MC68000_test_all_opcodes_fixed.X68','w').write(c)"
+   # Replace SIMHALT (Easy68K) with: bra *
+   ```
+
+3. **Assemble**:
+   ```bash
+   /tmp/vasm-src/vasmm68k_mot -m68000 -Fbin -o mcl68_test.bin MC68000_test_all_opcodes_fixed.X68
+   ./68k-emu mcl68_test.bin
+   ```
 
 ## Project Structure
 
