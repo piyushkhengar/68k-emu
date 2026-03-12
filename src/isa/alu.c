@@ -106,7 +106,7 @@ static int op_add_sub_generic(uint16_t op, uint8_t base)
     if (is_add)
         set_nzvc_add_sized(result, dest_val, src_for_flags, store_size);
     else
-        set_nzvc_sub_sized(result, dest_val, src_for_flags, store_size);
+        set_nzvc_sub_sized(result, dest_val, src_for_flags, store_size, 1);  /* SUB: X=C */
     return add_sub_cycles(d.ea_mode, d.ea_reg, d.size, d.dir);
 }
 
@@ -121,7 +121,7 @@ static int op_cmp_generic(uint16_t op)
     uint32_t src = ea_fetch_value(d.ea_mode, d.ea_reg, d.size) & d.mask;
     uint32_t result = (dest_val - src) & d.mask;
 
-    set_nzvc_sub_sized(result, dest_val, src, d.size);
+    set_nzvc_sub_sized(result, dest_val, src, d.size, 0);  /* CMP: X not affected */
     return cmp_cycles(d.ea_mode, d.ea_reg, d.size);
 }
 
@@ -206,7 +206,7 @@ static int op_cmpa(uint16_t op)
     if (d.size == 2)
         src = (uint32_t)(int32_t)(int16_t)(src & 0xFFFF);
     result = (dest - src) & 0xFFFFFFFF;
-    set_nzvc_sub_sized(result, dest, src, 4);
+    set_nzvc_sub_sized(result, dest, src, 4, 0);  /* CMPA: X not affected */
     return cmp_cycles(d.ea_mode, d.ea_reg, d.size);
 }
 

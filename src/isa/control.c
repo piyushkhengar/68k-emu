@@ -285,7 +285,7 @@ static int op_neg(uint16_t op)
     uint32_t dest = ea_fetch_value(d.ea_mode, d.ea_reg, d.size) & d.mask;
     uint32_t result = (0 - dest) & d.mask;
     ea_store_value(d.ea_mode, d.ea_reg, d.size, result);
-    set_nzvc_sub_sized(result, 0, dest, d.size);
+    set_nzvc_sub_sized(result, 0, dest, d.size, 1);  /* SUB: X=C */
     return add_sub_cycles(d.ea_mode, d.ea_reg, d.size, 1);
 }
 

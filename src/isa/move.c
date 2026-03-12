@@ -18,7 +18,9 @@ static int op_move_generic(uint16_t op, int size)
 
     uint32_t val = ea_fetch_value(src_mode, src_reg, size);
     ea_store_value(dst_mode, dst_reg, size, val);
-    set_nz_from_val(val, size);
+    /* MOVEA (dst_mode==1) does not affect condition codes */
+    if (dst_mode != 1)
+        set_nz_from_val(val, size);
     return move_cycles(src_mode, src_reg, dst_mode, dst_reg, size);
 }
 

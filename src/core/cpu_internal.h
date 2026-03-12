@@ -28,7 +28,7 @@ void set_nzvc_add(uint32_t result, uint32_t dest_val, uint32_t source_val);
 void set_nzvc_sub(uint32_t result, uint32_t dest_val, uint32_t source_val);
 /* Size-aware (1=byte, 2=word, 4=long): masks operands before setting N,Z,V,C,X */
 void set_nzvc_add_sized(uint32_t result, uint32_t dest_val, uint32_t source_val, int size);
-void set_nzvc_sub_sized(uint32_t result, uint32_t dest_val, uint32_t source_val, int size);
+void set_nzvc_sub_sized(uint32_t result, uint32_t dest_val, uint32_t source_val, int size, int affect_x);
 /* ADDX/SUBX: Z cleared if result nonzero, unchanged otherwise */
 void set_nzvc_addx_sized(uint32_t result, uint32_t dest_val, uint32_t source_val, int size);
 void set_nzvc_subx_sized(uint32_t result, uint32_t dest_val, uint32_t source_val, int size);

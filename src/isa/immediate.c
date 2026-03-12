@@ -68,7 +68,7 @@ static int op_subi(uint16_t op)
     uint32_t result = (dest - imm) & d.mask;
 
     ea_store_value(d.ea_mode, d.ea_reg, d.size, result);
-    set_nzvc_sub_sized(result, dest, imm, d.size);
+    set_nzvc_sub_sized(result, dest, imm, d.size, 1);  /* SUBI: X=C */
     return add_sub_cycles(d.ea_mode, d.ea_reg, d.size, 1) + (d.size == 4 ? 4 : 0);
 }
 
@@ -83,7 +83,7 @@ static int op_cmpi(uint16_t op)
     uint32_t dest = ea_fetch_value(d.ea_mode, d.ea_reg, d.size) & d.mask;
     uint32_t result = (dest - imm) & d.mask;
 
-    set_nzvc_sub_sized(result, dest, imm, d.size);
+    set_nzvc_sub_sized(result, dest, imm, d.size, 0);  /* CMPI: X not affected */
     return cmp_cycles(d.ea_mode, d.ea_reg, d.size) + (d.size == 4 ? 8 : 4);
 }
 
@@ -245,7 +245,7 @@ static int op_addq_subq(uint16_t op, int is_sub)
 
     ea_store_value(d.ea_mode, d.ea_reg, d.size, result);
     if (is_sub)
-        set_nzvc_sub_sized(result, dest, (uint32_t)d.data, d.size);
+        set_nzvc_sub_sized(result, dest, (uint32_t)d.data, d.size, 1);  /* SUBQ: X=C */
     else
         set_nzvc_add_sized(result, dest, (uint32_t)d.data, d.size);
 

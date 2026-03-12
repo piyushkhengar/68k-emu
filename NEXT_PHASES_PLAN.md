@@ -19,14 +19,14 @@
 | **EORItoSR** | 8038 | Privilege (already added S=1 for ORI/ANDI; verify EORI) |
 | **EXT.w** | ~34 | SR flags (Z/N) on edge cases – mostly fixed |
 | **MOVEtoSR** | 3127 | SR mask 0xA7/0x1F – **DONE** (4938 pass); remaining ssp delta |
-| **MOVEA.l/w** | 8017/8024 | Address register handling; sign-extension |
+| **MOVEA.l/w** | ~~8017/8024~~ | CC not affected – **DONE** (1353 pass); remaining ssp/cascade |
 | **ASL/LSL.b/l** | 8000+ | Shift size/count extraction (bits 7-6 vs 8-7) |
 
 **Actions:**
 1. **RTE/RTR** – Compare stack layout with 68000 PRM; run `PROCESSOR_TEST_INDEX=0 make processor-tests PROC_FILTER=RTE` and inspect JSON.
 2. **EORItoSR** – Add 0x0A7C to the privilege override in `apply_initial()` (may already be there).
 3. **MOVEA** – Check sign-extension of source for MOVEA.W/L.
-4. **Shift bits** – Fix `shift_size()` to use `(op >> 7) & 3` and `is_reg_count` to use `(op >> 6) & 1`.
+4. **Shift bits** – ~~Fix `shift_size()` to use `(op >> 7) & 3`~~ **Resolved:** bits 7-6 are correct; see SHIFT_OPCODE_INVESTIGATION.md.
 
 ---
 
@@ -37,7 +37,7 @@
 | **JMP** | 5045 | PC-relative EA base; extension word consumption |
 | **JSR** | 5029 | Same + stack push |
 | **BSR** | 3995 | Same |
-| **RTS** | 4057 | Stack pop; A7/ssp sync |
+| **RTS** | 4057 | Correct per spec – **verified** (4008 pass); remaining ssp delta |
 | **Bcc** | 4164 | 16-bit disp base = extension addr – **DONE** (11966 pass); remaining ssp |
 
 **Actions:** Verify PC used for `(d16,PC)` is PC *after* opcode+extension; check instruction length accounting.
@@ -48,9 +48,9 @@
 
 | Instruction | Failed | Root Cause |
 |-------------|--------|------------|
-| **MOVE.b/w/l** | 7090/7666/7664 | EA modes; byte vs word vs long |
-| **MOVEM** | 5549/5511 | A7 sync; `-(An)`/`(An)+` order |
-| **CMP/ADD/SUB** (all sizes) | 5000+ | Size handling; flags |
+| **MOVE.b/w/l** | 7090/7666/7664 | SSP deltas (0x7F2 vs 0x7FA); (An)+/-(An) step; extension word order |
+| **MOVEM** | 5322 pass, 10808 fail | Same SSP pattern; `-(An)`/`(An)+` order |
+| **CMP/ADD/SUB** | CMP: 27400 pass (was 13704) | CMP/CMPI/CMPA: X not affected – **DONE**; ADD unchanged |
 | **CLR/NOT/NEG** (w/l) | 3000+ | Size; EA modes |
 
 ---
@@ -105,4 +105,6 @@ make processor-tests 2>&1 | tee results.txt
 - [x] `control.c`: MOVEtoSR – same SR mask 0xA7/0x1F – **DONE** (4938 pass)
 - [x] `control.c`: MOVEtoCCR – CCR mask 0x1F (only X,N,Z,V,C) – **DONE** (4958 pass)
 - [x] `branch.c` + `immediate.c`: Bcc/DBcc 16-bit disp – base = extension word addr; target = (PC-2)+disp – **DONE**
-- [ ] `move.c`: MOVEA – verify word source sign-extended to 32 bits
+- [x] BSR/RTS – verified correct per 68k.hax.com; remaining failures = ssp test-data delta
+- [x] `shift.c`: size bits 7-6 confirmed correct; (op>>7)&3 causes regression – see SHIFT_OPCODE_INVESTIGATION.md
+- [x] `move.c`: MOVEA – skip set_nz_from_val when dst is An (CC not affected); sign-extend already correct in ea_store_value – **DONE** (1353 MOVEA pass, 681 MOVEA.w)
