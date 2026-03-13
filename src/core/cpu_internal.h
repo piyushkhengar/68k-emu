@@ -68,4 +68,11 @@ static inline void sync_a7_to_sp(void)
         cpu.usp = cpu.a[7];
 }
 
+/* Optional JSR trace callback (set via cpu_set_trace_jsr). Called before each JSR with target addr. */
+void cpu_set_trace_jsr(void (*fn)(uint32_t addr));
+void cpu_trace_jsr(uint32_t addr);
+/* Optional branch trace: called when a branch is taken. (from_pc, to_pc) - from_pc is before the branch. */
+void cpu_set_trace_branch_to(void (*fn)(uint32_t from_pc, uint32_t to_pc));
+void cpu_trace_branch_to(uint32_t from_pc, uint32_t to_pc);
+
 #endif /* CPU_INTERNAL_H */

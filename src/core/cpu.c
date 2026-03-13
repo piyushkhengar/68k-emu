@@ -20,9 +20,36 @@ CPU cpu;
 static jmp_buf exception_buf;
 static int exception_cycles_result;
 
+static void (*trace_jsr_fn)(uint32_t addr);
+static void (*trace_branch_to_fn)(uint32_t from_pc, uint32_t to_pc);
+
+void cpu_set_trace_jsr(void (*fn)(uint32_t addr))
+{
+    trace_jsr_fn = fn;
+}
+
+void cpu_trace_jsr(uint32_t addr)
+{
+    if (trace_jsr_fn)
+        trace_jsr_fn(addr);
+}
+
+void cpu_set_trace_branch_to(void (*fn)(uint32_t from_pc, uint32_t to_pc))
+{
+    trace_branch_to_fn = fn;
+}
+
+void cpu_trace_branch_to(uint32_t from_pc, uint32_t to_pc)
+{
+    if (trace_branch_to_fn)
+        trace_branch_to_fn(from_pc, to_pc);
+}
+
 void cpu_init(void)
 {
     memset(&cpu, 0, sizeof(cpu));
+    trace_jsr_fn = NULL;
+    trace_branch_to_fn = NULL;
 }
 
 void cpu_reset(void)

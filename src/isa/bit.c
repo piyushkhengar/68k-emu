@@ -36,7 +36,8 @@ static int op_btst(int ea_mode, int ea_reg, int size, int bit_reg, int is_imm, u
 {
     int bit_n = bit_number(bit_reg, ea_mode, is_imm, imm);
     uint32_t val = ea_fetch_value(ea_mode, ea_reg, size) & size_mask(size);
-    set_z_from_bit((int)((val >> bit_n) & 1));
+    int bit_val = (int)((val >> bit_n) & 1);
+    set_z_from_bit(bit_val);
     return 4 + (is_imm ? 4 : 0) + (ea_mode == 0 ? 0 : ea_cycles(ea_mode, ea_reg, size));
 }
 

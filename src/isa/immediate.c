@@ -263,6 +263,9 @@ int dispatch_0xxx(uint16_t op)
         int c = op_movep(op);
         if (c) return c;
     }
+    /* BTST/BCHG/BCLR/BSET Dn: check before ea_field 0x3C (ORI/ANDI/EORI to CCR) which shares EA #imm. */
+    if ((op & 0xF1C0) >= 0x0100 && (op & 0xF1C0) <= 0x01C0)
+        return op_bit_dn(op);
     int ea_field = op & 0x003F;
     int high = (op >> 8) & 0x0F;
     if (ea_field == 0x003C) {
@@ -278,8 +281,6 @@ int dispatch_0xxx(uint16_t op)
         return op_unimplemented(op);  /* SUBI/ADDI/CMPI to SR invalid */
     }
 
-    if (high == 0x01)
-        return op_bit_dn(op);   /* BTST/BCHG/BCLR/BSET Dn (MOVEP checked above) */
     /* Bit ops #imm: 0x08xx, 0x09xx, 0x0Bxx. 0x0Axx: bit 8 set -> EORI, bit 8 clear -> BCLR #imm */
     if (high == 0x08 || high == 0x09 || high == 0x0B)
         return op_bit_imm(op);

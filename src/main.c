@@ -8,6 +8,7 @@
  */
 
 #include "cpu.h"
+#include "cpu_internal.h"
 #include "memory.h"
 #include "processor_tests.h"
 #include "tests.h"
@@ -38,22 +39,34 @@ static void print_cpu_state(void)
            cpu.d[0], cpu.d[1], cpu.d[2], cpu.a[7], cpu.sr);
 }
 
-/* Parse argv; returns speed_mhz (0 = unlimited), sets *rom_or_test, *run_all, *processor_tests, *processor_tests_filter. */
+/* Parse argv; returns speed_mhz (0 = unlimited), sets *rom_or_test, *run_all, *processor_tests, *processor_tests_filter, *max_steps_out (-1 = default), *debug (JSR trace). */
 static double parse_args(int argc, char *argv[], const char **rom_or_test, int *run_all,
-                         const char **processor_tests, const char **processor_tests_filter)
+                         const char **processor_tests, const char **processor_tests_filter,
+                         int *max_steps_out, int *debug)
 {
     double speed_mhz = 0;
     *rom_or_test = NULL;
     *run_all = 0;
     *processor_tests = NULL;
     *processor_tests_filter = NULL;
+    *max_steps_out = -1;
+    *debug = 0;
 
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--speed") == 0) {
+        if (strcmp(argv[i], "--debug") == 0) {
+            *debug = 1;
+        } else if (strcmp(argv[i], "--speed") == 0) {
             if (i + 1 < argc) {
                 speed_mhz = strtod(argv[i + 1], NULL);
                 if (speed_mhz < 0)
                     speed_mhz = 0;
+                i++;
+            }
+        } else if (strcmp(argv[i], "--max-steps") == 0) {
+            if (i + 1 < argc) {
+                *max_steps_out = (int)strtol(argv[i + 1], NULL, 0);
+                if (*max_steps_out < 0)
+                    *max_steps_out = -1;
                 i++;
             }
         } else if (strcmp(argv[i], "--run-all-tests") == 0) {
@@ -72,6 +85,21 @@ static double parse_args(int argc, char *argv[], const char **rom_or_test, int *
         }
     }
     return speed_mhz;
+}
+
+static void trace_jsr_cb(uint32_t addr)
+{
+    (void)addr;
+    printf("JSR 0x%08X\n", addr);
+}
+
+static int btst_fail_reported;
+static void trace_branch_to_cb(uint32_t from_pc, uint32_t to_pc)
+{
+    if (to_pc == 0xA38 && !btst_fail_reported) {
+        btst_fail_reported = 1;
+        printf("Branch to BTST_FAIL from 0x%08X\n", from_pc);
+    }
 }
 
 static void sleep_sec(double sec)
@@ -106,7 +134,9 @@ int main(int argc, char *argv[])
     int run_all = 0;
     const char *processor_tests = NULL;
     const char *processor_tests_filter = NULL;
-    double speed_mhz = parse_args(argc, argv, &rom_or_test, &run_all, &processor_tests, &processor_tests_filter);
+    int max_steps_arg = -1;
+    int debug = 0;
+    double speed_mhz = parse_args(argc, argv, &rom_or_test, &run_all, &processor_tests, &processor_tests_filter, &max_steps_arg, &debug);
 
     if (processor_tests) {
         return run_processor_tests(processor_tests, processor_tests_filter);
@@ -148,6 +178,13 @@ int main(int argc, char *argv[])
     }
 
     cpu_reset();
+
+    if (debug && rom_or_test && !test) {
+        btst_fail_reported = 0;
+        cpu_set_trace_jsr(trace_jsr_cb);
+        cpu_set_trace_branch_to(trace_branch_to_cb);
+    }
+
     printf("PC=0x%08X  SP=0x%08X\n", cpu.pc, cpu.a[7]);
 
     if (speed_mhz > 0)
@@ -155,10 +192,12 @@ int main(int argc, char *argv[])
 
     int steps = 0;
     int max_steps;
-    if (test) {
+    if (max_steps_arg >= 0) {
+        max_steps = max_steps_arg;
+    } else if (test) {
         max_steps = test->max_steps ? test->max_steps : 100;
     } else if (rom_or_test) {
-        max_steps = 10000000;  /* ROM file: allow long execution */
+        max_steps = 500000000;  /* ROM file: allow long execution (e.g. MCL68 test suite) */
     } else {
         max_steps = 100;       /* nop_loop default */
     }
@@ -176,6 +215,8 @@ int main(int argc, char *argv[])
             cpu.cycles += c;
             cycles_this_frame += c;
             steps++;
+            if (rom_or_test && cpu.pc == 0xF000)  /* MCL68 ALL_DONE */
+                break;
 
             if (cycles_this_frame >= cycles_per_frame) {
                 double target_elapsed = frame_sec;
@@ -192,11 +233,19 @@ int main(int argc, char *argv[])
                 break;
             cpu.cycles += c;
             steps++;
+            if (rom_or_test && cpu.pc == 0xF000)  /* MCL68 ALL_DONE */
+                break;
         }
     }
 
     printf("Executed %d instructions. PC=0x%08X %s\n",
            steps, cpu.pc, cpu.halted ? "(halted)" : "");
+    if (rom_or_test && !test) {
+        if (cpu.pc == 0xF000)
+            printf("MCL68: ALL TESTS PASSED\n");
+        else
+            printf("MCL68: FAILED (PC stuck at 0x%08X = *_FAIL loop)\n", cpu.pc);
+    }
     if (test) {
         print_cpu_state();
         printf("Cycles: %u\n", (unsigned)cpu.cycles);

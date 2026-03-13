@@ -237,6 +237,7 @@ static int op_jsr(uint16_t op)
     uint32_t addr;
     int ea_mode, ea_reg;
     decode_ea_addr_jmp_jsr(op, &addr, &ea_mode, &ea_reg);
+    cpu_trace_jsr(addr);
     uint32_t sp = cpu_sp() - 4;
     mem_write32(sp, cpu.pc);
     cpu_sp_set(sp);

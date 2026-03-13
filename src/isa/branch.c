@@ -56,8 +56,11 @@ int op_bcc(uint16_t op)
     }
     {
         int taken = branch_condition_met(cond);
-        if (taken)
+        if (taken) {
+            uint32_t from = cpu.pc;
             cpu.pc += disp - (is_16bit ? 2 : 0);
+            cpu_trace_branch_to(from, cpu.pc);
+        }
         return taken ? CYCLES_BCC_TAKEN : CYCLES_BCC_NOT;
     }
 }

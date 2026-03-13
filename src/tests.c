@@ -1191,6 +1191,45 @@ static const uint8_t rol_mem_test[] = {
     0x4E, 0x71, 0x60, 0xFC,
 };
 
+/* BTST (An) test: movea.w #0x100,a0; move.b #0x81,(a0); btst.b #0,(a0) beq fail; btst.b #1,(a0) bne fail; D0=1 pass */
+static const uint8_t btst_an_test[] = {
+    0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x10,  /* reset */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x32, 0x3C, 0x01, 0x00,   /* 0x10: movea.w #0x100,a0 (0x323C: dest A0) */
+    0x14, 0x3C, 0x00, 0x81,   /* 0x14: move.b #0x81,(a0) (0x143C: dest (A0)) */
+    0x08, 0x10, 0x00, 0x00,   /* 0x18: btst.b #0,(a0) */
+    0x67, 0x0A,               /* 0x1C: beq.s +10 (fail if bit 0 clear) */
+    0x08, 0x10, 0x00, 0x01,   /* 0x1E: btst.b #1,(a0) */
+    0x66, 0x04,               /* 0x22: bne.s +4 (fail if bit 1 set) */
+    0x70, 0x01,               /* 0x24: moveq #1,d0 (pass) */
+    0x60, 0xFE,               /* 0x26: bra.s -2 */
+    0x70, 0x00,               /* 0x28: moveq #0,d0 (fail) */
+    0x60, 0xFE,               /* 0x2A: bra.s -2 */
+};
+
+/* BTST Dn,#imm: moveq #7,d7; btst.b d7,#0x88; beq fail; D0=1 pass */
+static const uint8_t btst_dn_imm_test[] = {
+    0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x10,  /* reset */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x7E, 0x07,               /* 0x10: moveq #7,d7 */
+    0x0F, 0x3C, 0x00, 0x88,   /* 0x12: btst.b d7,#0x88 (bit 7 of 0x88=1, Z=0) */
+    0x67, 0x06,               /* 0x16: beq.s +6 (fail if Z set) */
+    0x70, 0x01,               /* 0x18: moveq #1,d0 (pass) */
+    0x60, 0xFE,               /* 0x1A: bra.s -2 */
+    0x70, 0x00,               /* 0x1C: moveq #0,d0 (fail) */
+    0x60, 0xFE,               /* 0x1E: bra.s -2 */
+};
+
+/* Memory sanity: movea.w #0x100,a0; move.b #0x81,(a0); move.b (a0),d0; D0=0x81 */
+static const uint8_t move_mem_btst_test[] = {
+    0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x10,  /* reset */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x32, 0x3C, 0x01, 0x00,   /* 0x10: movea.w #0x100,a0 (0x323C: dest A0) */
+    0x14, 0x3C, 0x00, 0x81,   /* 0x14: move.b #0x81,(a0) (0x143C: dest (A0)) */
+    0x10, 0x10,               /* 0x18: move.b (a0),d0 (0x1010: src (A0) dest D0) */
+    0x4E, 0x71, 0x60, 0xFC,   /* 0x1A: nop; bra -2 */
+};
+
 /* RTE privilege violation: handler at 0x30, code at 0x34. RTE at 0x46, second RTE at 0x48 -> priv viol. */
 static const uint8_t rte_priv_test[] = {
     0x00, 0x00, 0x10, 0x00,   /* Reset: SP = 0x1000 (vector 0) */
@@ -1363,6 +1402,9 @@ static int check_test_result(size_t idx)
     case 105: return cpu.d[1] == 0x1234;                                      /* pea: D1=popped 0x1234 */
     case 106: return (cpu.d[0] & 0xFF) == 0x75;                                /* nbcd: 25->75 BCD */
     case 107: return (cpu.d[0] & 0xFFFF) == 0x0001;                            /* rol_mem: 0x8000->0x0001 */
+    case 108: return cpu.d[0] == 1;                                            /* btst_an: D0=1 on pass */
+    case 109: return (cpu.d[0] & 0xFF) == 0x81;                                /* move_mem_btst: D0=0x81 */
+    case 110: return cpu.d[0] == 1;                                            /* btst_dn_imm: D0=1 on pass */
     default: return 0;
     }
 }
@@ -1479,6 +1521,9 @@ static const builtin_test_t builtin_tests[] = {
     { "pea", pea_test, sizeof(pea_test), "Running PEA test", 0 },
     { "nbcd", nbcd_test, sizeof(nbcd_test), "Running NBCD test", 0 },
     { "rol_mem", rol_mem_test, sizeof(rol_mem_test), "Running ROL.W memory test", 0 },
+    { "btst_an", btst_an_test, sizeof(btst_an_test), "Running BTST (An) test", 0 },
+    { "move_mem_btst", move_mem_btst_test, sizeof(move_mem_btst_test), "Running MOVE.B (A0) roundtrip test", 0 },
+    { "btst_dn_imm", btst_dn_imm_test, sizeof(btst_dn_imm_test), "Running BTST Dn,#imm test", 0 },
 };
 
 #define NUM_BUILTIN_TESTS (sizeof(builtin_tests) / sizeof(builtin_tests[0]))
