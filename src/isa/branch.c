@@ -48,10 +48,13 @@ int op_bcc(uint16_t op)
     }
 
     if (cond == 0x1) {
+        /* BSR: push return address first, then check for odd target */
         uint32_t sp = cpu_sp() - 4;
         mem_write32(sp, cpu.pc);
         cpu_sp_set(sp);
         cpu.pc += disp - (is_16bit ? 2 : 0);
+        if (cpu.pc & 1)
+            cpu_take_addr_err(cpu.pc, op);
         return CYCLES_BSR;
     }
     {
@@ -60,6 +63,8 @@ int op_bcc(uint16_t op)
             uint32_t from = cpu.pc;
             cpu.pc += disp - (is_16bit ? 2 : 0);
             cpu_trace_branch_to(from, cpu.pc);
+            if (cpu.pc & 1)
+                cpu_take_addr_err(cpu.pc, op);
         }
         return taken ? CYCLES_BCC_TAKEN : CYCLES_BCC_NOT;
     }

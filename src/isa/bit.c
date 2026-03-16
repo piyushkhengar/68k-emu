@@ -48,9 +48,10 @@ static int op_bit_modify(int ea_mode, int ea_reg, int size, int bit_reg, int is_
                         bit_modify_fn modify)
 {
     int bit_n = bit_number(bit_reg, ea_mode, is_imm, imm);
-    uint32_t val = ea_fetch_value(ea_mode, ea_reg, size) & size_mask(size);
+    ea_rmw_t rmw;
+    uint32_t val = ea_read_rmw(ea_mode, ea_reg, size, &rmw) & size_mask(size);
     set_z_from_bit((int)((val >> bit_n) & 1));
-    ea_store_value(ea_mode, ea_reg, size, modify(val, bit_n));
+    ea_write_rmw(&rmw, modify(val, bit_n));
     return bit_modify_cycles(ea_mode, ea_reg, size, is_imm);
 }
 
@@ -91,6 +92,6 @@ int op_bit_imm(uint16_t op)
     if (ea_mode == 1)
         return op_unimplemented(op);
     uint8_t imm = (uint8_t)(fetch16() & 0xFF);
-    int cycles = bit_execute(ea_mode, ea_reg, 0, 1, imm, (op >> 8) & 3);
+    int cycles = bit_execute(ea_mode, ea_reg, 0, 1, imm, (op >> 6) & 3);
     return cycles ? cycles : op_unimplemented(op);
 }

@@ -48,10 +48,11 @@ static int op_addi(uint16_t op)
         return 0;
 
     uint32_t imm = fetch_imm(d.size);
-    uint32_t dest = ea_fetch_value(d.ea_mode, d.ea_reg, d.size);
+    ea_rmw_t rmw;
+    uint32_t dest = ea_read_rmw(d.ea_mode, d.ea_reg, d.size, &rmw) & d.mask;
     uint32_t result = (dest + imm) & d.mask;
 
-    ea_store_value(d.ea_mode, d.ea_reg, d.size, result);
+    ea_write_rmw(&rmw, result);
     set_nzvc_add_sized(result, dest, imm, d.size);
     return add_sub_cycles(d.ea_mode, d.ea_reg, d.size, 1) + (d.size == 4 ? 4 : 0);
 }
@@ -64,10 +65,11 @@ static int op_subi(uint16_t op)
         return 0;
 
     uint32_t imm = fetch_imm(d.size);
-    uint32_t dest = ea_fetch_value(d.ea_mode, d.ea_reg, d.size);
+    ea_rmw_t rmw;
+    uint32_t dest = ea_read_rmw(d.ea_mode, d.ea_reg, d.size, &rmw) & d.mask;
     uint32_t result = (dest - imm) & d.mask;
 
-    ea_store_value(d.ea_mode, d.ea_reg, d.size, result);
+    ea_write_rmw(&rmw, result);
     set_nzvc_sub_sized(result, dest, imm, d.size, 1);  /* SUBI: X=C */
     return add_sub_cycles(d.ea_mode, d.ea_reg, d.size, 1) + (d.size == 4 ? 4 : 0);
 }
@@ -95,10 +97,11 @@ static int op_ori(uint16_t op)
         return 0;
 
     uint32_t imm = fetch_imm(d.size);
-    uint32_t dest = ea_fetch_value(d.ea_mode, d.ea_reg, d.size);
+    ea_rmw_t rmw;
+    uint32_t dest = ea_read_rmw(d.ea_mode, d.ea_reg, d.size, &rmw) & d.mask;
     uint32_t result = (dest | imm) & d.mask;
 
-    ea_store_value(d.ea_mode, d.ea_reg, d.size, result);
+    ea_write_rmw(&rmw, result);
     set_nz_from_val(result, d.size);
     cpu.sr &= ~(SR_V | SR_C);
     return add_sub_cycles(d.ea_mode, d.ea_reg, d.size, 1) + (d.size == 4 ? 4 : 0);
@@ -112,10 +115,11 @@ static int op_andi(uint16_t op)
         return 0;
 
     uint32_t imm = fetch_imm(d.size);
-    uint32_t dest = ea_fetch_value(d.ea_mode, d.ea_reg, d.size);
+    ea_rmw_t rmw;
+    uint32_t dest = ea_read_rmw(d.ea_mode, d.ea_reg, d.size, &rmw) & d.mask;
     uint32_t result = (dest & imm) & d.mask;
 
-    ea_store_value(d.ea_mode, d.ea_reg, d.size, result);
+    ea_write_rmw(&rmw, result);
     set_nz_from_val(result, d.size);
     cpu.sr &= ~(SR_V | SR_C);
     return add_sub_cycles(d.ea_mode, d.ea_reg, d.size, 1) + (d.size == 4 ? 4 : 0);
@@ -129,10 +133,11 @@ static int op_eori(uint16_t op)
         return 0;
 
     uint32_t imm = fetch_imm(d.size);
-    uint32_t dest = ea_fetch_value(d.ea_mode, d.ea_reg, d.size);
+    ea_rmw_t rmw;
+    uint32_t dest = ea_read_rmw(d.ea_mode, d.ea_reg, d.size, &rmw) & d.mask;
     uint32_t result = (dest ^ imm) & d.mask;
 
-    ea_store_value(d.ea_mode, d.ea_reg, d.size, result);
+    ea_write_rmw(&rmw, result);
     set_nz_from_val(result, d.size);
     cpu.sr &= ~(SR_V | SR_C);
     return add_sub_cycles(d.ea_mode, d.ea_reg, d.size, 1) + (d.size == 4 ? 4 : 0);
@@ -145,8 +150,8 @@ static int op_ori_ccr(uint16_t op)
 {
     (void)op;
     uint8_t imm = fetch16() & 0xFF;
-    uint8_t ccr = cpu.sr & 0xFF;
-    cpu.sr = (cpu.sr & 0xFF00) | (ccr | imm);
+    uint8_t ccr = cpu.sr & 0x1F;
+    cpu.sr = (cpu.sr & 0xFF00) | ((ccr | imm) & 0x1F);
     return CYCLES_ORI_ANDI_EORI_CCR_SR;
 }
 
@@ -154,8 +159,8 @@ static int op_andi_ccr(uint16_t op)
 {
     (void)op;
     uint8_t imm = fetch16() & 0xFF;
-    uint8_t ccr = cpu.sr & 0xFF;
-    cpu.sr = (cpu.sr & 0xFF00) | (ccr & imm);
+    uint8_t ccr = cpu.sr & 0x1F;
+    cpu.sr = (cpu.sr & 0xFF00) | ((ccr & imm) & 0x1F);
     return CYCLES_ORI_ANDI_EORI_CCR_SR;
 }
 
@@ -163,8 +168,8 @@ static int op_eori_ccr(uint16_t op)
 {
     (void)op;
     uint8_t imm = fetch16() & 0xFF;
-    uint8_t ccr = cpu.sr & 0xFF;
-    cpu.sr = (cpu.sr & 0xFF00) | (ccr ^ imm);
+    uint8_t ccr = cpu.sr & 0x1F;
+    cpu.sr = (cpu.sr & 0xFF00) | ((ccr ^ imm) & 0x1F);
     return CYCLES_ORI_ANDI_EORI_CCR_SR;
 }
 
@@ -175,7 +180,7 @@ static int op_ori_sr(uint16_t op)
     if (!require_supervisor())
         return 0;
     uint16_t imm = fetch16();
-    cpu.sr = (cpu.sr | imm) & 0xFFFF;
+    cpu.sr = (cpu.sr | imm) & 0xA71F;
     return CYCLES_ORI_ANDI_EORI_CCR_SR;
 }
 
@@ -185,7 +190,7 @@ static int op_andi_sr(uint16_t op)
     if (!require_supervisor())
         return 0;
     uint16_t imm = fetch16();
-    cpu.sr = (cpu.sr & imm) & 0xFFFF;
+    cpu.sr = (cpu.sr & imm) & 0xA71F;
     return CYCLES_ORI_ANDI_EORI_CCR_SR;
 }
 
@@ -195,7 +200,7 @@ static int op_eori_sr(uint16_t op)
     if (!require_supervisor())
         return 0;
     uint16_t imm = fetch16();
-    cpu.sr = (cpu.sr ^ imm) & 0xFFFF;
+    cpu.sr = (cpu.sr ^ imm) & 0xA71F;
     return CYCLES_ORI_ANDI_EORI_CCR_SR;
 }
 
@@ -240,10 +245,11 @@ static int op_addq_subq(uint16_t op, int is_sub)
         return 8;
     }
 
-    uint32_t dest = ea_fetch_value(d.ea_mode, d.ea_reg, d.size);
+    ea_rmw_t rmw;
+    uint32_t dest = ea_read_rmw(d.ea_mode, d.ea_reg, d.size, &rmw) & d.mask;
     uint32_t result = is_sub ? (dest - d.data) & d.mask : (dest + d.data) & d.mask;
 
-    ea_store_value(d.ea_mode, d.ea_reg, d.size, result);
+    ea_write_rmw(&rmw, result);
     if (is_sub)
         set_nzvc_sub_sized(result, dest, (uint32_t)d.data, d.size, 1);  /* SUBQ: X=C */
     else
@@ -266,31 +272,28 @@ int dispatch_0xxx(uint16_t op)
     /* BTST/BCHG/BCLR/BSET Dn: check before ea_field 0x3C (ORI/ANDI/EORI to CCR) which shares EA #imm. */
     if ((op & 0xF1C0) >= 0x0100 && (op & 0xF1C0) <= 0x01C0)
         return op_bit_dn(op);
+    int ea_byte = op & 0x00FF;   /* full lower byte to distinguish CCR (0x3C) vs SR (0x7C) */
     int ea_field = op & 0x003F;
     int high = (op >> 8) & 0x0F;
-    if (ea_field == 0x003C) {
+    if (ea_byte == 0x3C) {
         if (high == 0x00) return op_ori_ccr(op);
         if (high == 0x02) return op_andi_ccr(op);
         if (high == 0x0A) return op_eori_ccr(op);
         return op_unimplemented(op);  /* SUBI/ADDI/CMPI to CCR invalid */
     }
-    if (ea_field == 0x007C) {
+    if (ea_byte == 0x7C) {
         if (high == 0x00) return op_ori_sr(op);
         if (high == 0x02) return op_andi_sr(op);
         if (high == 0x0A) return op_eori_sr(op);
         return op_unimplemented(op);  /* SUBI/ADDI/CMPI to SR invalid */
     }
 
-    /* Bit ops #imm: 0x08xx, 0x09xx, 0x0Bxx. 0x0Axx: bit 8 set -> EORI, bit 8 clear -> BCLR #imm */
-    if (high == 0x08 || high == 0x09 || high == 0x0B)
+    /* Bit ops #imm: 0x08xx (BTST/BCHG/BCLR/BSET with #imm count). */
+    if (high == 0x08)
         return op_bit_imm(op);
-    if (high == 0x0A) {
-        /* EORI has size in bits 7-6 (00=B, 01=W, 10=L). BCLR #imm has bits 7-6=00 (0x0A00-0x0A3F).
-         * EORI.W/L (0x0A40-0x0ABF) -> op_eori; 0x0A00-0x0A3F -> BCLR #imm. */
-        if ((op & 0x00C0) != 0)
-            return op_eori(op);
-        return op_bit_imm(op);
-    }
+    /* EORI #imm: all sizes (byte/word/long). CCR/SR variants handled above. */
+    if (high == 0x0A)
+        return op_eori(op);
     if (high == 0x00) return op_ori(op);
     if (high == 0x02) return op_andi(op);
     if (high == 0x04) return op_subi(op);
@@ -316,6 +319,8 @@ static int op_dbcc(uint16_t op)
 
     if (new_val != -1) {
         cpu.pc += disp - 2;   /* 16-bit disp: base = extension word addr = PC-2 */
+        if (cpu.pc & 1)
+            cpu_take_addr_err(cpu.pc, op);
         return dbcc_cycles(1);
     }
     return dbcc_cycles(0);

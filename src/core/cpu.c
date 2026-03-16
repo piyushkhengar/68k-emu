@@ -15,6 +15,7 @@
 #include <string.h>
 
 CPU cpu;
+int cpu_write_bus_adj = 0;
 
 /* Used by cpu_take_exception to unwind and abort the current instruction */
 static jmp_buf exception_buf;
@@ -90,14 +91,16 @@ uint32_t fetch32(void)
 /* Helper: set N,Z and clear V,C from value (size in bytes: 1,2,4) */
 void set_nz_from_val(uint32_t val, int size)
 {
+    uint32_t mask = (size == 1) ? 0xFFu : (size == 2) ? 0xFFFFu : 0xFFFFFFFFu;
+    uint32_t masked = val & mask;
     cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);
-    if (val == 0)
+    if (masked == 0)
         cpu.sr |= SR_Z;
-    if (size == 1 && (val & 0x80))
+    if (size == 1 && (masked & 0x80))
         cpu.sr |= SR_N;
-    else if (size == 2 && (val & 0x8000))
+    else if (size == 2 && (masked & 0x8000))
         cpu.sr |= SR_N;
-    else if (size == 4 && (val & 0x80000000))
+    else if (size == 4 && (masked & 0x80000000))
         cpu.sr |= SR_N;
 }
 
@@ -152,7 +155,7 @@ void set_nzvc_add_sized(uint32_t result, uint32_t dest_val, uint32_t source_val,
 }
 
 /* Size-aware N,Z,V,C,X for ADDX/SUBX: Z cleared if result nonzero, unchanged otherwise */
-void set_nzvc_addx_sized(uint32_t result, uint32_t dest_val, uint32_t source_val, int size)
+void set_nzvc_addx_sized(uint32_t result, uint32_t dest_val, uint32_t source_val, int size, uint32_t xbit)
 {
     uint32_t size_mask = (size == 1) ? 0xFF : (size == 2) ? 0xFFFF : 0xFFFFFFFF;
     uint32_t result_masked = result & size_mask, dest_masked = dest_val & size_mask, source_masked = source_val & size_mask;
@@ -164,13 +167,14 @@ void set_nzvc_addx_sized(uint32_t result, uint32_t dest_val, uint32_t source_val
         cpu.sr &= ~SR_Z;   /* Z cleared if nonzero */
     if (result_signed < 0)
         cpu.sr |= SR_N;
-    if (result_masked < dest_masked)
+    /* Carry: sum overflows the size (xbit must be included in the check) */
+    if ((uint64_t)dest_masked + (uint64_t)source_masked + xbit > (uint64_t)size_mask)
         cpu.sr |= SR_C | SR_X;
     if ((dest_signed > 0 && source_signed > 0 && result_signed < 0) || (dest_signed < 0 && source_signed < 0 && result_signed > 0))
         cpu.sr |= SR_V;
 }
 
-void set_nzvc_subx_sized(uint32_t result, uint32_t dest_val, uint32_t source_val, int size)
+void set_nzvc_subx_sized(uint32_t result, uint32_t dest_val, uint32_t source_val, int size, uint32_t xbit)
 {
     uint32_t size_mask = (size == 1) ? 0xFF : (size == 2) ? 0xFFFF : 0xFFFFFFFF;
     uint32_t result_masked = result & size_mask, dest_masked = dest_val & size_mask, source_masked = source_val & size_mask;
@@ -182,7 +186,8 @@ void set_nzvc_subx_sized(uint32_t result, uint32_t dest_val, uint32_t source_val
         cpu.sr &= ~SR_Z;
     if (result_signed < 0)
         cpu.sr |= SR_N;
-    if (dest_masked < source_masked)
+    /* Borrow: dest < src + xbit (xbit must be included) */
+    if ((uint64_t)dest_masked < (uint64_t)source_masked + xbit)
         cpu.sr |= SR_C | SR_X;
     if ((dest_signed >= 0 && source_signed < 0 && result_signed < 0) || (dest_signed < 0 && source_signed >= 0 && result_signed > 0))
         cpu.sr |= SR_V;
@@ -206,6 +211,93 @@ void set_nzvc_sub_sized(uint32_t result, uint32_t dest_val, uint32_t source_val,
         cpu.sr |= SR_C | (affect_x ? SR_X : 0);
     if ((dest_signed >= 0 && source_signed < 0 && result_signed < 0) || (dest_signed < 0 && source_signed >= 0 && result_signed > 0))
         cpu.sr |= SR_V;
+}
+
+/*
+ * Push 14-byte address error exception frame and vector.
+ * fault_addr: the odd address (full 32-bit).
+ * ir:         opcode word of the faulting instruction.
+ * saved_pc:   value to store in PC field of exception frame.
+ * access_bits: low 5 bits encoding R/W(bit4), I/N(bit3), FC(bits2-0).
+ *   0x1E = supervisor instruction fetch (R=1, I=1, FC=6)
+ *   0x15 = supervisor data read         (R=1, I=0, FC=5)
+ *   0x05 = supervisor data write        (R=0, I=0, FC=5)
+ *   0x11 = user data read               (R=1, I=0, FC=1)
+ *   0x01 = user data write              (R=0, I=0, FC=1)
+ * func_code word = (ir & 0xFF00) | ((ir_lo & 0xE0) | access_bits)
+ */
+static void push_addr_err_frame(uint32_t fault_addr, uint16_t ir,
+                                 uint32_t saved_pc, uint8_t access_bits)
+{
+    uint16_t func_code = (ir & 0xFF00) | (uint16_t)((ir & 0xE0) | access_bits);
+    uint32_t sp = cpu.ssp;
+    sp -= 2; mem_write16(sp, (uint16_t)(saved_pc & 0xFFFF));
+    sp -= 2; mem_write16(sp, (uint16_t)(saved_pc >> 16));
+    sp -= 2; mem_write16(sp, cpu.sr);   /* saved_sr already set (before switch) */
+    sp -= 2; mem_write16(sp, ir);
+    sp -= 2; mem_write16(sp, (uint16_t)(fault_addr & 0xFFFF));
+    sp -= 2; mem_write16(sp, (uint16_t)(fault_addr >> 16));
+    sp -= 2; mem_write16(sp, func_code);
+    cpu.ssp = sp;
+    cpu.a[7] = sp;
+    cpu.pc = mem_read32((unsigned)ADDR_ERR_VECTOR * 4);
+}
+
+/*
+ * Address error from instruction fetch at odd PC.
+ * Called after any SP adjustment (e.g. RTS already incremented SP, BSR already decremented).
+ * saved_pc = fault_addr - 4 (68000 prefetch pipeline accounts for 4 bytes ahead).
+ */
+void cpu_take_addr_err(uint32_t fault_addr, uint16_t ir)
+{
+    uint16_t saved_sr = cpu.sr;
+    if (!(saved_sr & 0x2000))
+        cpu.usp = cpu.a[7];
+    cpu.sr = (saved_sr | 0x2000) & ~0x8000;  /* Set S, clear T */
+    exception_cycles_result = exception_cycles(ADDR_ERR_VECTOR);
+    /* FC=6 supervisor program, FC=2 user program; I=1 instruction fetch, R=1 read */
+    uint8_t inst_fc = (saved_sr & 0x2000) ? 6 : 2;
+    uint8_t inst_access_bits = (uint8_t)(0x10 | 0x08 | inst_fc);
+    /* Restore saved_sr masked to valid bits; push_addr_err_frame uses cpu.sr for SR slot */
+    cpu.sr = saved_sr & 0xA71F;
+    push_addr_err_frame(fault_addr, ir, fault_addr - 4, inst_access_bits);
+    cpu.sr = (saved_sr | 0x2000) & ~0x8000;
+
+#if defined(__GNUC__) && defined(_WIN32)
+    __builtin_longjmp(exception_buf, 1);
+#else
+    longjmp(exception_buf, 1);
+#endif
+}
+
+/*
+ * Address error from data access (odd address in mem_read16/32 or mem_write16/32).
+ * is_read: 1 for reads, 0 for writes.
+ * saved_pc = cpu.pc - 2 (PC after last instruction word fetch, minus 2).
+ */
+void cpu_take_addr_err_data(uint32_t fault_addr, int is_read)
+{
+    uint16_t saved_sr = cpu.sr;
+    uint16_t ir = cpu.ir;
+    if (!(saved_sr & 0x2000))
+        cpu.usp = cpu.a[7];
+    cpu.sr = (saved_sr | 0x2000) & ~0x8000;
+    exception_cycles_result = exception_cycles(ADDR_ERR_VECTOR);
+    /* Compute access_bits: R/W(bit4), I/N=0, FC(supervisor=5, user=1) */
+    uint8_t fc = (saved_sr & 0x2000) ? 5 : 1;
+    uint8_t access_bits = (uint8_t)((is_read ? 0x10 : 0x00) | fc);
+    uint32_t saved_pc = cpu.pc - 2 + cpu_write_bus_adj;
+    cpu_write_bus_adj = 0;
+    /* Mask off reserved/undefined SR bits before saving in exception frame */
+    cpu.sr = saved_sr & 0xA71F;
+    push_addr_err_frame(fault_addr, ir, saved_pc, access_bits);
+    cpu.sr = (saved_sr | 0x2000) & ~0x8000;
+
+#if defined(__GNUC__) && defined(_WIN32)
+    __builtin_longjmp(exception_buf, 1);
+#else
+    longjmp(exception_buf, 1);
+#endif
 }
 
 /*
@@ -340,6 +432,8 @@ int cpu_step(void)
         return exception_cycles_result;
     }
 
+    cpu_write_bus_adj = 0;
     uint16_t op = fetch16();
+    cpu.ir = op;
     return execute(op);
 }

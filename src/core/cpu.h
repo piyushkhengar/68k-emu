@@ -25,6 +25,7 @@ typedef struct {
     /* Execution state */
     uint32_t cycles;     /* Cycle counter (for future use) */
     int halted;          /* HALT instruction sets this */
+    uint16_t ir;         /* Instruction register: current opcode (set in cpu_step) */
 } CPU;
 
 extern CPU cpu;

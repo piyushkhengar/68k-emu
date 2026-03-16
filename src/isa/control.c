@@ -54,14 +54,13 @@ static int op_chk(uint16_t op)
     int32_t bound = (int32_t)(int16_t)(ea_fetch_value(ea_mode, ea_reg, 2) & 0xFFFF);
 
     if (dn_val < 0 || dn_val > bound) {
-        cpu.sr &= ~SR_N;
+        cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);
         if (dn_val < 0)
-            cpu.sr |= SR_N;  /* N=1 if Dn < 0 */
-        /* N=0 if Dn > bound */
+            cpu.sr |= SR_N;  /* N=1 if Dn < 0, N=0 if Dn > bound */
         cpu_take_exception(CHK_VECTOR, 4);
         return 0;
     }
-    cpu.sr &= ~SR_N;  /* In bounds: N=0 */
+    cpu.sr &= ~(SR_Z | SR_V | SR_C);  /* In bounds: N preserved (undefined/hardware-specific), Z/V/C cleared */
     return chk_cycles(ea_mode, ea_reg);
 }
 
@@ -100,22 +99,24 @@ static int op_nop(uint16_t op)
  * Only the lower 5 bits (X,N,Z,V,C) are restored; bits 5-7 are unused. */
 static int op_rtr(uint16_t op)
 {
-    (void)op;
     uint32_t sp = cpu_sp();
     uint8_t ccr = (uint8_t)(mem_read16(sp) & 0xFF);
     cpu.sr = (cpu.sr & 0xFF00) | (ccr & 0x1F);
     cpu.pc = mem_read32(sp + 2);
     cpu_sp_set(sp + 6);
+    if (cpu.pc & 1)
+        cpu_take_addr_err(cpu.pc, op);
     return 20;  /* Motorola: RTR = 20 cycles */
 }
 
 /* RTS: pop return address from stack, jump to it. 0x4E75. */
 static int op_rts(uint16_t op)
 {
-    (void)op;
     uint32_t sp = cpu_sp();
     cpu.pc = mem_read32(sp);
     cpu_sp_set(sp + 4);
+    if (cpu.pc & 1)
+        cpu_take_addr_err(cpu.pc, op);
     return CYCLES_RTS;
 }
 
@@ -134,7 +135,6 @@ static int op_trap(uint16_t op)
  * low byte (CCR): mask 0x1F (X,N,Z,V,C). Unimplemented bits read as 0. */
 static int op_rte(uint16_t op)
 {
-    (void)op;
     if (!require_supervisor())
         return 0;
     uint32_t sp = cpu.ssp;
@@ -143,6 +143,8 @@ static int op_rte(uint16_t op)
     cpu.pc = mem_read32(sp + 2);
     cpu.ssp = sp + 6;
     cpu.a[7] = (cpu.sr & 0x2000) ? cpu.ssp : cpu.usp;
+    if (cpu.pc & 1)
+        cpu_take_addr_err(cpu.pc, op);
     return CYCLES_RTE;
 }
 
@@ -164,9 +166,10 @@ static int op_not(uint16_t op)
     if (!decode_not(op, &d))
         return 0;
 
-    uint32_t val = ea_fetch_value(d.ea_mode, d.ea_reg, d.size) & d.mask;
+    ea_rmw_t rmw;
+    uint32_t val = ea_read_rmw(d.ea_mode, d.ea_reg, d.size, &rmw) & d.mask;
     uint32_t result = (~val) & d.mask;
-    ea_store_value(d.ea_mode, d.ea_reg, d.size, result);
+    ea_write_rmw(&rmw, result);
     set_nz_from_val(result, d.size);
     return add_sub_cycles(d.ea_mode, d.ea_reg, d.size, 1);
 }
@@ -227,6 +230,8 @@ static int op_jmp(uint16_t op)
     uint32_t addr;
     int ea_mode, ea_reg;
     decode_ea_addr_jmp_jsr(op, &addr, &ea_mode, &ea_reg);
+    if (addr & 1)
+        cpu_take_addr_err(addr, op);
     cpu.pc = addr;
     return jmp_cycles(ea_mode, ea_reg);
 }
@@ -237,6 +242,8 @@ static int op_jsr(uint16_t op)
     uint32_t addr;
     int ea_mode, ea_reg;
     decode_ea_addr_jmp_jsr(op, &addr, &ea_mode, &ea_reg);
+    if (addr & 1)
+        cpu_take_addr_err(addr, op);
     cpu_trace_jsr(addr);
     uint32_t sp = cpu_sp() - 4;
     mem_write32(sp, cpu.pc);
@@ -252,14 +259,15 @@ static int op_tas(uint16_t op)
     int ea_reg = ea_reg_from_op(op);
     if (ea_mode == 1)
         return op_unimplemented(op);
-    uint8_t val = (uint8_t)(ea_fetch_value(ea_mode, ea_reg, 1) & 0xFF);
+    ea_rmw_t rmw;
+    uint8_t val = (uint8_t)(ea_read_rmw(ea_mode, ea_reg, 1, &rmw) & 0xFF);
     cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);
     if (val == 0)
         cpu.sr |= SR_Z;
     if (val & 0x80)
         cpu.sr |= SR_N;
     uint8_t result = val | 0x80;
-    ea_store_value(ea_mode, ea_reg, 1, result);
+    ea_write_rmw(&rmw, result);
     return 4 + ea_cycles(ea_mode, ea_reg, 1) * 2;  /* read + write */
 }
 
@@ -283,9 +291,10 @@ static int op_neg(uint16_t op)
     ea_decode_from_op(op, &d);
     if (ea_is_an(d.ea_mode))
         return op_unimplemented(op);
-    uint32_t dest = ea_fetch_value(d.ea_mode, d.ea_reg, d.size) & d.mask;
+    ea_rmw_t rmw;
+    uint32_t dest = ea_read_rmw(d.ea_mode, d.ea_reg, d.size, &rmw) & d.mask;
     uint32_t result = (0 - dest) & d.mask;
-    ea_store_value(d.ea_mode, d.ea_reg, d.size, result);
+    ea_write_rmw(&rmw, result);
     set_nzvc_sub_sized(result, 0, dest, d.size, 1);  /* SUB: X=C */
     return add_sub_cycles(d.ea_mode, d.ea_reg, d.size, 1);
 }
@@ -298,9 +307,10 @@ static int op_negx(uint16_t op)
     if (ea_is_an(d.ea_mode))
         return op_unimplemented(op);
     uint8_t x_in = (cpu.sr & SR_X) ? 1 : 0;
-    uint32_t dest = ea_fetch_value(d.ea_mode, d.ea_reg, d.size) & d.mask;
+    ea_rmw_t rmw;
+    uint32_t dest = ea_read_rmw(d.ea_mode, d.ea_reg, d.size, &rmw) & d.mask;
     uint32_t result = (0 - dest - x_in) & d.mask;
-    ea_store_value(d.ea_mode, d.ea_reg, d.size, result);
+    ea_write_rmw(&rmw, result);
     cpu.sr &= ~(SR_N | SR_V | SR_C | SR_X);
     if (result != 0)
         cpu.sr &= ~SR_Z;
@@ -312,19 +322,10 @@ static int op_negx(uint16_t op)
         cpu.sr |= SR_N;
     if (dest != 0 || x_in)
         cpu.sr |= SR_C | SR_X;
-    /* V: overflow when 0 - dest - X overflows */
-    if (d.size == 1) {
-        int32_t r = (int32_t)(int8_t)result, dest_s = (int32_t)(int8_t)dest;
-        if ((dest_s > 0 && r < 0) || (dest_s == 0 && x_in && r != 0))
-            cpu.sr |= SR_V;
-    } else if (d.size == 2) {
-        int32_t r = (int32_t)(int16_t)result, dest_s = (int32_t)(int16_t)dest;
-        if ((dest_s > 0 && r < 0) || (dest_s == 0 && x_in && r != 0))
-            cpu.sr |= SR_V;
-    } else {
-        int32_t r = (int32_t)result, dest_s = (int32_t)dest;
-        if ((dest_s > 0 && r < 0) || (dest_s == 0 && x_in && r != 0))
-            cpu.sr |= SR_V;
+    /* V: set if both dest and result have MSB set (signed overflow in 0 - dest - X). */
+    {
+        uint32_t msb = (uint32_t)1 << (d.size * 8 - 1);
+        if ((dest & msb) && (result & msb)) cpu.sr |= SR_V;
     }
     return add_sub_cycles(d.ea_mode, d.ea_reg, d.size, 1);
 }
@@ -337,7 +338,10 @@ static int op_move_from_sr(uint16_t op)
     /* Data alterable: Dn, (An), (An)+, -(An), d(An), (d8,An,Xn), abs.w, abs.l. Reject An, #imm, d(PC), (d8,PC,Xn). */
     if (ea_mode == 1 || (ea_mode == 7 && ea_reg >= 2 && ea_reg <= 4))
         return op_unimplemented(op);
-    ea_store_value(ea_mode, ea_reg, 2, (uint32_t)cpu.sr & 0xFFFF);
+    /* 68000 performs a dummy read before writing (real hardware behavior). */
+    ea_rmw_t rmw;
+    ea_read_rmw(ea_mode, ea_reg, 2, &rmw);
+    ea_write_rmw(&rmw, (uint32_t)cpu.sr & 0xFFFF);
     return move_cycles(0, 0, ea_mode, ea_reg, 2);
 }
 
@@ -365,7 +369,8 @@ static int op_move_sr(uint16_t op)
     return move_cycles(ea_mode, ea_reg, 0, 0, 2);
 }
 
-/* CLR <ea>. 0x4200, 0x4240, 0x4280. Store 0, set Z, clear N,V,C. An+byte illegal. */
+/* CLR <ea>. 0x4200, 0x4240, 0x4280. Store 0, set Z, clear N,V,C. An+byte illegal.
+ * 68000 performs a dummy read before writing (read-modify-write cycle). */
 static int op_clr(uint16_t op)
 {
     int ea_mode = ea_mode_from_op(op);
@@ -375,7 +380,9 @@ static int op_clr(uint16_t op)
     if (ea_reject_byte_an(ea_mode, size))
         return op_unimplemented(op);
 
-    ea_store_value(ea_mode, ea_reg, size, 0);
+    ea_rmw_t rmw;
+    ea_read_rmw(ea_mode, ea_reg, size, &rmw);  /* dummy read (real 68000 behavior) */
+    ea_write_rmw(&rmw, 0);
     cpu.sr &= ~(SR_N | SR_V | SR_C);
     cpu.sr |= SR_Z;
     return clr_cycles(ea_mode, ea_reg, size);
@@ -428,21 +435,23 @@ static int op_link(uint16_t op)
     int an = op & 7;
     int32_t disp = (int16_t)fetch16();
     uint32_t sp = cpu_sp() - 4;
+    cpu_sp_set(sp);           /* update SP/A7 first so LINK A7 stores decremented SP */
     mem_write32(sp, cpu.a[an]);
-    cpu_sp_set(sp);
     cpu.a[an] = sp;
     cpu_sp_set(sp + disp);
     return CYCLES_LINK;
 }
 
-/* UNLK An: SP=An, An=pop. 0x4E58-0x4E5F. */
+/* UNLK An: SP=An, An=pop, SP=SP+4. 0x4E58-0x4E5F.
+ * For UNLK A7: SP+4 step comes first, then An=pop overrides A7/SSP. */
 static int op_unlk(uint16_t op)
 {
     int an = op & 7;
     uint32_t sp = cpu.a[an];
-    cpu_sp_set(sp);
-    cpu.a[an] = mem_read32(sp);
-    cpu_sp_set(sp + 4);
+    cpu_sp_set(sp + 4);          /* advance SP past the saved-An slot */
+    cpu.a[an] = mem_read32(sp);  /* restore An from saved value */
+    if (an == 7)
+        sync_a7_to_sp();         /* UNLK A7: popped value wins over SP+4 */
     return CYCLES_UNLK;
 }
 

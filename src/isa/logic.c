@@ -34,34 +34,59 @@ static int op_exg(uint16_t op)
         tmp = cpu.d[rx];
         cpu.d[rx] = cpu.a[ry];
         cpu.a[ry] = tmp;
+        if (ry == 7) sync_a7_to_sp();
     } else {
         return op_unimplemented(op);
     }
     return exg_cycles();
 }
 
-/* BCD add: dest + src + X. Returns result, sets *carry_out. */
-static uint8_t bcd_add_byte(uint8_t dest, uint8_t src, uint8_t x_in, uint8_t *carry_out)
+/* BCD add: dest + src + X. Uses binary add + decimal correction (matches M68000 hardware).
+ * V = correction caused bit7 to go from 0 → 1 (binary was < 0x80, BCD result ≥ 0x80). */
+static uint8_t bcd_add_byte(uint8_t dest, uint8_t src, uint8_t x_in, uint8_t *carry_out, uint8_t *v_out)
 {
-    uint8_t lo = (dest & 0x0F) + (src & 0x0F) + x_in;
-    uint8_t hi_carry = (lo >= 10) ? 1 : 0;
-    if (lo >= 10) lo -= 10;
-    uint8_t hi = (dest >> 4) + (src >> 4) + hi_carry;
-    *carry_out = (hi >= 10) ? 1 : 0;
-    if (hi >= 10) hi -= 10;
-    return (hi << 4) | lo;
+    uint16_t binary = (uint16_t)dest + (uint16_t)src + (uint16_t)x_in;
+    uint8_t pre = (uint8_t)(binary & 0xFF);
+    uint8_t c = (uint8_t)((binary >> 8) & 1);
+    uint8_t half_carry = (((dest & 0xF) + (src & 0xF) + x_in) > 0xF) ? 1 : 0;
+    uint8_t result = pre;
+    if ((result & 0xF) > 9 || half_carry) {
+        uint16_t tmp = (uint16_t)result + 6;
+        result = (uint8_t)(tmp & 0xFF);
+        c |= (uint8_t)((tmp >> 8) & 1);
+    }
+    if (result > 0x9F || c) {
+        result = (uint8_t)((result + 0x60) & 0xFF);
+        *carry_out = 1;
+    } else {
+        *carry_out = 0;
+    }
+    *v_out = (uint8_t)(((~pre) & result) >> 7) & 1;  /* bit7 went 0→1 after correction */
+    return result;
 }
 
-/* BCD subtract: dest - src - X. Returns result, sets *borrow_out. */
-static uint8_t bcd_sub_byte(uint8_t dest, uint8_t src, uint8_t x_in, uint8_t *borrow_out)
+/* BCD subtract: dest - src - X. Uses binary sub + decimal correction (matches M68000 hardware).
+ * V = correction caused bit7 to go from 1 → 0 (binary was ≥ 0x80, BCD result < 0x80). */
+static uint8_t bcd_sub_byte(uint8_t dest, uint8_t src, uint8_t x_in, uint8_t *borrow_out, uint8_t *v_out)
 {
-    int lo = (int)(dest & 0x0F) - (int)(src & 0x0F) - (int)x_in;
-    uint8_t hi_borrow = (lo < 0) ? 1 : 0;
-    if (lo < 0) lo += 10;
-    int hi = (int)(dest >> 4) - (int)(src >> 4) - (int)hi_borrow;
-    *borrow_out = (hi < 0) ? 1 : 0;
-    if (hi < 0) hi += 10;
-    return (uint8_t)((hi << 4) | lo);
+    int16_t binary = (int16_t)dest - (int16_t)src - (int16_t)x_in;
+    uint8_t pre = (uint8_t)(binary & 0xFF);
+    int half_borrow = (((int)(dest & 0xF) - (int)(src & 0xF) - (int)x_in) < 0) ? 1 : 0;
+    uint8_t result = pre;
+    if (half_borrow) {
+        result = (uint8_t)((result - 6) & 0xFF);
+    }
+    if (binary < 0) {
+        result = (uint8_t)((result - 0x60) & 0xFF);
+        *borrow_out = 1;
+    } else if (half_borrow && pre < 6) {
+        /* Low adj underflowed the byte → decimal borrow set, but no high correction applied */
+        *borrow_out = 1;
+    } else {
+        *borrow_out = 0;
+    }
+    *v_out = (uint8_t)((pre & (~result)) >> 7) & 1;  /* bit7 went 1→0 after correction */
+    return result;
 }
 
 /* ABCD/SBCD: shared decode and structure. RM=0: Dy,Dx. RM=1: -(Ay),-(Ax). */
@@ -76,25 +101,33 @@ static int op_bcd_math(uint16_t op, int is_add)
     if (rm == 0) {
         uint8_t src = (uint8_t)(cpu.d[ry] & 0xFF);
         uint8_t dest = (uint8_t)(cpu.d[rx] & 0xFF);
-        uint8_t result = is_add ? bcd_add_byte(dest, src, x_in, &carry_borrow)
-                               : bcd_sub_byte(dest, src, x_in, &carry_borrow);
+        uint8_t v_flag;
+        uint8_t result = is_add ? bcd_add_byte(dest, src, x_in, &carry_borrow, &v_flag)
+                               : bcd_sub_byte(dest, src, x_in, &carry_borrow, &v_flag);
         cpu.d[rx] = (cpu.d[rx] & 0xFFFFFF00) | result;
         cpu.sr &= ~(SR_N | SR_V | SR_C | SR_X);
         if (carry_borrow) cpu.sr |= SR_C | SR_X;
+        if (result & 0x80) cpu.sr |= SR_N;
+        if (v_flag) cpu.sr |= SR_V;
         if (result != 0) cpu.sr &= ~SR_Z;
         return abcd_sbcd_cycles(0);
     } else {
         cpu.a[ry] -= ea_step(ry, 1);
+        uint32_t addr_y = cpu.a[ry];  /* capture src addr before rx decrement (handles rx==ry) */
         cpu.a[rx] -= ea_step(rx, 1);
+        uint32_t addr_x = cpu.a[rx];
         if (rx == 7 || ry == 7)
             sync_a7_to_sp();
-        uint8_t src = (uint8_t)mem_read8(cpu.a[ry]);
-        uint8_t dest = (uint8_t)mem_read8(cpu.a[rx]);
-        uint8_t result = is_add ? bcd_add_byte(dest, src, x_in, &carry_borrow)
-                               : bcd_sub_byte(dest, src, x_in, &carry_borrow);
-        mem_write8(cpu.a[rx], result);
+        uint8_t src = (uint8_t)mem_read8(addr_y);
+        uint8_t dest = (uint8_t)mem_read8(addr_x);
+        uint8_t v_flag;
+        uint8_t result = is_add ? bcd_add_byte(dest, src, x_in, &carry_borrow, &v_flag)
+                               : bcd_sub_byte(dest, src, x_in, &carry_borrow, &v_flag);
+        mem_write8(addr_x, result);
         cpu.sr &= ~(SR_N | SR_V | SR_C | SR_X);
         if (carry_borrow) cpu.sr |= SR_C | SR_X;
+        if (result & 0x80) cpu.sr |= SR_N;
+        if (v_flag) cpu.sr |= SR_V;
         if (result != 0) cpu.sr &= ~SR_Z;
         return abcd_sbcd_cycles(1);
     }
@@ -103,36 +136,27 @@ static int op_bcd_math(uint16_t op, int is_add)
 static int op_abcd(uint16_t op) { return op_bcd_math(op, 1); }
 static int op_sbcd(uint16_t op) { return op_bcd_math(op, 0); }
 
-/* NBCD <ea>: 0 - dest - X (BCD). 0x4800-0x483F. EA in bits 5-0: Dn (mode 0) or -(An) (mode 4). */
+/* NBCD <ea>: 0 - dest - X (BCD). 0x4800-0x483F. All alterable EA modes. */
 int op_nbcd(uint16_t op)
 {
     int ea_mode = ea_mode_from_op(op);
     int ea_reg = ea_reg_from_op(op);
-    uint8_t x_in = (cpu.sr & SR_X) ? 1 : 0;
-    uint8_t borrow;
+    /* Reject An (mode 1) and non-alterable modes (mode 7 reg 2,3,4) */
+    if (ea_mode == 1) return op_unimplemented(op);
+    if (ea_mode == 7 && (ea_reg == 2 || ea_reg == 3 || ea_reg == 4)) return op_unimplemented(op);
 
-    if (ea_mode == 0) {
-        uint8_t dest = (uint8_t)(cpu.d[ea_reg] & 0xFF);
-        uint8_t result = bcd_sub_byte(0, dest, x_in, &borrow);
-        cpu.d[ea_reg] = (cpu.d[ea_reg] & 0xFFFFFF00) | result;
-        cpu.sr &= ~(SR_N | SR_V | SR_C | SR_X);
-        if (borrow) cpu.sr |= SR_C | SR_X;
-        if (result != 0) cpu.sr &= ~SR_Z;
-        return nbcd_cycles(0);
-    } else if (ea_mode == 4) {
-        cpu.a[ea_reg] -= ea_step(ea_reg, 1);
-        if (ea_reg == 7)
-            sync_a7_to_sp();
-        uint8_t dest = (uint8_t)mem_read8(cpu.a[ea_reg]);
-        uint8_t result = bcd_sub_byte(0, dest, x_in, &borrow);
-        mem_write8(cpu.a[ea_reg], result);
-        cpu.sr &= ~(SR_N | SR_V | SR_C | SR_X);
-        if (borrow) cpu.sr |= SR_C | SR_X;
-        if (result != 0) cpu.sr &= ~SR_Z;
-        return nbcd_cycles(1);
-    } else {
-        return op_unimplemented(op);
-    }
+    uint8_t x_in = (cpu.sr & SR_X) ? 1 : 0;
+    uint8_t borrow, v_flag;
+    ea_rmw_t rmw;
+    uint8_t dest = (uint8_t)(ea_read_rmw(ea_mode, ea_reg, 1, &rmw) & 0xFF);
+    uint8_t result = bcd_sub_byte(0, dest, x_in, &borrow, &v_flag);
+    ea_write_rmw(&rmw, result);
+    cpu.sr &= ~(SR_N | SR_V | SR_C | SR_X);
+    if (borrow) cpu.sr |= SR_C | SR_X;
+    if (result & 0x80) cpu.sr |= SR_N;
+    if (v_flag) cpu.sr |= SR_V;
+    if (result != 0) cpu.sr &= ~SR_Z;
+    return nbcd_cycles(ea_mode != 0);
 }
 
 /* Byte ops cannot use An (mode 1). */
@@ -194,11 +218,12 @@ static int op_logic_binop(uint16_t op, logic_binop_fn fn)
         result = fn(dest_val, src) & d.mask;
         logic_store_dn(d.dn_reg, result, d.size);
     } else {
-        /* Dn, <ea> */
+        /* Dn, <ea>: resolve EA once to avoid double side-effects */
         src = cpu.d[d.dn_reg] & d.mask;
-        dest_val = ea_fetch_value(d.ea_mode, d.ea_reg, d.size) & d.mask;
+        ea_rmw_t rmw;
+        dest_val = ea_read_rmw(d.ea_mode, d.ea_reg, d.size, &rmw) & d.mask;
         result = fn(dest_val, src) & d.mask;
-        ea_store_value(d.ea_mode, d.ea_reg, d.size, result);
+        ea_write_rmw(&rmw, result);
     }
 
     set_nz_from_val(result, d.size);
@@ -278,13 +303,15 @@ static int op_muls(uint16_t op)
 /* DIVU.W <ea>, Dn: 32/16 -> 16q:16r. Dividend=Dn, divisor=EA. */
 static int op_divu(uint16_t op)
 {
+    uint32_t instr_pc = cpu.pc - 2;  /* PC after opcode fetch; save before EA extension word reads */
     mul_div_decoded_t d;
     if (!decode_mul_div(op, &d))
         return 0;
 
     uint32_t divisor = ea_fetch_value(d.ea_mode, d.ea_reg, 2) & 0xFFFF;
     if (divisor == 0) {
-        cpu.pc -= 2;
+        cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);  /* Hardware clears condition codes on div-by-zero */
+        cpu.pc = instr_pc;
         cpu_take_exception(DIVIDE_BY_ZERO_VECTOR, 4);
         return 0;
     }
@@ -292,8 +319,9 @@ static int op_divu(uint16_t op)
     uint32_t dividend = cpu.d[d.dn_reg];
     uint32_t quotient = dividend / divisor;
     if (quotient > 0xFFFF) {
+        /* Overflow: V=1, C=0; N/Z/X preserved (undefined on hardware, but hardware preserves them) */
         cpu.sr |= SR_V;
-        cpu.sr &= ~(SR_N | SR_Z | SR_C);
+        cpu.sr &= ~SR_C;
         return div_cycles(d.ea_mode, d.ea_reg, 0);
     }
 
@@ -323,8 +351,9 @@ static int op_divs(uint16_t op)
     int32_t quotient = dividend / divisor;
 
     if (quotient > 32767 || quotient < -32768) {
+        /* Overflow: V=1, C=0; N/Z/X preserved (undefined on hardware, but hardware preserves them) */
         cpu.sr |= SR_V;
-        cpu.sr &= ~(SR_N | SR_Z | SR_C);
+        cpu.sr &= ~SR_C;
         return div_cycles(d.ea_mode, d.ea_reg, 1);
     }
 
@@ -343,14 +372,11 @@ int op_eor(uint16_t op)
     if (!decode_logic(op, &d))
         return 0;
 
-    uint32_t ea_val = ea_fetch_value(d.ea_mode, d.ea_reg, d.size) & d.mask;
     uint32_t dn_val = cpu.d[d.dn_reg] & d.mask;
+    ea_rmw_t rmw;
+    uint32_t ea_val = ea_read_rmw(d.ea_mode, d.ea_reg, d.size, &rmw) & d.mask;
     uint32_t result = (ea_val ^ dn_val) & d.mask;
-
-    if (d.ea_mode == 0)
-        logic_store_dn(d.ea_reg, result, d.size);
-    else
-        ea_store_value(d.ea_mode, d.ea_reg, d.size, result);
+    ea_write_rmw(&rmw, result);
     set_nz_from_val(result, d.size);
     return add_sub_cycles(d.ea_mode, d.ea_reg, d.size, 1);
 }

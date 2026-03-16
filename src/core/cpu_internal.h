@@ -18,6 +18,11 @@
 /* Shared CPU state (defined in cpu.c) */
 extern CPU cpu;
 
+/* Bus error saved-PC adjustment: added to (cpu.pc - 2) to get saved_pc in address error frame.
+ * 0 (default, reads and MOVEM writes): saved_pc = cpu.pc - 2.
+ * 2 (MOVE-type writes): saved_pc = cpu.pc  (real 68000 prefetches one word before data writes). */
+extern int cpu_write_bus_adj;
+
 /* Fetch helpers - advance PC and return value */
 uint16_t fetch16(void);
 uint32_t fetch32(void);
@@ -29,9 +34,9 @@ void set_nzvc_sub(uint32_t result, uint32_t dest_val, uint32_t source_val);
 /* Size-aware (1=byte, 2=word, 4=long): masks operands before setting N,Z,V,C,X */
 void set_nzvc_add_sized(uint32_t result, uint32_t dest_val, uint32_t source_val, int size);
 void set_nzvc_sub_sized(uint32_t result, uint32_t dest_val, uint32_t source_val, int size, int affect_x);
-/* ADDX/SUBX: Z cleared if result nonzero, unchanged otherwise */
-void set_nzvc_addx_sized(uint32_t result, uint32_t dest_val, uint32_t source_val, int size);
-void set_nzvc_subx_sized(uint32_t result, uint32_t dest_val, uint32_t source_val, int size);
+/* ADDX/SUBX: Z cleared if result nonzero, unchanged otherwise. xbit = old X flag (0 or 1). */
+void set_nzvc_addx_sized(uint32_t result, uint32_t dest_val, uint32_t source_val, int size, uint32_t xbit);
+void set_nzvc_subx_sized(uint32_t result, uint32_t dest_val, uint32_t source_val, int size, uint32_t xbit);
 
 /* Fallback for unimplemented opcodes (never returns; longjmps). Returns int for dispatch compatibility. */
 int op_unimplemented(uint16_t op);
@@ -42,6 +47,11 @@ int op_illegal(uint16_t op);
 /* Take exception: push PC and SR, set supervisor mode, load handler from vector.
  * cycles_before_fault: cycles consumed by aborted instruction (e.g. 4 for illegal opcode fetch). */
 void cpu_take_exception(int vector_num, int cycles_before_fault);
+
+/* Take address error exception: 14-byte frame. fault_addr = odd address; ir = opcode. */
+void cpu_take_addr_err(uint32_t fault_addr, uint16_t ir);
+/* Take address error exception for data access: 14-byte frame. is_read=1 for read, 0 for write. */
+void cpu_take_addr_err_data(uint32_t fault_addr, int is_read);
 
 /* Returns 0 if privilege violation (takes exception); 1 if OK to proceed. */
 int require_supervisor(void);

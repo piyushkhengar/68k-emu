@@ -129,9 +129,71 @@ uint32_t ea_fetch_value(int mode, int reg, int size)
     }
 }
 
+uint32_t ea_read_rmw(int mode, int reg, int size, ea_rmw_t *rmw)
+{
+    rmw->mode   = mode;
+    rmw->reg    = reg;
+    rmw->size   = size;
+    rmw->is_mem = ea_resolve_addr(mode, reg, size, &rmw->addr);
+    if (rmw->is_mem)
+        return mem_read_sized(rmw->addr, size);
+    /* Register EA: Dn (mode 0) or An (mode 1). */
+    if (mode == 0) return cpu.d[reg];
+    if (mode == 1) return cpu.a[reg];
+    return 0;
+}
+
+void ea_write_rmw(const ea_rmw_t *rmw, uint32_t value)
+{
+    if (rmw->is_mem) {
+        mem_write_sized(rmw->addr, rmw->size, value);
+        return;
+    }
+    switch (rmw->mode) {
+    case 0: /* Dn: preserve upper bits for byte/word */
+        if (rmw->size == 1)      cpu.d[rmw->reg] = (cpu.d[rmw->reg] & 0xFFFFFF00) | (value & 0xFF);
+        else if (rmw->size == 2) cpu.d[rmw->reg] = (cpu.d[rmw->reg] & 0xFFFF0000) | (value & 0xFFFF);
+        else                     cpu.d[rmw->reg] = value;
+        break;
+    case 1: /* An: word result is sign-extended to 32 bits */
+        if (rmw->size == 2) cpu.a[rmw->reg] = (uint32_t)(int32_t)(int16_t)(value & 0xFFFF);
+        else                cpu.a[rmw->reg] = value;
+        if (rmw->reg == 7) sync_a7_to_sp();
+        break;
+    default:
+        break;
+    }
+}
+
 void ea_store_value(int mode, int reg, int size, uint32_t value)
 {
     uint32_t addr;
+
+    if (mode == 3) {
+        /* (An)+ destination: write FIRST, then post-increment only on success.
+         * If write fires address error (odd addr), An stays unchanged. */
+        addr = cpu.a[reg];
+        mem_write_sized(addr, size, value);
+        cpu.a[reg] += ea_step(reg, size);
+        if (reg == 7) sync_a7_to_sp();
+        return;
+    }
+    if (mode == 4 && size == 4) {
+        /* -(An).L destination: two 2-byte steps. If first step lands odd,
+         * leave An at An-2 (write fires with An at An-2).
+         * Real 68000 does np (prefetch) before -(An) writes; adjust saved_pc by +2. */
+        cpu_write_bus_adj = 2;
+        cpu.a[reg] -= 2;
+        if (!(cpu.a[reg] & 1)) cpu.a[reg] -= 2;
+        addr = cpu.a[reg];
+        if (reg == 7) sync_a7_to_sp();
+        mem_write_sized(addr, size, value);
+        return;
+    }
+    if (mode == 4) {
+        /* -(An) destination (byte/word): real 68000 prefetches before write. */
+        cpu_write_bus_adj = 2;
+    }
 
     if (ea_resolve_addr(mode, reg, size, &addr)) {
         mem_write_sized(addr, size, value);

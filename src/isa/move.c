@@ -17,10 +17,11 @@ static int op_move_generic(uint16_t op, int size)
     int dst_reg = ea_reg_from_op_dest(op);
 
     uint32_t val = ea_fetch_value(src_mode, src_reg, size);
-    ea_store_value(dst_mode, dst_reg, size, val);
     /* MOVEA (dst_mode==1) does not affect condition codes */
+    /* Set CC before the write so address-error on odd write still reflects correct CC */
     if (dst_mode != 1)
         set_nz_from_val(val, size);
+    ea_store_value(dst_mode, dst_reg, size, val);
     return move_cycles(src_mode, src_reg, dst_mode, dst_reg, size);
 }
 
@@ -43,10 +44,10 @@ static int op_move_l_imm_disp_an(uint16_t op)
  * MOVE.L #imm,d(An) is special-cased: dest ext word (disp) comes before source (imm).
  */
 
-/* MOVE.L #imm, d(An): source EA 0x3C (#imm), dest EA mode 5 (d(An)) in bits 11-9. */
+/* MOVE.L #imm, d(An): source EA 0x3C (#imm), dest EA mode 5 (d(An)) in bits 8-6. */
 static int is_move_l_imm_to_disp_an(uint16_t op)
 {
-    return (op & 0x003F) == 0x3C && (op & 0x0E00) == 0x0A00;
+    return (op & 0x003F) == 0x3C && (op & 0x01C0) == 0x00A0;
 }
 
 int dispatch_move_b(uint16_t op)

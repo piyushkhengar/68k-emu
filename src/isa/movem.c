@@ -15,7 +15,7 @@ int movem_store_ea_valid(int mode, int reg)
 {
     if (mode == 0 || mode == 1 || mode == 3)
         return 0;
-    if (mode == 7 && (reg == 3 || reg == 4))
+    if (mode == 7 && reg == 4)
         return 0;
     return 1;
 }
@@ -25,7 +25,7 @@ int movem_load_ea_valid(int mode, int reg)
 {
     if (mode == 0 || mode == 1 || mode == 4)
         return 0;
-    if (mode == 7 && (reg == 3 || reg == 4))
+    if (mode == 7 && reg == 4)
         return 0;
     return 1;
 }
@@ -44,17 +44,23 @@ int op_movem_store(uint16_t op)
     int step = size;
 
     if (ea_mode == 4) {
-        /* -(An): reverse order A7-A0, D7-D0. Decrement before each store. A7 uses 2 for word. */
-        int step_an = (ea_reg == 7 && size == 2) ? 2 : size;
+        /* -(An): predecrement. For predecrement, mask bits are reversed:
+         * bit 0=A7, bit 1=A6, ..., bit 7=A0, bit 8=D7, bit 9=D6, ..., bit 15=D0.
+         * Loop forward (bit 0 first) so A7 is stored at highest address. */
         addr = cpu.a[ea_reg];
-        for (int i = 15; i >= 0; i--) {
+        for (int i = 0; i < 16; i++) {
             if (mask & (1u << i)) {
-                addr -= step_an;
+                if (size == 4) {
+                    addr -= 2;
+                    if (!(addr & 1)) addr -= 2;
+                } else {
+                    addr -= size;
+                }
                 uint32_t val;
-                if (i >= 8)
-                    val = cpu.a[i - 8];
+                if (i < 8)
+                    val = cpu.a[7 - i];   /* bit 0=A7, bit 7=A0 */
                 else
-                    val = cpu.d[i];
+                    val = cpu.d[15 - i];  /* bit 8=D7, bit 15=D0 */
                 if (size == 2)
                     mem_write16(addr, (uint16_t)(val & 0xFFFF));
                 else
@@ -104,7 +110,10 @@ int op_movem_load(uint16_t op)
     uint32_t addr;
     int step = size;
 
-    if (!ea_resolve_addr(ea_mode, ea_reg, 4, &addr))
+    /* Pass size=2 (one bus word) so that for (An)+ mode, An is only pre-incremented
+     * by 2; if the first read fires an address error, An stays at initial+2. For
+     * success cases, cpu.a[ea_reg]=addr at the end of the loop overrides this. */
+    if (!ea_resolve_addr(ea_mode, ea_reg, 2, &addr))
         return op_unimplemented(op);
 
     for (int i = 0; i < 16; i++) {
@@ -128,5 +137,8 @@ int op_movem_load(uint16_t op)
         if (ea_reg == 7)
             sync_a7_to_sp();
     }
+    /* If A7 was loaded from memory (bit 15 of mask), sync ssp/usp with cpu.a[7]. */
+    if (mask & 0x8000)
+        sync_a7_to_sp();
     return 12 + 4 * (int)__builtin_popcount(mask);  /* Approximate */
 }

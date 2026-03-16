@@ -14,9 +14,9 @@
 static inline int ea_mode_from_op(uint16_t op) { return (op >> 3) & 7; }
 static inline int ea_reg_from_op(uint16_t op)  { return op & 7; }
 
-/* Decode EA from bits 11-6 (destination EA, e.g. MOVE). */
-static inline int ea_mode_from_op_dest(uint16_t op) { return (op >> 9) & 7; }
-static inline int ea_reg_from_op_dest(uint16_t op) { return (op >> 6) & 7; }
+/* Decode destination EA from MOVE encoding: mode in bits 8-6, register in bits 11-9. */
+static inline int ea_mode_from_op_dest(uint16_t op) { return (op >> 6) & 7; }
+static inline int ea_reg_from_op_dest(uint16_t op)  { return (op >> 9) & 7; }
 
 /* Decode size from bits 7-6: 00=B(1), 01=W(2), 10/11=L(4). */
 static inline int decode_size_bits_6_7(uint16_t op)
@@ -71,6 +71,29 @@ int ea_resolve_addr(int mode, int reg, int size, uint32_t *addr);
 
 /* Step for (An)+/-(An): A7 uses 2 for byte (word align). */
 int ea_step(int reg, int size);
+
+/*
+ * Read-modify-write (RMW) support.
+ * Resolves the EA *once* (advancing PC for extension words, modifying An for
+ * post-increment / pre-decrement exactly once), reads the current value, and
+ * saves enough context so the caller can write the result back with ea_write_rmw().
+ *
+ * Usage:
+ *   ea_rmw_t rmw;
+ *   uint32_t old_val = ea_read_rmw(mode, reg, size, &rmw);
+ *   uint32_t new_val = compute(old_val, ...);
+ *   ea_write_rmw(&rmw, new_val);
+ */
+typedef struct {
+    int      mode;    /* EA mode (kept for register fallback) */
+    int      reg;     /* EA register */
+    int      size;    /* operand size in bytes */
+    int      is_mem;  /* 1 = memory EA (addr valid), 0 = register EA */
+    uint32_t addr;    /* resolved memory address (valid when is_mem == 1) */
+} ea_rmw_t;
+
+uint32_t ea_read_rmw(int mode, int reg, int size, ea_rmw_t *rmw);
+void     ea_write_rmw(const ea_rmw_t *rmw, uint32_t value);
 
 /* Fetch value from effective address. Returns zero-extended value. */
 uint32_t ea_fetch_value(int mode, int reg, int size);
