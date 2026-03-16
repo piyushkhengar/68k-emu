@@ -21,6 +21,16 @@ static int op_move_generic(uint16_t op, int size)
     /* Set CC before the write so address-error on odd write still reflects correct CC */
     if (dst_mode != 1)
         set_nz_from_val(val, size);
+
+    /* For abs.l destination with a memory source, the 68000 hasn't completed
+     * the destination extension fetch when the write address error frame is
+     * built, so saved_pc is 2 less than the default formula.
+     * Register (mode 0/1) and #imm (mode 7 reg 4) sources have enough
+     * pipeline slack for the full dest fetch before the write. */
+    if (dst_mode == 7 && dst_reg == 1 &&
+        src_mode >= 2 && !(src_mode == 7 && src_reg == 4))
+        cpu_write_bus_adj = -2;
+
     ea_store_value(dst_mode, dst_reg, size, val);
     return move_cycles(src_mode, src_reg, dst_mode, dst_reg, size);
 }
