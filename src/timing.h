@@ -43,12 +43,10 @@ int shift_cycles_register(int size, int count, int is_reg_count);
 int shift_cycles_memory(int ea_mode, int ea_reg);
 
 /* MUL/DIV: base + EA fetch. Word form only. */
-int mul_cycles(int ea_mode, int ea_reg);
-int div_cycles(int ea_mode, int ea_reg, int is_signed);
 int mulu_cycles(int ea_mode, int ea_reg, uint16_t source);
 int muls_cycles(int ea_mode, int ea_reg, uint16_t source);
 int divu_cycles(int ea_mode, int ea_reg, uint32_t dividend, uint16_t divisor);
-int divs_cycles(int ea_mode, int ea_reg);
+int divs_cycles(int ea_mode, int ea_reg, int32_t dividend, int16_t divisor);
 
 /* DBcc: state 0=cc true(12), 1=branch(10), 2=expired(14). */
 int dbcc_cycles(int state);

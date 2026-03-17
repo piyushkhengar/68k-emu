@@ -26,4 +26,7 @@ const builtin_test_t *find_builtin_test(const char *name);
 /* Run all built-in tests in one process. speed_mhz: 0 = hyperspeed. Returns 0 if all pass, 1 if any fail. */
 int run_all_tests(double speed_mhz);
 
+/* Timing unit tests. Returns number of failures (0 = all pass). */
+int run_timing_tests(void);
+
 #endif /* TESTS_H */

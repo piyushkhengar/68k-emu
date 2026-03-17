@@ -318,19 +318,18 @@ static int op_divu(uint16_t op)
     }
 
     uint32_t dividend = cpu.d[d.dn_reg];
-    uint32_t quotient = dividend / divisor;
+    uint32_t quotient = dividend / (uint32_t)divisor;
     if (quotient > 0xFFFF) {
-        /* Overflow: V=1, C=0; N/Z/X preserved (undefined on hardware, but hardware preserves them) */
         cpu.sr |= SR_V;
         cpu.sr &= ~SR_C;
-        return div_cycles(d.ea_mode, d.ea_reg, 0);
+        return divu_cycles(d.ea_mode, d.ea_reg, dividend, (uint16_t)divisor);
     }
 
-    uint32_t remainder = dividend % divisor;
+    uint32_t remainder = dividend % (uint32_t)divisor;
     cpu.d[d.dn_reg] = (remainder << 16) | (quotient & 0xFFFF);
     cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);
     set_nz_from_val(quotient & 0xFFFF, 2);
-    return div_cycles(d.ea_mode, d.ea_reg, 0);
+    return divu_cycles(d.ea_mode, d.ea_reg, dividend, (uint16_t)divisor);
 }
 
 /* DIVS.W <ea>, Dn: 32/16 -> 16q:16r signed. */
@@ -347,23 +346,22 @@ static int op_divs(uint16_t op)
         return 0;
     }
 
-    int32_t divisor = (int32_t)(int16_t)div_raw;
+    int16_t divisor_s = (int16_t)div_raw;
     int32_t dividend = (int32_t)cpu.d[d.dn_reg];
-    int32_t quotient = dividend / divisor;
+    int32_t quotient = dividend / (int32_t)divisor_s;
 
     if (quotient > 32767 || quotient < -32768) {
-        /* Overflow: V=1, C=0; N/Z/X preserved (undefined on hardware, but hardware preserves them) */
         cpu.sr |= SR_V;
         cpu.sr &= ~SR_C;
-        return div_cycles(d.ea_mode, d.ea_reg, 1);
+        return divs_cycles(d.ea_mode, d.ea_reg, dividend, divisor_s);
     }
 
-    int32_t remainder = dividend % divisor;
+    int32_t remainder = dividend % (int32_t)divisor_s;
     uint32_t result = ((uint32_t)(uint16_t)remainder << 16) | ((uint32_t)(uint16_t)quotient & 0xFFFF);
     cpu.d[d.dn_reg] = result;
     cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);
     set_nz_from_val((uint32_t)(uint16_t)quotient, 2);
-    return div_cycles(d.ea_mode, d.ea_reg, 1);
+    return divs_cycles(d.ea_mode, d.ea_reg, dividend, divisor_s);
 }
 
 /* EOR: Dn to EA only. result = ea_val ^ Dn. When EA is Dn, preserve upper bits.

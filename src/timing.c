@@ -79,8 +79,8 @@ int move_cycles(int src_mode, int src_reg, int dst_mode, int dst_reg, int size)
     int di = ea_index(dst_mode, dst_reg);
     int si = ea_index(src_mode, src_reg);
     if (size == 4)
-        return move_l[di][si];
-    return move_bw[di][si];
+        return move_l[si][di];
+    return move_bw[si][di];
 }
 
 /* MOVEP: 16 (word) or 24 (long). Motorola MC68000 d(An) form. */
@@ -212,37 +212,74 @@ int muls_cycles(int ea_mode, int ea_reg, uint16_t source)
     return 38 + 2 * __builtin_popcount(transitions & 0xFFFF) + ea_cycles(ea_mode, ea_reg, 2);
 }
 
-/* DIVU: best 76, worst 140. DIVS: best 120, worst 158. Operand-dependent.
- * For now, use a simplified approach that matches the common patterns. */
+/*
+ * DIVU cycle-accurate timing. Based on Jorge Cwik's (ijor) reverse-engineering
+ * of the 68000 microcode restoring division algorithm.
+ * Overflow: 10 cycles. Normal range: 76-136 cycles (register operand).
+ */
 int divu_cycles(int ea_mode, int ea_reg, uint32_t dividend, uint16_t divisor)
 {
     if (divisor == 0)
-        return 0;  /* divide-by-zero exception handles timing separately */
-    uint32_t quotient = dividend / divisor;
-    if (quotient > 0xFFFF)
-        return 10 + ea_cycles(ea_mode, ea_reg, 2);  /* overflow: short */
-    /* Approximate: 76 + 2*(number of 0 bits in quotient among the top bits) */
-    /* Simplified Motorola formula: 6 for base + 2 per quotient bit analysis */
-    /* Use: 76 + 2 * (15 - msb_position_of_quotient_candidate) + additional */
-    /* Exact timing is complex; use worst-case 140 as fallback */
-    return 140 + ea_cycles(ea_mode, ea_reg, 2);
+        return 0;
+    if ((dividend >> 16) >= (uint32_t)divisor)
+        return 10 + ea_cycles(ea_mode, ea_reg, 2);
+
+    unsigned mcycles = 38;
+    uint32_t hdivisor = (uint32_t)divisor << 16;
+
+    for (int i = 0; i < 15; i++) {
+        uint32_t temp = dividend;
+        dividend <<= 1;
+        if ((int32_t)temp < 0) {
+            dividend -= hdivisor;
+        } else {
+            mcycles += 2;
+            if (dividend >= hdivisor) {
+                dividend -= hdivisor;
+                mcycles--;
+            }
+        }
+    }
+    return mcycles * 2 + ea_cycles(ea_mode, ea_reg, 2);
 }
 
-int divs_cycles(int ea_mode, int ea_reg)
+/*
+ * DIVS cycle-accurate timing. Based on Jorge Cwik's (ijor) reverse-engineering
+ * of the 68000 microcode signed division algorithm.
+ * Absolute overflow: 16-18 cycles. Normal range: 120-156 cycles (register).
+ */
+int divs_cycles(int ea_mode, int ea_reg, int32_t dividend, int16_t divisor)
 {
-    return 158 + ea_cycles(ea_mode, ea_reg, 2);
-}
+    if (divisor == 0)
+        return 0;
 
-/* Legacy wrappers */
-int mul_cycles(int ea_mode, int ea_reg)
-{
-    return 70 + ea_cycles(ea_mode, ea_reg, 2);
-}
+    unsigned mcycles = 6;
+    if (dividend < 0)
+        mcycles++;
 
-int div_cycles(int ea_mode, int ea_reg, int is_signed)
-{
-    int base = is_signed ? 158 : 140;
-    return base + ea_cycles(ea_mode, ea_reg, 2);
+    uint32_t adividend = (uint32_t)((dividend < 0) ? -dividend : dividend);
+    uint16_t adivisor = (uint16_t)((divisor < 0) ? -divisor : divisor);
+
+    if ((adividend >> 16) >= (uint32_t)adivisor)
+        return (mcycles + 2) * 2 + ea_cycles(ea_mode, ea_reg, 2);
+
+    unsigned aquot = adividend / adivisor;
+    mcycles += 55;
+
+    if (divisor >= 0) {
+        if (dividend >= 0)
+            mcycles--;
+        else
+            mcycles++;
+    }
+
+    for (int i = 0; i < 15; i++) {
+        if ((int16_t)aquot >= 0)
+            mcycles++;
+        aquot <<= 1;
+    }
+
+    return mcycles * 2 + ea_cycles(ea_mode, ea_reg, 2);
 }
 
 /* TST: Dn: 4. Memory: 4 + ea (B/W), 4 + ea (L). */

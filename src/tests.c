@@ -1628,6 +1628,67 @@ static const builtin_test_t builtin_tests[] = {
 
 #define NUM_BUILTIN_TESTS (sizeof(builtin_tests) / sizeof(builtin_tests[0]))
 
+static const unsigned expected_cycles[NUM_BUILTIN_TESTS] = {
+    994,  /* nop */
+    694,  /* move_b */        696,  /* move_b_mem */
+    698,  /* move_b_imm_dn */ 706,  /* move_b_imm_an */
+    706,  /* move_b_anp_dn */ 720,  /* move_b_pdec_dn */
+    700,  /* move_b_dn_anp */ 700,  /* move_b_dn_pdec */
+    722,  /* move_b_disp_dn */704,  /* move_b_dn_disp */
+    694,  /* move_w */        696,  /* move_w_mem */
+    698,  /* move_w_imm_dn */ 706,  /* move_w_imm_an */
+    706,  /* move_w_anp_dn */ 720,  /* move_w_pdec_dn */
+    704,  /* move_w_dn_anp */ 704,  /* move_w_dn_pdec */
+    722,  /* move_w_disp_dn */708,  /* move_w_dn_disp */
+    694,  /* move */          694,  /* test */
+    704,  /* move_mem */      702,  /* move_imm */
+    718,  /* move_imm_mem */  718,  /* move_anp */
+    720,  /* move_disp */     726,  /* move_l_imm_disp */
+    724,  /* move_l_pdec_dn */710,  /* move_l_dn_anp */
+    712,  /* move_l_dn_pdec */694,  /* moveq */
+     26,  /* add_b */         688,  /* add_w */
+     26,  /* add */            26,  /* sub_b */
+    688,  /* sub_w */          30,  /* sub */
+    688,  /* cmp_b */         688,  /* cmp_w */
+    690,  /* cmp */            62,  /* add_idx */
+    688,  /* addx_b */        692,  /* addx_l */
+     62,  /* sub_idx */       688,  /* subx_b */
+    692,  /* subx_l */        720,  /* cmp_idx */
+    706,  /* addi */          706,  /* subi */
+    704,  /* cmpi */          698,  /* addq */
+    698,  /* subq */          706,  /* addq_a */
+    688,  /* and */            688,  /* or */
+    698,  /* eor */            694,  /* not */
+    700,  /* adda_w */        700,  /* adda_l */
+    700,  /* suba_w */        700,  /* suba_l */
+    706,  /* cmpa_w */        706,  /* cmpa_l */
+    686,  /* bcc */           4476, /* bcc_all */
+   1200,  /* bsr_rts */      1044,  /* addr_err */
+   1030,  /* illegal */      2022,  /* trap_rte */
+   1474,  /* rte_priv */      702,  /* lea */
+    700,  /* jmp */            718,  /* jsr */
+    688,  /* tst */            696,  /* clr */
+    714,  /* ori */            714,  /* andi */
+    714,  /* eori */           710,  /* ori_ccr */
+    710,  /* ori_sr */          40,  /* asl_imm */
+     36,  /* lsr_imm */         38,  /* rol_reg */
+     48,  /* asl_mem */         82,  /* mulu */
+     62,  /* muls */           176,  /* divu */
+    184,  /* divs */           342,  /* div_by_zero */
+    116,  /* dbcc */            64,  /* scc */
+     52,  /* ext */             34,  /* swap */
+     78,  /* link_unlk */      690,  /* exg */
+    690,  /* abcd */           690,  /* sbcd */
+      4,  /* stop */          1534,  /* trapv */
+    694,  /* chk */            800,  /* line1010 */
+    702,  /* move_ccr */       710,  /* move_sr */
+    712,  /* pea */            696,  /* nbcd */
+    716,  /* rol_mem */        994,  /* btst_an */
+    704,  /* move_mem_btst */  984,  /* btst_dn_imm */
+    132,  /* trace_mode */    2050,  /* nested_exc */
+    550,  /* smoke */
+};
+
 const builtin_test_t *find_builtin_test(const char *name)
 {
     for (size_t i = 0; i < NUM_BUILTIN_TESTS; i++) {
@@ -1677,10 +1738,25 @@ int run_all_tests(double speed_mhz)
         }
 
         int pass = check_test_result(i);
-        printf("  %-12s %s\n", t->name, pass ? "PASS" : "FAIL");
-        if (!pass)
+        int cycle_ok = 1;
+        if (expected_cycles[i] && cpu.cycles != expected_cycles[i]) {
+            cycle_ok = 0;
+        }
+        if (pass && cycle_ok) {
+            printf("  %-12s PASS\n", t->name);
+        } else if (!pass) {
+            printf("  %-12s FAIL\n", t->name);
             failed = 1;
+        } else {
+            printf("  %-12s FAIL (cycles: expected %u, got %u)\n",
+                   t->name, expected_cycles[i], (unsigned)cpu.cycles);
+            failed = 1;
+        }
     }
+
+    int timing_fails = run_timing_tests();
+    if (timing_fails)
+        failed = 1;
 
     if (failed)
         printf("Some tests failed.\n");
