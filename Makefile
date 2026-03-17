@@ -18,7 +18,7 @@ SRCS = src/main.c src/core/cpu.c src/core/memory.c src/core/ea.c \
        deps/cJSON/cJSON.c
 OBJS = $(SRCS:.c=.o)
 
-.PHONY: all clean test
+.PHONY: all clean test mcl68-test
 
 all: $(TARGET)
 
@@ -38,6 +38,14 @@ SPEED_ARG = $(if $(SPEED), --speed $(SPEED),)
 # Regression tests: run all built-in tests in one process
 test: $(TARGET)
 	@./$(TARGET) --run-all-tests$(SPEED_ARG) || exit 1
+
+# MCL68 end-to-end test: patches ROM (requires mcl68_test.bin.bak) and runs full opcode suite
+MCL68_ROM ?= mcl68_test.bin
+mcl68-test: $(TARGET)
+	@python3 patch_mcl68_rom.py
+	@./$(TARGET) $(MCL68_ROM) --max-steps 50000000 2>&1 | grep -q "ALL TESTS PASSED" \
+		&& echo "MCL68: PASS" \
+		|| (echo "MCL68: FAIL"; exit 1)
 
 # ProcessorTests: run SingleStepTests/680x0 JSON suite (set PROC_TESTS=path/to/68000/v1, PROC_FILTER=ADD for subset)
 PROC_TESTS ?= ProcessorTests/68000/v1

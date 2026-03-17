@@ -66,6 +66,6 @@ int op_bcc(uint16_t op)
             if (cpu.pc & 1)
                 cpu_take_addr_err(cpu.pc, op);
         }
-        return taken ? CYCLES_BCC_TAKEN : CYCLES_BCC_NOT;
+        return taken ? CYCLES_BCC_TAKEN : (is_16bit ? 12 : CYCLES_BCC_NOT);
     }
 }

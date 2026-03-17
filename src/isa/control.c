@@ -32,12 +32,12 @@ static int op_stop(uint16_t op)
     return CYCLES_STOP;
 }
 
-/* TRAPV: 0x4E76. Trap on overflow (vector 7). */
+/* TRAPV: 0x4E76. Trap on overflow (vector 7). Total trap = 34 cycles, no trap = 4. */
 static int op_trapv(uint16_t op)
 {
     (void)op;
     if (cpu.sr & SR_V) {
-        cpu_take_exception(TRAPV_VECTOR, 4);
+        cpu_take_exception(TRAPV_VECTOR, 0);
         return 0;
     }
     return 4;
@@ -57,7 +57,7 @@ static int op_chk(uint16_t op)
         cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);
         if (dn_val < 0)
             cpu.sr |= SR_N;  /* N=1 if Dn < 0, N=0 if Dn > bound */
-        cpu_take_exception(CHK_VECTOR, 4);
+        cpu_take_exception(CHK_VECTOR, ea_cycles(ea_mode, ea_reg, 2) + 6);
         return 0;
     }
     cpu.sr &= ~(SR_Z | SR_V | SR_C);  /* In bounds: N preserved (undefined/hardware-specific), Z/V/C cleared */
@@ -122,11 +122,11 @@ static int op_rts(uint16_t op)
 
 #define CYCLES_RTE  20
 
-/* TRAP #n: software interrupt. 0x4E40-0x4E4F. Vector 32+n. */
+/* TRAP #n: software interrupt. 0x4E40-0x4E4F. Vector 32+n. Total = 34 cycles. */
 static int op_trap(uint16_t op)
 {
     int n = op & 0x0F;
-    cpu_take_exception(32 + n, 4);  /* 4 cycles for opcode fetch */
+    cpu_take_exception(32 + n, 0);
     return 0;  /* unreachable */
 }
 
@@ -159,7 +159,8 @@ static int decode_not(uint16_t op, ea_decoded_t *d)
     return 1;
 }
 
-/* NOT <ea>: one's complement. 0x46xx. An not allowed. */
+/* NOT <ea>: one's complement. 0x46xx. An not allowed.
+ * Dn: 4 (b/w), 6 (L). Memory: 8 + ea (b/w), 12 + ea (L). */
 static int op_not(uint16_t op)
 {
     ea_decoded_t d;
@@ -171,7 +172,9 @@ static int op_not(uint16_t op)
     uint32_t result = (~val) & d.mask;
     ea_write_rmw(&rmw, result);
     set_nz_from_val(result, d.size);
-    return add_sub_cycles(d.ea_mode, d.ea_reg, d.size, 1);
+    if (d.ea_mode == 0)
+        return (d.size == 4) ? 6 : 4;
+    return ((d.size == 4) ? 12 : 8) + ea_cycles(d.ea_mode, d.ea_reg, d.size);
 }
 
 /* Decode EA for JMP/JSR. Fills *addr_out, *ea_mode, *ea_reg on success.
@@ -268,7 +271,9 @@ static int op_tas(uint16_t op)
         cpu.sr |= SR_N;
     uint8_t result = val | 0x80;
     ea_write_rmw(&rmw, result);
-    return 4 + ea_cycles(ea_mode, ea_reg, 1) * 2;  /* read + write */
+    if (ea_mode == 0)
+        return 4;
+    return 10 + ea_cycles(ea_mode, ea_reg, 1);
 }
 
 /* TST <ea>. 0x4Axx. Compare with zero, set N,Z, clear V,C. */
@@ -296,7 +301,9 @@ static int op_neg(uint16_t op)
     uint32_t result = (0 - dest) & d.mask;
     ea_write_rmw(&rmw, result);
     set_nzvc_sub_sized(result, 0, dest, d.size, 1);  /* SUB: X=C */
-    return add_sub_cycles(d.ea_mode, d.ea_reg, d.size, 1);
+    if (d.ea_mode == 0)
+        return (d.size == 4) ? 6 : 4;
+    return ((d.size == 4) ? 12 : 8) + ea_cycles(d.ea_mode, d.ea_reg, d.size);
 }
 
 /* NEGX <ea>: dest = 0 - dest - X. 0x40xx (excl. 0x40C0-0x43FF MOVE from SR). Z: cleared if result nonzero, else unchanged. */
@@ -327,7 +334,9 @@ static int op_negx(uint16_t op)
         uint32_t msb = (uint32_t)1 << (d.size * 8 - 1);
         if ((dest & msb) && (result & msb)) cpu.sr |= SR_V;
     }
-    return add_sub_cycles(d.ea_mode, d.ea_reg, d.size, 1);
+    if (d.ea_mode == 0)
+        return (d.size == 4) ? 6 : 4;
+    return ((d.size == 4) ? 12 : 8) + ea_cycles(d.ea_mode, d.ea_reg, d.size);
 }
 
 /* MOVE.W SR, <ea>. 0x40C0-0x43FF. Dest EA in bits 5-0. Data alterable only. Unprivileged on 68000. */
@@ -342,7 +351,9 @@ static int op_move_from_sr(uint16_t op)
     ea_rmw_t rmw;
     ea_read_rmw(ea_mode, ea_reg, 2, &rmw);
     ea_write_rmw(&rmw, (uint32_t)cpu.sr & 0xFFFF);
-    return move_cycles(0, 0, ea_mode, ea_reg, 2);
+    if (ea_mode == 0)
+        return 6;
+    return 8 + ea_cycles(ea_mode, ea_reg, 2);
 }
 
 /* MOVE.W <ea>, CCR. 0x42C0-0x43FF. Source EA in bits 5-0.
@@ -353,7 +364,7 @@ static int op_move_ccr(uint16_t op)
     int ea_reg = ea_reg_from_op(op);
     uint16_t val = (uint16_t)(ea_fetch_value(ea_mode, ea_reg, 2) & 0xFFFF);
     cpu.sr = (cpu.sr & 0xFF00) | (val & 0x1F);
-    return move_cycles(ea_mode, ea_reg, 0, 0, 2);
+    return 12 + ea_cycles(ea_mode, ea_reg, 2);
 }
 
 /* MOVE.W <ea>, SR. 0x46C0-0x47FF. Privileged. Source EA in bits 5-0.
@@ -366,7 +377,7 @@ static int op_move_sr(uint16_t op)
     int ea_reg = ea_reg_from_op(op);
     uint16_t val = (uint16_t)(ea_fetch_value(ea_mode, ea_reg, 2) & 0xFFFF);
     cpu.sr = ((val >> 8) & 0xA7) << 8 | (val & 0x1F);
-    return move_cycles(ea_mode, ea_reg, 0, 0, 2);
+    return 12 + ea_cycles(ea_mode, ea_reg, 2);
 }
 
 /* CLR <ea>. 0x4200, 0x4240, 0x4280. Store 0, set Z, clear N,V,C. An+byte illegal.

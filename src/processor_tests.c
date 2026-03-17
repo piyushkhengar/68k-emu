@@ -261,7 +261,9 @@ static char *load_json(const char *path, size_t *out_size)
     return load_file(path, out_size);
 }
 
-static int run_file(const char *path, int *passed, int *failed, int verbose, int test_index)
+static int run_file(const char *path, int *passed, int *failed,
+                    int *cycle_ok, int *cycle_bad,
+                    int verbose, int test_index)
 {
     size_t json_size;
     char *json = load_json(path, &json_size);
@@ -311,7 +313,8 @@ static int run_file(const char *path, int *passed, int *failed, int verbose, int
         if (test_index >= 0) {
             printf("Before: pc=0x%08X a6=0x%08X d0=0x%08X\n", (unsigned)cpu.pc, (unsigned)cpu.a[6], (unsigned)cpu.d[0]);
         }
-        cpu_step();
+        int step_cycles = cpu_step();
+        cpu.cycles = (uint32_t)step_cycles;
         if (test_index >= 0) {
             printf("After:  pc=0x%08X a6=0x%08X d0=0x%08X\n", (unsigned)cpu.pc, (unsigned)cpu.a[6], (unsigned)cpu.d[0]);
             cJSON *exp_a6 = cJSON_GetObjectItem(final, "a6");
@@ -325,6 +328,20 @@ static int run_file(const char *path, int *passed, int *failed, int verbose, int
         } else {
             file_failed++;
         }
+
+        cJSON *length = cJSON_GetObjectItem(test, "length");
+        if (length && cJSON_IsNumber(length)) {
+            uint32_t expected_cycles = get_num(length);
+            if (cpu.cycles == expected_cycles) {
+                (*cycle_ok)++;
+            } else {
+                (*cycle_bad)++;
+                if (test_index >= 0)
+                    printf("  CYCLE %s: expected %u, got %u\n",
+                           name, expected_cycles, (unsigned)cpu.cycles);
+            }
+        }
+
         if (test_index >= 0)
             break;
     }
@@ -342,7 +359,10 @@ static int name_matches_filter(const char *name, const char *filter)
     return strstr(name, filter) != NULL;
 }
 
-static int run_directory(const char *dir, const char *filter, int *passed, int *failed, int verbose, int test_index)
+static int run_directory(const char *dir, const char *filter,
+                        int *passed, int *failed,
+                        int *cycle_ok, int *cycle_bad,
+                        int verbose, int test_index)
 {
     DIR *d = opendir(dir);
     if (!d) {
@@ -384,7 +404,8 @@ static int run_directory(const char *dir, const char *filter, int *passed, int *
 
         char path[512];
         snprintf(path, sizeof(path), "%s/%s", dir, ent->d_name);
-        if (run_file(path, passed, failed, verbose, test_index) == 0)
+
+        if (run_file(path, passed, failed, cycle_ok, cycle_bad, verbose, test_index) == 0)
             files++;
     }
     closedir(d);
@@ -403,11 +424,14 @@ int run_processor_tests(const char *dir, const char *filter)
            filter && *filter ? filter : "",
            filter && *filter ? ")" : "");
     int passed = 0, failed = 0;
+    int cycle_ok = 0, cycle_bad = 0;
     int verbose = test_index >= 0 ? 1 : 0;
 
-    if (run_directory(dir, filter, &passed, &failed, verbose, test_index) < 0)
+    if (run_directory(dir, filter, &passed, &failed, &cycle_ok, &cycle_bad, verbose, test_index) < 0)
         return 1;
 
     printf("Passed: %d  Failed: %d\n", passed, failed);
+    if (cycle_ok + cycle_bad > 0)
+        printf("Cycles: %d correct  %d mismatched\n", cycle_ok, cycle_bad);
     return failed ? 1 : 0;
 }

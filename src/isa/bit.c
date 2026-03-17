@@ -25,34 +25,39 @@ static void set_z_from_bit(int bit_val)
         cpu.sr |= SR_Z;
 }
 
-/* Base cycles for modify ops (BCHG/BCLR/BSET): 8 + (imm ? 4 : 0) + memory EA cycles. */
-static int bit_modify_cycles(int ea_mode, int ea_reg, int size, int is_imm)
+/* Bit modify cycles (BCHG/BCLR/BSET). Dn: 8/10 + (imm?4:0). Memory: 8 + (imm?4:0) + ea. */
+static int bit_modify_cycles(int ea_mode, int ea_reg, int size, int is_imm, int opcode)
 {
-    return 8 + (is_imm ? 4 : 0) + (ea_mode == 0 ? 0 : ea_cycles(ea_mode, ea_reg, size) * 2);
+    if (ea_mode == 0) {
+        int base = (opcode == 2) ? 10 : 8;  /* BCLR Dn = 10, BCHG/BSET Dn = 8 */
+        return base + (is_imm ? 4 : 0);
+    }
+    return 8 + (is_imm ? 4 : 0) + ea_cycles(ea_mode, ea_reg, size);
 }
 
-/* BTST: test only. No store. */
+/* BTST: test only. No store. Dn: 6 + (imm?4:0). Memory: 4 + (imm?4:0) + ea. */
 static int op_btst(int ea_mode, int ea_reg, int size, int bit_reg, int is_imm, uint8_t imm)
 {
     int bit_n = bit_number(bit_reg, ea_mode, is_imm, imm);
     uint32_t val = ea_fetch_value(ea_mode, ea_reg, size) & size_mask(size);
     int bit_val = (int)((val >> bit_n) & 1);
     set_z_from_bit(bit_val);
-    return 4 + (is_imm ? 4 : 0) + (ea_mode == 0 ? 0 : ea_cycles(ea_mode, ea_reg, size));
+    int base = (ea_mode == 0) ? 6 : 4;
+    return base + (is_imm ? 4 : 0) + (ea_mode == 0 ? 0 : ea_cycles(ea_mode, ea_reg, size));
 }
 
 /* Modify ops (BCHG/BCLR/BSET): fetch, test, modify, store. */
 typedef uint32_t (*bit_modify_fn)(uint32_t val, int bit_n);
 
 static int op_bit_modify(int ea_mode, int ea_reg, int size, int bit_reg, int is_imm, uint8_t imm,
-                        bit_modify_fn modify)
+                        bit_modify_fn modify, int opcode)
 {
     int bit_n = bit_number(bit_reg, ea_mode, is_imm, imm);
     ea_rmw_t rmw;
     uint32_t val = ea_read_rmw(ea_mode, ea_reg, size, &rmw) & size_mask(size);
     set_z_from_bit((int)((val >> bit_n) & 1));
     ea_write_rmw(&rmw, modify(val, bit_n));
-    return bit_modify_cycles(ea_mode, ea_reg, size, is_imm);
+    return bit_modify_cycles(ea_mode, ea_reg, size, is_imm, opcode);
 }
 
 static uint32_t modify_bchg(uint32_t val, int bit_n) { return val ^ (1u << bit_n); }
@@ -66,9 +71,9 @@ static int bit_execute(int ea_mode, int ea_reg, int bit_reg, int is_imm, uint8_t
 
     switch (opcode) {
     case 0: return op_btst(ea_mode, ea_reg, size, bit_reg, is_imm, imm);
-    case 1: return op_bit_modify(ea_mode, ea_reg, size, bit_reg, is_imm, imm, modify_bchg);
-    case 2: return op_bit_modify(ea_mode, ea_reg, size, bit_reg, is_imm, imm, modify_bclr);
-    case 3: return op_bit_modify(ea_mode, ea_reg, size, bit_reg, is_imm, imm, modify_bset);
+    case 1: return op_bit_modify(ea_mode, ea_reg, size, bit_reg, is_imm, imm, modify_bchg, 1);
+    case 2: return op_bit_modify(ea_mode, ea_reg, size, bit_reg, is_imm, imm, modify_bclr, 2);
+    case 3: return op_bit_modify(ea_mode, ea_reg, size, bit_reg, is_imm, imm, modify_bset, 3);
     default: return 0;
     }
 }

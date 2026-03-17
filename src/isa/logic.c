@@ -156,7 +156,7 @@ int op_nbcd(uint16_t op)
     if (result & 0x80) cpu.sr |= SR_N;
     if (v_flag) cpu.sr |= SR_V;
     if (result != 0) cpu.sr &= ~SR_Z;
-    return nbcd_cycles(ea_mode != 0);
+    return nbcd_cycles(ea_mode, ea_reg);
 }
 
 /* Byte ops cannot use An (mode 1). */
@@ -273,14 +273,14 @@ static int op_mulu(uint16_t op)
     if (!decode_mul_div(op, &d))
         return 0;
 
-    uint32_t src = ea_fetch_value(d.ea_mode, d.ea_reg, 2) & 0xFFFF;
+    uint16_t src = (uint16_t)(ea_fetch_value(d.ea_mode, d.ea_reg, 2) & 0xFFFF);
     uint32_t mult = cpu.d[d.dn_reg] & 0xFFFF;
-    uint32_t result = src * mult;
+    uint32_t result = (uint32_t)src * mult;
 
     cpu.d[d.dn_reg] = result;
     cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);
     set_nz_from_val(result, 4);
-    return mul_cycles(d.ea_mode, d.ea_reg);
+    return mulu_cycles(d.ea_mode, d.ea_reg, src);
 }
 
 /* MULS.W <ea>, Dn: 16x16 -> 32 signed. */
@@ -290,14 +290,15 @@ static int op_muls(uint16_t op)
     if (!decode_mul_div(op, &d))
         return 0;
 
-    int32_t src = (int32_t)(int16_t)(ea_fetch_value(d.ea_mode, d.ea_reg, 2) & 0xFFFF);
+    uint16_t src_raw = (uint16_t)(ea_fetch_value(d.ea_mode, d.ea_reg, 2) & 0xFFFF);
+    int32_t src = (int32_t)(int16_t)src_raw;
     int32_t mult = (int32_t)(int16_t)(cpu.d[d.dn_reg] & 0xFFFF);
     uint32_t result = (uint32_t)(int32_t)(src * mult);
 
     cpu.d[d.dn_reg] = result;
     cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);
     set_nz_from_val(result, 4);
-    return mul_cycles(d.ea_mode, d.ea_reg);
+    return muls_cycles(d.ea_mode, d.ea_reg, src_raw);
 }
 
 /* DIVU.W <ea>, Dn: 32/16 -> 16q:16r. Dividend=Dn, divisor=EA. */
@@ -365,7 +366,8 @@ static int op_divs(uint16_t op)
     return div_cycles(d.ea_mode, d.ea_reg, 1);
 }
 
-/* EOR: Dn to EA only. result = ea_val ^ Dn. When EA is Dn, preserve upper bits. */
+/* EOR: Dn to EA only. result = ea_val ^ Dn. When EA is Dn, preserve upper bits.
+ * Dn: 4 (b/w), 8 (L). Memory: 8 + ea (b/w), 12 + ea (L). */
 int op_eor(uint16_t op)
 {
     logic_decoded_t d;
@@ -378,7 +380,9 @@ int op_eor(uint16_t op)
     uint32_t result = (ea_val ^ dn_val) & d.mask;
     ea_write_rmw(&rmw, result);
     set_nz_from_val(result, d.size);
-    return add_sub_cycles(d.ea_mode, d.ea_reg, d.size, 1);
+    if (d.ea_mode == 0)
+        return (d.size == 4) ? 8 : 4;
+    return ((d.size == 4) ? 12 : 8) + ea_cycles(d.ea_mode, d.ea_reg, d.size);
 }
 
 /* 0x8xxx: OR. SBCD, DIVU (opmode 3), DIVS (opmode 7). */

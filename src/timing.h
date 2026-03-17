@@ -7,10 +7,12 @@
 #ifndef TIMING_H
 #define TIMING_H
 
+#include <stdint.h>
+
 /* Fixed-cycle instructions */
 #define CYCLES_NOP      4
 #define CYCLES_MOVEQ    4
-#define CYCLES_RTS      12
+#define CYCLES_RTS      16
 #define CYCLES_BCC_NOT  8   /* Bcc when condition not met */
 #define CYCLES_BCC_TAKEN 10 /* Bcc when condition met (byte disp) */
 #define CYCLES_BSR      18
@@ -43,15 +45,21 @@ int shift_cycles_memory(int ea_mode, int ea_reg);
 /* MUL/DIV: base + EA fetch. Word form only. */
 int mul_cycles(int ea_mode, int ea_reg);
 int div_cycles(int ea_mode, int ea_reg, int is_signed);
+int mulu_cycles(int ea_mode, int ea_reg, uint16_t source);
+int muls_cycles(int ea_mode, int ea_reg, uint16_t source);
+int divu_cycles(int ea_mode, int ea_reg, uint32_t dividend, uint16_t divisor);
+int divs_cycles(int ea_mode, int ea_reg);
 
-/* DBcc, Scc cycle counts. */
-int dbcc_cycles(int taken);
+/* DBcc: state 0=cc true(12), 1=branch(10), 2=expired(14). */
+int dbcc_cycles(int state);
+/* Scc: Dn true=6, Dn false=4, memory=8+ea. */
 int scc_cycles(int ea_mode, int ea_reg);
+int scc_cycles_full(int ea_mode, int ea_reg, int cond_true);
 
 /* EXG, ABCD/SBCD, NBCD, CHK cycle counts. */
 int exg_cycles(void);
 int abcd_sbcd_cycles(int is_memory);
-int nbcd_cycles(int is_memory);
+int nbcd_cycles(int ea_mode, int ea_reg);
 int chk_cycles(int ea_mode, int ea_reg);
 
 /* LEA, PEA, JMP, JSR, TST, CLR cycle counts. */

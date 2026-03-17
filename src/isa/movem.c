@@ -94,7 +94,26 @@ int op_movem_store(uint16_t op)
                 sync_a7_to_sp();
         }
     }
-    return 12 + 4 * (int)__builtin_popcount(mask);  /* Approximate */
+    {
+        int n = __builtin_popcount(mask);
+        int per_reg = (size == 4) ? 8 : 4;
+        int base;
+        switch (ea_mode) {
+        case 2: case 3: case 4: base = 8; break;
+        case 5: base = 12; break;
+        case 6: base = 14; break;
+        case 7:
+            switch (ea_reg) {
+            case 0: case 2: base = 12; break;
+            case 1: base = 16; break;
+            case 3: base = 14; break;
+            default: base = 12; break;
+            }
+            break;
+        default: base = 8; break;
+        }
+        return base + per_reg * n;
+    }
 }
 
 /* MOVEM mem to reg. 0x4C80-0x4CBF. */
@@ -140,5 +159,24 @@ int op_movem_load(uint16_t op)
     /* If A7 was loaded from memory (bit 15 of mask), sync ssp/usp with cpu.a[7]. */
     if (mask & 0x8000)
         sync_a7_to_sp();
-    return 12 + 4 * (int)__builtin_popcount(mask);  /* Approximate */
+    {
+        int n = __builtin_popcount(mask);
+        int per_reg = (size == 4) ? 8 : 4;
+        int base;
+        switch (ea_mode) {
+        case 2: case 3: base = 12; break;
+        case 5: base = 16; break;
+        case 6: base = 18; break;
+        case 7:
+            switch (ea_reg) {
+            case 0: case 2: base = 16; break;
+            case 1: base = 20; break;
+            case 3: base = 18; break;
+            default: base = 16; break;
+            }
+            break;
+        default: base = 12; break;
+        }
+        return base + per_reg * n;
+    }
 }

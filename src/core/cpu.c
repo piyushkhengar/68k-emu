@@ -423,17 +423,35 @@ int cpu_step(void)
     if (cpu.halted)
         return 0;
 
+    int was_trace = cpu.sr & 0x8000;
+
 #if defined(__GNUC__) && defined(_WIN32)
     if (__builtin_setjmp(exception_buf) != 0) {
 #else
     if (setjmp(exception_buf) != 0) {
 #endif
-        /* Exception occurred; PC already updated to handler */
         return exception_cycles_result;
     }
 
     cpu_write_bus_adj = 0;
     uint16_t op = fetch16();
     cpu.ir = op;
-    return execute(op);
+    int cycles = execute(op);
+
+    if (was_trace && !cpu.halted) {
+        uint16_t saved_sr = cpu.sr;
+        if (!(saved_sr & 0x2000)) {
+            cpu.usp = cpu.a[7];
+            cpu.a[7] = cpu.ssp;
+        }
+        cpu.sr = (saved_sr | 0x2000) & ~0x8000;
+        uint32_t sp = cpu.a[7] - 6;
+        mem_write32(sp + 2, cpu.pc);
+        mem_write16(sp, saved_sr);
+        cpu.a[7] = sp;
+        cpu.pc = mem_read32(TRACE_VECTOR * 4);
+        cycles += exception_cycles(TRACE_VECTOR);
+    }
+
+    return cycles;
 }

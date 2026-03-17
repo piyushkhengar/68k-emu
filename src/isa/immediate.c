@@ -54,7 +54,9 @@ static int op_addi(uint16_t op)
 
     ea_write_rmw(&rmw, result);
     set_nzvc_add_sized(result, dest, imm, d.size);
-    return add_sub_cycles(d.ea_mode, d.ea_reg, d.size, 1) + (d.size == 4 ? 4 : 0);
+    if (d.ea_mode == 0)
+        return (d.size == 4) ? 16 : 8;
+    return ((d.size == 4) ? 20 : 12) + ea_cycles(d.ea_mode, d.ea_reg, d.size);
 }
 
 /* SUBI #imm, <ea>: dest = dest - imm. 0x04xx */
@@ -71,7 +73,9 @@ static int op_subi(uint16_t op)
 
     ea_write_rmw(&rmw, result);
     set_nzvc_sub_sized(result, dest, imm, d.size, 1);  /* SUBI: X=C */
-    return add_sub_cycles(d.ea_mode, d.ea_reg, d.size, 1) + (d.size == 4 ? 4 : 0);
+    if (d.ea_mode == 0)
+        return (d.size == 4) ? 16 : 8;
+    return ((d.size == 4) ? 20 : 12) + ea_cycles(d.ea_mode, d.ea_reg, d.size);
 }
 
 /* CMPI #imm, <ea>: compare, no store. 0x0Cxx. X not affected. */
@@ -86,7 +90,9 @@ static int op_cmpi(uint16_t op)
     uint32_t result = (dest - imm) & d.mask;
 
     set_nzvc_sub_sized(result, dest, imm, d.size, 0);  /* CMPI: X not affected */
-    return cmp_cycles(d.ea_mode, d.ea_reg, d.size) + (d.size == 4 ? 8 : 4);
+    if (d.ea_mode == 0)
+        return (d.size == 4) ? 14 : 8;
+    return ((d.size == 4) ? 12 : 8) + ea_cycles(d.ea_mode, d.ea_reg, d.size);
 }
 
 /* ORI #imm, <ea>: dest = dest | imm. 0x00xx. An not allowed. */
@@ -104,7 +110,9 @@ static int op_ori(uint16_t op)
     ea_write_rmw(&rmw, result);
     set_nz_from_val(result, d.size);
     cpu.sr &= ~(SR_V | SR_C);
-    return add_sub_cycles(d.ea_mode, d.ea_reg, d.size, 1) + (d.size == 4 ? 4 : 0);
+    if (d.ea_mode == 0)
+        return (d.size == 4) ? 16 : 8;
+    return ((d.size == 4) ? 20 : 12) + ea_cycles(d.ea_mode, d.ea_reg, d.size);
 }
 
 /* ANDI #imm, <ea>: dest = dest & imm. 0x02xx. An not allowed. */
@@ -122,7 +130,9 @@ static int op_andi(uint16_t op)
     ea_write_rmw(&rmw, result);
     set_nz_from_val(result, d.size);
     cpu.sr &= ~(SR_V | SR_C);
-    return add_sub_cycles(d.ea_mode, d.ea_reg, d.size, 1) + (d.size == 4 ? 4 : 0);
+    if (d.ea_mode == 0)
+        return (d.size == 4) ? 16 : 8;
+    return ((d.size == 4) ? 20 : 12) + ea_cycles(d.ea_mode, d.ea_reg, d.size);
 }
 
 /* EORI #imm, <ea>: dest = dest ^ imm. 0x0Axx. An not allowed. */
@@ -140,7 +150,9 @@ static int op_eori(uint16_t op)
     ea_write_rmw(&rmw, result);
     set_nz_from_val(result, d.size);
     cpu.sr &= ~(SR_V | SR_C);
-    return add_sub_cycles(d.ea_mode, d.ea_reg, d.size, 1) + (d.size == 4 ? 4 : 0);
+    if (d.ea_mode == 0)
+        return (d.size == 4) ? 16 : 8;
+    return ((d.size == 4) ? 20 : 12) + ea_cycles(d.ea_mode, d.ea_reg, d.size);
 }
 
 #define CYCLES_ORI_ANDI_EORI_CCR_SR  20
@@ -256,8 +268,8 @@ static int op_addq_subq(uint16_t op, int is_sub)
         set_nzvc_add_sized(result, dest, (uint32_t)d.data, d.size);
 
     if (d.ea_mode == 0)
-        return 4;
-    return 8 + ea_cycles(d.ea_mode, d.ea_reg, d.size) * 2;
+        return (d.size == 4) ? 8 : 4;
+    return ((d.size == 4) ? 12 : 8) + ea_cycles(d.ea_mode, d.ea_reg, d.size);
 }
 
 /* 0x0xxx: ORI (0x00), ANDI (0x02), SUBI (0x04), ADDI (0x06), EORI (0x0A), CMPI (0x0C).
@@ -311,7 +323,7 @@ static int op_dbcc(uint16_t op)
     int32_t disp = (int16_t)fetch16();
 
     if (branch_condition_met(cond))
-        return dbcc_cycles(0);   /* Condition true: terminate, no operation */
+        return dbcc_cycles(0);   /* Condition true: terminate (12 cycles) */
 
     uint16_t dn_val = (uint16_t)(cpu.d[dn] & 0xFFFF);
     int16_t new_val = (int16_t)(dn_val - 1);
@@ -321,9 +333,9 @@ static int op_dbcc(uint16_t op)
         cpu.pc += disp - 2;   /* 16-bit disp: base = extension word addr = PC-2 */
         if (cpu.pc & 1)
             cpu_take_addr_err(cpu.pc, op);
-        return dbcc_cycles(1);
+        return dbcc_cycles(1);  /* branch taken (10 cycles) */
     }
-    return dbcc_cycles(0);
+    return dbcc_cycles(2);  /* count expired (14 cycles) */
 }
 
 /* Scc: 0x5Cxx. Set byte to 0xFF if condition true, else 0x00. An (mode 1) not allowed. */
@@ -338,9 +350,10 @@ static int op_scc(uint16_t op)
         return 0;
     }
 
-    uint8_t val = branch_condition_met(cond) ? 0xFF : 0x00;
+    int cond_true = branch_condition_met(cond);
+    uint8_t val = cond_true ? 0xFF : 0x00;
     ea_store_value(ea_mode, ea_reg, 1, val);
-    return scc_cycles(ea_mode, ea_reg);
+    return scc_cycles_full(ea_mode, ea_reg, cond_true);
 }
 
 /* 0x5xxx: DBcc (bits 7-3=11001), Scc (bits 7-3!=11001, size 11), ADDQ, SUBQ. */

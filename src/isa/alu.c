@@ -177,7 +177,12 @@ static int op_adda(uint16_t op)
     result = dest + src;
     cpu.a[d.an_reg] = result;
     if (d.an_reg == 7) sync_a7_to_sp();
-    return add_sub_cycles(d.ea_mode, d.ea_reg, d.size, 0);
+    /* ADDA/SUBA/CMPA: base 8 always; except memory .L = base 6. */
+    {
+        int is_mem = (d.ea_mode >= 2 && !(d.ea_mode == 7 && d.ea_reg == 4));
+        int base = (is_mem && d.size == 4) ? 6 : 8;
+        return base + ea_cycles(d.ea_mode, d.ea_reg, d.size);
+    }
 }
 
 static int op_suba(uint16_t op)
@@ -194,7 +199,11 @@ static int op_suba(uint16_t op)
     result = dest - src;
     cpu.a[d.an_reg] = result;
     if (d.an_reg == 7) sync_a7_to_sp();
-    return add_sub_cycles(d.ea_mode, d.ea_reg, d.size, 0);
+    {
+        int is_mem = (d.ea_mode >= 2 && !(d.ea_mode == 7 && d.ea_reg == 4));
+        int base = (is_mem && d.size == 4) ? 6 : 8;
+        return base + ea_cycles(d.ea_mode, d.ea_reg, d.size);
+    }
 }
 
 static int op_cmpa(uint16_t op)
@@ -210,7 +219,11 @@ static int op_cmpa(uint16_t op)
         src = (uint32_t)(int32_t)(int16_t)(src & 0xFFFF);
     result = (dest - src) & 0xFFFFFFFF;
     set_nzvc_sub_sized(result, dest, src, 4, 0);  /* CMPA: X not affected */
-    return cmp_cycles(d.ea_mode, d.ea_reg, d.size);
+    {
+        int is_mem = (d.ea_mode >= 2 && !(d.ea_mode == 7 && d.ea_reg == 4));
+        int base = (is_mem && d.size == 4) ? 6 : 8;
+        return base + ea_cycles(d.ea_mode, d.ea_reg, d.size);
+    }
 }
 
 /* Decoded fields for ADDX/SUBX. Format: 1101/1001 Rx 1 SIZE 0 0 R/M Ry. */

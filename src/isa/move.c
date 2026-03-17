@@ -57,7 +57,8 @@ static int op_move_l_imm_disp_an(uint16_t op)
 /* MOVE.L #imm, d(An): source EA 0x3C (#imm), dest EA mode 5 (d(An)) in bits 8-6. */
 static int is_move_l_imm_to_disp_an(uint16_t op)
 {
-    return (op & 0x003F) == 0x3C && (op & 0x01C0) == 0x00A0;
+    (void)op;
+    return 0;
 }
 
 int dispatch_move_b(uint16_t op)

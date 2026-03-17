@@ -103,21 +103,19 @@ int add_sub_cycles(int ea_mode, int ea_reg, int size, int dir)
     return base + ea_cycles(ea_mode, ea_reg, size);
 }
 
-/* CMP: <ea> to Dn. */
+/* CMP: <ea> to Dn. Base 4 (B/W), 6 (L). No special Dn/An/#imm case. */
 int cmp_cycles(int ea_mode, int ea_reg, int size)
 {
     int base = (size == 4) ? 6 : 4;
-    if (size == 4 && (ea_mode <= 1 || (ea_mode == 7 && ea_reg == 4)))
-        base = 8;
     return base + ea_cycles(ea_mode, ea_reg, size);
 }
 
-/* ADDX/SUBX: Dy,Dx = 4(B) or 8(W/L); -(Ay),-(Ax) = 18(B) or 30(L). */
+/* ADDX/SUBX: Dy,Dx = 4(B/W) or 8(L); -(Ay),-(Ax) = 18(B/W) or 30(L). */
 int addx_subx_cycles(int is_memory, int size)
 {
     if (!is_memory)
-        return (size == 1) ? 4 : 8;
-    return (size == 1) ? 18 : 30;
+        return (size == 4) ? 8 : 4;
+    return (size == 4) ? 30 : 18;
 }
 
 /* PEA: 8 + LEA cycles (push + EA calc). */
@@ -200,20 +198,54 @@ int shift_cycles_memory(int ea_mode, int ea_reg)
     return 8 + ea_cycles(ea_mode, ea_reg, 2);
 }
 
-/* MULU/MULS: ~70 base + EA fetch (word). */
+/* MULU: 38 + 2*popcount(source) + ea. MULS: 38 + 2*f(source) + ea. */
+int mulu_cycles(int ea_mode, int ea_reg, uint16_t source)
+{
+    return 38 + 2 * __builtin_popcount(source) + ea_cycles(ea_mode, ea_reg, 2);
+}
+
+int muls_cycles(int ea_mode, int ea_reg, uint16_t source)
+{
+    /* Count 0→1 and 1→0 transitions in 17-bit value <0, b15..b0> */
+    uint32_t v = (uint32_t)source << 1;  /* shift left to compare with leading 0 */
+    uint32_t transitions = v ^ (uint32_t)source;
+    return 38 + 2 * __builtin_popcount(transitions & 0xFFFF) + ea_cycles(ea_mode, ea_reg, 2);
+}
+
+/* DIVU: best 76, worst 140. DIVS: best 120, worst 158. Operand-dependent.
+ * For now, use a simplified approach that matches the common patterns. */
+int divu_cycles(int ea_mode, int ea_reg, uint32_t dividend, uint16_t divisor)
+{
+    if (divisor == 0)
+        return 0;  /* divide-by-zero exception handles timing separately */
+    uint32_t quotient = dividend / divisor;
+    if (quotient > 0xFFFF)
+        return 10 + ea_cycles(ea_mode, ea_reg, 2);  /* overflow: short */
+    /* Approximate: 76 + 2*(number of 0 bits in quotient among the top bits) */
+    /* Simplified Motorola formula: 6 for base + 2 per quotient bit analysis */
+    /* Use: 76 + 2 * (15 - msb_position_of_quotient_candidate) + additional */
+    /* Exact timing is complex; use worst-case 140 as fallback */
+    return 140 + ea_cycles(ea_mode, ea_reg, 2);
+}
+
+int divs_cycles(int ea_mode, int ea_reg)
+{
+    return 158 + ea_cycles(ea_mode, ea_reg, 2);
+}
+
+/* Legacy wrappers */
 int mul_cycles(int ea_mode, int ea_reg)
 {
     return 70 + ea_cycles(ea_mode, ea_reg, 2);
 }
 
-/* DIVU ~140, DIVS ~158 base + EA fetch (word). */
 int div_cycles(int ea_mode, int ea_reg, int is_signed)
 {
     int base = is_signed ? 158 : 140;
     return base + ea_cycles(ea_mode, ea_reg, 2);
 }
 
-/* TST: base 4 + EA read. Dn/An: 4. Memory: 4 + ea_cycles. */
+/* TST: Dn: 4. Memory: 4 + ea (B/W), 4 + ea (L). */
 int tst_cycles(int mode, int reg, int size)
 {
     if (mode <= 1)
@@ -221,10 +253,23 @@ int tst_cycles(int mode, int reg, int size)
     return 4 + ea_cycles(mode, reg, size);
 }
 
-/* DBcc: 10 not taken, 14 taken (Motorola MC68000). */
-int dbcc_cycles(int taken)
+/* Scc: Dn condition true = 6, Dn condition false = 4, Memory = 8 + ea. */
+int scc_cycles_full(int ea_mode, int ea_reg, int cond_true)
 {
-    return taken ? 14 : 10;
+    if (ea_mode == 0)
+        return cond_true ? 6 : 4;
+    return 8 + ea_cycles(ea_mode, ea_reg, 1);
+}
+
+/* DBcc: cc true = 12, branch taken = 10, count expired = 14 (Motorola MC68000). */
+int dbcc_cycles(int state)
+{
+    switch (state) {
+    case 0: return 12;  /* condition true: terminate */
+    case 1: return 10;  /* condition false, count not expired: branch */
+    case 2: return 14;  /* condition false, count expired: fall through */
+    default: return 10;
+    }
 }
 
 /* Scc: 4 for Dn, 8 + ea_cycles for memory (byte). */
@@ -247,10 +292,12 @@ int abcd_sbcd_cycles(int is_memory)
     return is_memory ? 18 : 6;
 }
 
-/* NBCD: same as ABCD/SBCD. */
-int nbcd_cycles(int is_memory)
+/* NBCD: Dn = 6, memory = 8 + ea_cycles. */
+int nbcd_cycles(int ea_mode, int ea_reg)
 {
-    return is_memory ? 18 : 6;
+    if (ea_mode == 0)
+        return 6;
+    return 8 + ea_cycles(ea_mode, ea_reg, 1);
 }
 
 /* CHK: 10 + ea_cycles (word). Motorola MC68000. */
@@ -259,13 +306,12 @@ int chk_cycles(int ea_mode, int ea_reg)
     return 10 + ea_cycles(ea_mode, ea_reg, 2);
 }
 
-/* CLR: Dn: 4(B), 4(W), 6(L). Memory: 8 + ea_cycles (read+write). */
+/* CLR: Dn: 4(B/W), 6(L). Memory: 8 + ea (B/W), 12 + ea (L). */
 int clr_cycles(int mode, int reg, int size)
 {
-    if (mode == 0) {
+    if (mode == 0)
         return (size == 4) ? 6 : 4;
-    }
-    return 8 + ea_cycles(mode, reg, size);
+    return ((size == 4) ? 12 : 8) + ea_cycles(mode, reg, size);
 }
 
 /* Exception processing: stacking + vector fetch + first 2 words of handler. Motorola MC68000. */
