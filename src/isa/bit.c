@@ -25,24 +25,31 @@ static void set_z_from_bit(int bit_val)
         cpu.sr |= SR_Z;
 }
 
-/* Bit modify cycles (BCHG/BCLR/BSET). Dn: 8/10 + (imm?4:0). Memory: 8 + (imm?4:0) + ea. */
-static int bit_modify_cycles(int ea_mode, int ea_reg, int size, int is_imm, int opcode)
+/* Bit modify cycles (BCHG/BCLR/BSET). Dn: data-dependent on bit number.
+ * bit >= 16: BCLR=10, BCHG/BSET=8. bit < 16: BCLR=8, BCHG/BSET=6. +4 if #imm.
+ * Memory: 8 + (imm?4:0) + ea. */
+static int bit_modify_cycles(int ea_mode, int ea_reg, int size, int is_imm, int opcode, int bit_n)
 {
     if (ea_mode == 0) {
-        int base = (opcode == 2) ? 10 : 8;  /* BCLR Dn = 10, BCHG/BSET Dn = 8 */
+        int base = (opcode == 2) ? 10 : 8;
+        if (bit_n < 16) base -= 2;
         return base + (is_imm ? 4 : 0);
     }
     return 8 + (is_imm ? 4 : 0) + ea_cycles(ea_mode, ea_reg, size);
 }
 
-/* BTST: test only. No store. Dn: 6 + (imm?4:0). Memory: 4 + (imm?4:0) + ea. */
+/* BTST: test only. No store. Dn: 6 + (imm?4:0). #imm EA: 6 + ea. Memory: 4 + (imm?4:0) + ea. */
 static int op_btst(int ea_mode, int ea_reg, int size, int bit_reg, int is_imm, uint8_t imm)
 {
     int bit_n = bit_number(bit_reg, ea_mode, is_imm, imm);
     uint32_t val = ea_fetch_value(ea_mode, ea_reg, size) & size_mask(size);
     int bit_val = (int)((val >> bit_n) & 1);
     set_z_from_bit(bit_val);
-    int base = (ea_mode == 0) ? 6 : 4;
+    int base;
+    if (ea_mode == 0 || (ea_mode == 7 && ea_reg == 4))
+        base = 6;
+    else
+        base = 4;
     return base + (is_imm ? 4 : 0) + (ea_mode == 0 ? 0 : ea_cycles(ea_mode, ea_reg, size));
 }
 
@@ -57,7 +64,7 @@ static int op_bit_modify(int ea_mode, int ea_reg, int size, int bit_reg, int is_
     uint32_t val = ea_read_rmw(ea_mode, ea_reg, size, &rmw) & size_mask(size);
     set_z_from_bit((int)((val >> bit_n) & 1));
     ea_write_rmw(&rmw, modify(val, bit_n));
-    return bit_modify_cycles(ea_mode, ea_reg, size, is_imm, opcode);
+    return bit_modify_cycles(ea_mode, ea_reg, size, is_imm, opcode, bit_n);
 }
 
 static uint32_t modify_bchg(uint32_t val, int bit_n) { return val ^ (1u << bit_n); }

@@ -193,6 +193,12 @@ static void test_divs_cycles(void)
     /* Overflow: negative dividend → (7+2)*2 = 18 */
     TCHECK(divs_cycles(0, 0, (int32_t)0x80000000, 1), 18, "DIVS overflow neg dividend");
 
+    /* Signed overflow: quotient 65535 overflows int16 but abs values don't overflow */
+    TCHECK(divs_cycles(0, 0, 65535, 1), 16, "DIVS signed overflow (65535/1)");
+
+    /* Signed overflow: quotient -32769 overflows int16 */
+    TCHECK(divs_cycles(0, 0, -32769, 1), 18, "DIVS signed overflow (-32769/1)");
+
     /* Range check: non-overflow results in 120-156 */
     int c1 = divs_cycles(0, 0, 100, 10);
     TASSERT(c1 >= 120 && c1 <= 156, "DIVS 100/10 in range: got %d", c1);

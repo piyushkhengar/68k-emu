@@ -56,8 +56,9 @@ static int op_chk(uint16_t op)
     if (dn_val < 0 || dn_val > bound) {
         cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);
         if (dn_val < 0)
-            cpu.sr |= SR_N;  /* N=1 if Dn < 0, N=0 if Dn > bound */
-        cpu_take_exception(CHK_VECTOR, ea_cycles(ea_mode, ea_reg, 2) + 6);
+            cpu.sr |= SR_N;
+        int chk_base = (dn_val > bound) ? 4 : 6;
+        cpu_take_exception(CHK_VECTOR, ea_cycles(ea_mode, ea_reg, 2) + chk_base);
         return 0;
     }
     cpu.sr &= ~(SR_Z | SR_V | SR_C);  /* In bounds: N preserved (undefined/hardware-specific), Z/V/C cleared */

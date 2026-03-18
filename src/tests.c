@@ -1656,7 +1656,7 @@ static const unsigned expected_cycles[NUM_BUILTIN_TESTS] = {
     692,  /* subx_l */        720,  /* cmp_idx */
     706,  /* addi */          706,  /* subi */
     704,  /* cmpi */          698,  /* addq */
-    698,  /* subq */          706,  /* addq_a */
+    698,  /* subq */          704,  /* addq_a */
     688,  /* and */            688,  /* or */
     698,  /* eor */            694,  /* not */
     700,  /* adda_w */        700,  /* adda_l */
@@ -1674,7 +1674,7 @@ static const unsigned expected_cycles[NUM_BUILTIN_TESTS] = {
      36,  /* lsr_imm */         38,  /* rol_reg */
      48,  /* asl_mem */         82,  /* mulu */
      62,  /* muls */           176,  /* divu */
-    184,  /* divs */           342,  /* div_by_zero */
+    184,  /* divs */           362,  /* div_by_zero */
     116,  /* dbcc */            64,  /* scc */
      52,  /* ext */             34,  /* swap */
      78,  /* link_unlk */      690,  /* exg */
@@ -1684,7 +1684,7 @@ static const unsigned expected_cycles[NUM_BUILTIN_TESTS] = {
     702,  /* move_ccr */       710,  /* move_sr */
     712,  /* pea */            696,  /* nbcd */
     716,  /* rol_mem */        994,  /* btst_an */
-    704,  /* move_mem_btst */  984,  /* btst_dn_imm */
+    704,  /* move_mem_btst */  986,  /* btst_dn_imm */
     132,  /* trace_mode */    2050,  /* nested_exc */
     550,  /* smoke */
 };

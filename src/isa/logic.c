@@ -311,9 +311,9 @@ static int op_divu(uint16_t op)
 
     uint32_t divisor = ea_fetch_value(d.ea_mode, d.ea_reg, 2) & 0xFFFF;
     if (divisor == 0) {
-        cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);  /* Hardware clears condition codes on div-by-zero */
+        cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);
         cpu.pc = instr_pc;
-        cpu_take_exception(DIVIDE_BY_ZERO_VECTOR, 4);
+        cpu_take_exception(DIVIDE_BY_ZERO_VECTOR, pending_cycles + 4);
         return 0;
     }
 
@@ -342,7 +342,7 @@ static int op_divs(uint16_t op)
     uint32_t div_raw = ea_fetch_value(d.ea_mode, d.ea_reg, 2) & 0xFFFF;
     if (div_raw == 0) {
         cpu.pc -= 2;
-        cpu_take_exception(DIVIDE_BY_ZERO_VECTOR, 4);
+        cpu_take_exception(DIVIDE_BY_ZERO_VECTOR, pending_cycles + 4);
         return 0;
     }
 

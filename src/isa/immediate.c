@@ -259,7 +259,7 @@ static int op_addq_subq(uint16_t op, int is_sub)
         cpu.a[d.ea_reg] = result;
         if (d.ea_reg == 7)
             sync_a7_to_sp();
-        return 8;
+        return (d.size == 4) ? 6 : 8;
     }
 
     ea_rmw_t rmw;

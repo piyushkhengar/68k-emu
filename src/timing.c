@@ -257,12 +257,12 @@ int divs_cycles(int ea_mode, int ea_reg, int32_t dividend, int16_t divisor)
     if (dividend < 0)
         mcycles++;
 
-    uint32_t adividend = (uint32_t)((dividend < 0) ? -dividend : dividend);
-    uint16_t adivisor = (uint16_t)((divisor < 0) ? -divisor : divisor);
-
-    if ((adividend >> 16) >= (uint32_t)adivisor)
+    int32_t quotient = dividend / (int32_t)divisor;
+    if (quotient > 32767 || quotient < -32768)
         return (mcycles + 2) * 2 + ea_cycles(ea_mode, ea_reg, 2);
 
+    uint32_t adividend = (uint32_t)((dividend < 0) ? -dividend : dividend);
+    uint16_t adivisor = (uint16_t)((divisor < 0) ? -divisor : divisor);
     unsigned aquot = adividend / adivisor;
     mcycles += 55;
 
