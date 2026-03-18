@@ -12,6 +12,7 @@
 #include "memory.h"
 #include "processor_tests.h"
 #include "tests.h"
+#include "genesis/bus.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -39,10 +40,10 @@ static void print_cpu_state(void)
            cpu.d[0], cpu.d[1], cpu.d[2], cpu.a[7], cpu.sr);
 }
 
-/* Parse argv; returns speed_mhz (0 = unlimited), sets *rom_or_test, *run_all, *processor_tests, *processor_tests_filter, *max_steps_out (-1 = default), *debug (JSR trace). */
+/* Parse argv; returns speed_mhz (0 = unlimited). */
 static double parse_args(int argc, char *argv[], const char **rom_or_test, int *run_all,
                          const char **processor_tests, const char **processor_tests_filter,
-                         int *max_steps_out, int *debug)
+                         int *max_steps_out, int *debug, int *genesis_mode)
 {
     double speed_mhz = 0;
     *rom_or_test = NULL;
@@ -51,9 +52,12 @@ static double parse_args(int argc, char *argv[], const char **rom_or_test, int *
     *processor_tests_filter = NULL;
     *max_steps_out = -1;
     *debug = 0;
+    *genesis_mode = 0;
 
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--debug") == 0) {
+        if (strcmp(argv[i], "--genesis") == 0) {
+            *genesis_mode = 1;
+        } else if (strcmp(argv[i], "--debug") == 0) {
             *debug = 1;
         } else if (strcmp(argv[i], "--speed") == 0) {
             if (i + 1 < argc) {
@@ -136,7 +140,8 @@ int main(int argc, char *argv[])
     const char *processor_tests_filter = NULL;
     int max_steps_arg = -1;
     int debug = 0;
-    double speed_mhz = parse_args(argc, argv, &rom_or_test, &run_all, &processor_tests, &processor_tests_filter, &max_steps_arg, &debug);
+    int genesis_mode = 0;
+    double speed_mhz = parse_args(argc, argv, &rom_or_test, &run_all, &processor_tests, &processor_tests_filter, &max_steps_arg, &debug, &genesis_mode);
 
     if (processor_tests) {
         return run_processor_tests(processor_tests, processor_tests_filter);
@@ -146,10 +151,49 @@ int main(int argc, char *argv[])
     }
 
     const builtin_test_t *test = NULL;
-    if (rom_or_test)
+    if (rom_or_test && !genesis_mode)
         test = find_builtin_test(rom_or_test);
 
-    if (test) {
+    if (genesis_mode && rom_or_test) {
+        /* Genesis mode: load ROM through the bus */
+        FILE *f = fopen(rom_or_test, "rb");
+        if (!f) {
+            perror(rom_or_test);
+            return 1;
+        }
+        fseek(f, 0, SEEK_END);
+        long size = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        uint8_t *rom = malloc(size);
+        if (!rom) {
+            fclose(f);
+            fprintf(stderr, "Out of memory\n");
+            return 1;
+        }
+        fread(rom, 1, size, f);
+        fclose(f);
+
+        if (bus_init(rom, (size_t)size) < 0) {
+            free(rom);
+            return 1;
+        }
+        free(rom);
+
+        static const mem_bus_t genesis_bus = {
+            .read8   = bus_read8,
+            .read16  = bus_read16,
+            .read32  = bus_read32,
+            .write8  = bus_write8,
+            .write16 = bus_write16,
+            .write32 = bus_write32,
+        };
+        mem_set_bus(&genesis_bus);
+
+        printf("Genesis: loaded %s (%ld bytes)\n", rom_or_test, size);
+    } else if (genesis_mode) {
+        fprintf(stderr, "Usage: %s --genesis <rom.bin>\n", argv[0]);
+        return 1;
+    } else if (test) {
         mem_load_rom(test->rom, test->size);
         printf("%s\n", test->description);
     } else if (rom_or_test) {
@@ -240,13 +284,15 @@ int main(int argc, char *argv[])
 
     printf("Executed %d instructions. PC=0x%08X %s\n",
            steps, cpu.pc, cpu.halted ? "(halted)" : "");
-    if (rom_or_test && !test) {
+    if (genesis_mode) {
+        print_cpu_state();
+        printf("Cycles: %u\n", (unsigned)cpu.cycles);
+    } else if (rom_or_test && !test) {
         if (cpu.pc == 0xF000)
             printf("MCL68: ALL TESTS PASSED\n");
         else
             printf("MCL68: FAILED (PC stuck at 0x%08X = *_FAIL loop)\n", cpu.pc);
-    }
-    if (test) {
+    } else if (test) {
         print_cpu_state();
         printf("Cycles: %u\n", (unsigned)cpu.cycles);
     }

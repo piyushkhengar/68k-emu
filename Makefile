@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -g -std=c11 -Isrc -Isrc/core -Isrc/isa -I.
+CFLAGS = -Wall -Wextra -g -std=c11 -Isrc -Isrc/core -Isrc/isa -Isrc/genesis -I.
 TARGET = 68k-emu
 
 # Optional: -DHAVE_ZLIB and -lz for .json.gz support
@@ -14,6 +14,7 @@ SRCS = src/main.c src/core/cpu.c src/core/memory.c src/core/ea.c \
        src/isa/move.c src/isa/alu.c src/isa/branch.c src/isa/control.c \
        src/isa/immediate.c src/isa/logic.c src/isa/shift.c src/isa/bit.c \
        src/isa/movem.c src/isa/movep.c \
+       src/genesis/bus.c \
        src/tests.c src/timing.c src/timing_tests.c src/processor_tests.c \
        deps/cJSON/cJSON.c
 OBJS = $(SRCS:.c=.o)
