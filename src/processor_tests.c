@@ -17,6 +17,25 @@
 #include <zlib.h>
 #endif
 
+/*
+ * Known-bad tests with corrupted expected data in the upstream test suite.
+ * See: https://github.com/SingleStepTests/ProcessorTests/issues/21
+ */
+static const char *known_bad_tests[] = {
+    "e502 [ASL.b Q, D2] 1583",
+    "e502 [ASL.b Q, D2] 1761",
+    NULL
+};
+
+static int is_known_bad(const char *name)
+{
+    for (int i = 0; known_bad_tests[i]; i++) {
+        if (strcmp(name, known_bad_tests[i]) == 0)
+            return 1;
+    }
+    return 0;
+}
+
 static uint32_t get_num(cJSON *item)
 {
     if (!item || !cJSON_IsNumber(item))
@@ -262,6 +281,7 @@ static char *load_json(const char *path, size_t *out_size)
 }
 
 static int run_file(const char *path, int *passed, int *failed,
+                    int *skipped,
                     int *cycle_ok, int *cycle_bad,
                     int verbose, int test_index)
 {
@@ -306,6 +326,11 @@ static int run_file(const char *path, int *passed, int *failed,
             file_failed++;
             if (verbose)
                 printf("  SKIP %s (missing initial/final)\n", name);
+            continue;
+        }
+
+        if (is_known_bad(name)) {
+            (*skipped)++;
             continue;
         }
 
@@ -369,7 +394,7 @@ static int name_matches_filter(const char *name, const char *filter)
 }
 
 static int run_directory(const char *dir, const char *filter,
-                        int *passed, int *failed,
+                        int *passed, int *failed, int *skipped,
                         int *cycle_ok, int *cycle_bad,
                         int verbose, int test_index)
 {
@@ -414,7 +439,7 @@ static int run_directory(const char *dir, const char *filter,
         char path[512];
         snprintf(path, sizeof(path), "%s/%s", dir, ent->d_name);
 
-        if (run_file(path, passed, failed, cycle_ok, cycle_bad, verbose, test_index) == 0)
+        if (run_file(path, passed, failed, skipped, cycle_ok, cycle_bad, verbose, test_index) == 0)
             files++;
     }
     closedir(d);
@@ -432,14 +457,17 @@ int run_processor_tests(const char *dir, const char *filter)
            filter && *filter ? " (filter: " : "",
            filter && *filter ? filter : "",
            filter && *filter ? ")" : "");
-    int passed = 0, failed = 0;
+    int passed = 0, failed = 0, skipped = 0;
     int cycle_ok = 0, cycle_bad = 0;
     int verbose = test_index >= 0 ? 1 : 0;
 
-    if (run_directory(dir, filter, &passed, &failed, &cycle_ok, &cycle_bad, verbose, test_index) < 0)
+    if (run_directory(dir, filter, &passed, &failed, &skipped, &cycle_ok, &cycle_bad, verbose, test_index) < 0)
         return 1;
 
-    printf("Passed: %d  Failed: %d\n", passed, failed);
+    printf("Passed: %d  Failed: %d", passed, failed);
+    if (skipped > 0)
+        printf("  Skipped: %d (known bad test data)", skipped);
+    printf("\n");
     if (cycle_ok + cycle_bad > 0)
         printf("Cycles: %d correct  %d mismatched\n", cycle_ok, cycle_bad);
     return failed ? 1 : 0;
