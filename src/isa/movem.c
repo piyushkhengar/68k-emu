@@ -40,13 +40,11 @@ int op_movem_store(uint16_t op)
 
     int size = ((op >> 6) & 1) ? 4 : 2;
     uint16_t mask = fetch16();
+    pending_cycles += 4;
     uint32_t addr;
     int step = size;
 
     if (ea_mode == 4) {
-        /* -(An): predecrement. For predecrement, mask bits are reversed:
-         * bit 0=A7, bit 1=A6, ..., bit 7=A0, bit 8=D7, bit 9=D6, ..., bit 15=D0.
-         * Loop forward (bit 0 first) so A7 is stored at highest address. */
         addr = cpu.a[ea_reg];
         for (int i = 0; i < 16; i++) {
             if (mask & (1u << i)) {
@@ -58,20 +56,20 @@ int op_movem_store(uint16_t op)
                 }
                 uint32_t val;
                 if (i < 8)
-                    val = cpu.a[7 - i];   /* bit 0=A7, bit 7=A0 */
+                    val = cpu.a[7 - i];
                 else
-                    val = cpu.d[15 - i];  /* bit 8=D7, bit 15=D0 */
+                    val = cpu.d[15 - i];
                 if (size == 2)
                     mem_write16(addr, (uint16_t)(val & 0xFFFF));
                 else
                     mem_write32(addr, val);
+                pending_cycles += (size == 2) ? 4 : 8;
             }
         }
         cpu.a[ea_reg] = addr;
         if (ea_reg == 7)
             sync_a7_to_sp();
     } else {
-        /* Control mode: D0-D7, A0-A7. Increment after each store. */
         if (!ea_resolve_addr(ea_mode, ea_reg, 4, &addr))
             return op_unimplemented(op);
         for (int i = 0; i < 16; i++) {
@@ -85,6 +83,7 @@ int op_movem_store(uint16_t op)
                     mem_write16(addr, (uint16_t)(val & 0xFFFF));
                 else
                     mem_write32(addr, val);
+                pending_cycles += (size == 2) ? 4 : 8;
                 addr += step;
             }
         }
@@ -126,12 +125,10 @@ int op_movem_load(uint16_t op)
 
     int size = ((op >> 6) & 1) ? 4 : 2;
     uint16_t mask = fetch16();
+    pending_cycles += 4;
     uint32_t addr;
     int step = size;
 
-    /* Pass size=2 (one bus word) so that for (An)+ mode, An is only pre-incremented
-     * by 2; if the first read fires an address error, An stays at initial+2. For
-     * success cases, cpu.a[ea_reg]=addr at the end of the loop overrides this. */
     if (!ea_resolve_addr(ea_mode, ea_reg, 2, &addr))
         return op_unimplemented(op);
 
@@ -140,10 +137,11 @@ int op_movem_load(uint16_t op)
             uint32_t val;
             if (size == 2) {
                 val = mem_read16(addr);
-                val = (uint32_t)(int32_t)(int16_t)val;  /* sign-extend */
+                val = (uint32_t)(int32_t)(int16_t)val;
             } else {
                 val = mem_read32(addr);
             }
+            pending_cycles += (size == 2) ? 4 : 8;
             if (i >= 8)
                 cpu.a[i - 8] = val;
             else

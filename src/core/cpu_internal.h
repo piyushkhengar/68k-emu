@@ -24,6 +24,11 @@ extern CPU cpu;
  * 2 (MOVE-type writes): saved_pc = cpu.pc  (real 68000 prefetches one word before data writes). */
 extern int cpu_write_bus_adj;
 
+/* Accumulates bus/internal cycles consumed during instruction execution.
+ * Reset to 0 at the start of cpu_step(). Used by address error handlers to
+ * include pre-fault instruction cycles in the total exception time. */
+extern int pending_cycles;
+
 /* Fetch helpers - advance PC and return value */
 uint16_t fetch16(void);
 uint32_t fetch32(void);

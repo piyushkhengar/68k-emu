@@ -100,19 +100,22 @@ static int op_nop(uint16_t op)
 static int op_rtr(uint16_t op)
 {
     uint32_t sp = cpu_sp();
+    pending_cycles += 8;
     uint8_t ccr = (uint8_t)(mem_read16(sp) & 0xFF);
+    pending_cycles += 4;
     cpu.sr = (cpu.sr & 0xFF00) | (ccr & 0x1F);
     cpu.pc = mem_read32(sp + 2);
     cpu_sp_set(sp + 6);
     if (cpu.pc & 1)
         cpu_take_addr_err(cpu.pc, op);
-    return 20;  /* Motorola: RTR = 20 cycles */
+    return 20;
 }
 
 /* RTS: pop return address from stack, jump to it. 0x4E75. */
 static int op_rts(uint16_t op)
 {
     uint32_t sp = cpu_sp();
+    pending_cycles += 8;
     cpu.pc = mem_read32(sp);
     cpu_sp_set(sp + 4);
     if (cpu.pc & 1)
@@ -138,7 +141,9 @@ static int op_rte(uint16_t op)
     if (!require_supervisor())
         return 0;
     uint32_t sp = cpu.ssp;
+    pending_cycles += 8;
     uint16_t sr = mem_read16(sp);
+    pending_cycles += 4;
     cpu.sr = ((sr >> 8) & 0xA7) << 8 | (sr & 0x1F);
     cpu.pc = mem_read32(sp + 2);
     cpu.ssp = sp + 6;
@@ -202,6 +207,7 @@ static int op_pea(uint16_t op)
         return op_unimplemented(op);
 
     uint32_t sp = cpu_sp() - 4;
+    pending_cycles += 4;
     mem_write32(sp, addr);
     cpu_sp_set(sp);
     return pea_cycles(ea_mode, ea_reg);
@@ -233,8 +239,13 @@ static int op_jmp(uint16_t op)
     uint32_t addr;
     int ea_mode, ea_reg;
     decode_ea_addr_jmp_jsr(op, &addr, &ea_mode, &ea_reg);
-    if (addr & 1)
+    if (addr & 1) {
+        if (ea_mode == 5 || (ea_mode == 7 && (ea_reg == 0 || ea_reg == 2)))
+            pending_cycles -= 2;
+        else if (ea_mode == 7 && ea_reg == 1)
+            pending_cycles -= 4;
         cpu_take_addr_err(addr, op);
+    }
     cpu.pc = addr;
     return jmp_cycles(ea_mode, ea_reg);
 }
@@ -245,10 +256,16 @@ static int op_jsr(uint16_t op)
     uint32_t addr;
     int ea_mode, ea_reg;
     decode_ea_addr_jmp_jsr(op, &addr, &ea_mode, &ea_reg);
-    if (addr & 1)
+    if (addr & 1) {
+        if (ea_mode == 5 || (ea_mode == 7 && (ea_reg == 0 || ea_reg == 2)))
+            pending_cycles -= 2;
+        else if (ea_mode == 7 && ea_reg == 1)
+            pending_cycles -= 4;
         cpu_take_addr_err(addr, op);
+    }
     cpu_trace_jsr(addr);
     uint32_t sp = cpu_sp() - 4;
+    pending_cycles += 4;
     mem_write32(sp, cpu.pc);
     cpu_sp_set(sp);
     cpu.pc = addr;
@@ -445,8 +462,10 @@ static int op_link(uint16_t op)
 {
     int an = op & 7;
     int32_t disp = (int16_t)fetch16();
+    pending_cycles += 4;
     uint32_t sp = cpu_sp() - 4;
-    cpu_sp_set(sp);           /* update SP/A7 first so LINK A7 stores decremented SP */
+    cpu_sp_set(sp);
+    pending_cycles += 4;
     mem_write32(sp, cpu.a[an]);
     cpu.a[an] = sp;
     cpu_sp_set(sp + disp);
@@ -459,10 +478,11 @@ static int op_unlk(uint16_t op)
 {
     int an = op & 7;
     uint32_t sp = cpu.a[an];
-    cpu_sp_set(sp + 4);          /* advance SP past the saved-An slot */
-    cpu.a[an] = mem_read32(sp);  /* restore An from saved value */
+    cpu_sp_set(sp + 4);
+    pending_cycles += 8;
+    cpu.a[an] = mem_read32(sp);
     if (an == 7)
-        sync_a7_to_sp();         /* UNLK A7: popped value wins over SP+4 */
+        sync_a7_to_sp();
     return CYCLES_UNLK;
 }
 

@@ -58,6 +58,7 @@ int ea_resolve_addr(int mode, int reg, int size, uint32_t *addr)
         }
         return 1;
     case 4: /* -(An) */
+        pending_cycles += 2;
         cpu.a[reg] -= ea_step(reg, size);
         *addr = cpu.a[reg];
         if (reg == 7) {
@@ -66,23 +67,29 @@ int ea_resolve_addr(int mode, int reg, int size, uint32_t *addr)
         }
         return 1;
     case 5: /* d(An) */
+        pending_cycles += 4;
         *addr = cpu.a[reg] + (int32_t)(int16_t)fetch16();
         return 1;
     case 6: /* (d8,An,Xn) */
+        pending_cycles += 6;
         *addr = decode_indexed_addr(cpu.a[reg]);
         return 1;
     case 7:
         switch (reg) {
         case 0: /* abs.w */
+            pending_cycles += 4;
             *addr = (int32_t)(int16_t)fetch16();
             return 1;
         case 1: /* abs.l */
+            pending_cycles += 8;
             *addr = fetch32();
             return 1;
         case 2: /* d(PC) */
+            pending_cycles += 4;
             *addr = cpu.pc + (int32_t)(int16_t)fetch16();
             return 1;
         case 3: /* (d8,PC,Xn) */
+            pending_cycles += 6;
             *addr = decode_indexed_addr(cpu.pc);
             return 1;
         case 4: /* #imm */
@@ -109,8 +116,11 @@ uint32_t ea_fetch_value(int mode, int reg, int size)
 {
     uint32_t addr;
 
-    if (ea_resolve_addr(mode, reg, size, &addr))
-        return mem_read_sized(addr, size);
+    if (ea_resolve_addr(mode, reg, size, &addr)) {
+        uint32_t val = mem_read_sized(addr, size);
+        pending_cycles += (size <= 2) ? 4 : 8;
+        return val;
+    }
 
     switch (mode) {
     case 0: /* Dn */
@@ -119,8 +129,9 @@ uint32_t ea_fetch_value(int mode, int reg, int size)
         return cpu.a[reg];
     case 7:
         if (reg == 4) { /* #imm */
-            if (size == 1) return fetch16() & 0xFF;
-            if (size == 2) return fetch16() & 0xFFFF;
+            if (size == 1) { pending_cycles += 4; return fetch16() & 0xFF; }
+            if (size == 2) { pending_cycles += 4; return fetch16() & 0xFFFF; }
+            pending_cycles += 8;
             return fetch32();
         }
         return 0;
@@ -135,8 +146,11 @@ uint32_t ea_read_rmw(int mode, int reg, int size, ea_rmw_t *rmw)
     rmw->reg    = reg;
     rmw->size   = size;
     rmw->is_mem = ea_resolve_addr(mode, reg, size, &rmw->addr);
-    if (rmw->is_mem)
-        return mem_read_sized(rmw->addr, size);
+    if (rmw->is_mem) {
+        uint32_t val = mem_read_sized(rmw->addr, size);
+        pending_cycles += (size <= 2) ? 4 : 8;
+        return val;
+    }
     /* Register EA: Dn (mode 0) or An (mode 1). */
     if (mode == 0) return cpu.d[reg];
     if (mode == 1) return cpu.a[reg];
@@ -181,7 +195,9 @@ void ea_store_value(int mode, int reg, int size, uint32_t value)
     if (mode == 4 && size == 4) {
         /* -(An).L destination: two 2-byte steps. If first step lands odd,
          * leave An at An-2 (write fires with An at An-2).
-         * Real 68000 does np (prefetch) before -(An) writes; adjust saved_pc by +2. */
+         * Real 68000 does np (prefetch) before -(An) writes; adjust saved_pc by +2.
+         * Pre-fault: 2 predecrement internal + 2 prefetch overlap = 4 cycles. */
+        pending_cycles += 4;
         cpu_write_bus_adj = 2;
         cpu.a[reg] -= 2;
         if (!(cpu.a[reg] & 1)) cpu.a[reg] -= 2;
@@ -192,6 +208,7 @@ void ea_store_value(int mode, int reg, int size, uint32_t value)
     }
     if (mode == 4) {
         /* -(An) destination (byte/word): real 68000 prefetches before write. */
+        pending_cycles += 2;
         cpu_write_bus_adj = 2;
     }
 

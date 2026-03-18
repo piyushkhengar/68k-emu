@@ -258,10 +258,8 @@ static int op_addx_subx(uint16_t op, int is_add)
         else
             set_nzvc_subx_sized(result, dest_val, src, d.size, xbit);
     } else {
-        /* ADDX/SUBX -(Ay), -(Ax): process source then dest sequentially (real 68000 order).
-         * For .L, two 2-byte steps: stop at An-2 if odd (address error fires with reg at An-2).
-         * Source is fully processed before dest is touched, so address error on src read
-         * leaves dest register unchanged. */
+        /* ADDX/SUBX -(Ay), -(Ax): process source then dest sequentially (real 68000 order). */
+        pending_cycles += 2;
         if (d.size == 4) {
             cpu.a[d.src_reg] -= 2;
             if (!(cpu.a[d.src_reg] & 1)) cpu.a[d.src_reg] -= 2;
@@ -270,7 +268,8 @@ static int op_addx_subx(uint16_t op, int is_add)
         }
         uint32_t addr_y = cpu.a[d.src_reg];
         if (d.src_reg == 7) sync_a7_to_sp();
-        uint32_t src = alu_mem_read_sized(addr_y, d.size);  /* may longjmp; dest untouched */
+        uint32_t src = alu_mem_read_sized(addr_y, d.size);
+        pending_cycles += (d.size <= 2) ? 4 : 8;
 
         if (d.size == 4) {
             cpu.a[d.dest_reg] -= 2;
@@ -281,6 +280,7 @@ static int op_addx_subx(uint16_t op, int is_add)
         uint32_t addr_x = cpu.a[d.dest_reg];
         if (d.dest_reg == 7) sync_a7_to_sp();
         uint32_t dest_val = alu_mem_read_sized(addr_x, d.size);
+        pending_cycles += (d.size <= 2) ? 4 : 8;
         uint32_t result = is_add ? (dest_val + src + xbit) & d.mask : (dest_val - src - xbit) & d.mask;
         alu_mem_write_sized(addr_x, d.size, result);
         if (is_add)
@@ -345,8 +345,9 @@ static int op_cmpm(uint16_t op)
     uint32_t src;
     if (size == 1) src = mem_read8(src_addr);
     else if (size == 2) src = mem_read16(src_addr);
-    else src = mem_read32(src_addr);  /* may longjmp; dst_addr not yet computed */
+    else src = mem_read32(src_addr);
     src &= mask;
+    pending_cycles += (size <= 2) ? 4 : 8;
 
     uint32_t dst_addr = cpu.a[axn];
     cpu.a[axn] += step_x;

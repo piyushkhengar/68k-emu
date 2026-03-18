@@ -16,10 +16,15 @@ static uint32_t fetch_imm(int size)
 {
     if (size == 1) {
         uint16_t w = fetch16();
+        pending_cycles += 4;
         return w & 0xFF;
     }
-    if (size == 2)
-        return fetch16() & 0xFFFF;
+    if (size == 2) {
+        uint16_t w = fetch16();
+        pending_cycles += 4;
+        return w & 0xFFFF;
+    }
+    pending_cycles += 8;
     return fetch32();
 }
 
@@ -330,10 +335,12 @@ static int op_dbcc(uint16_t op)
     cpu.d[dn] = (cpu.d[dn] & 0xFFFF0000) | ((uint32_t)(uint16_t)new_val & 0xFFFF);
 
     if (new_val != -1) {
-        cpu.pc += disp - 2;   /* 16-bit disp: base = extension word addr = PC-2 */
-        if (cpu.pc & 1)
+        cpu.pc += disp - 2;
+        if (cpu.pc & 1) {
+            pending_cycles += 2;
             cpu_take_addr_err(cpu.pc, op);
-        return dbcc_cycles(1);  /* branch taken (10 cycles) */
+        }
+        return dbcc_cycles(1);
     }
     return dbcc_cycles(2);  /* count expired (14 cycles) */
 }

@@ -287,6 +287,7 @@ static int run_file(const char *path, int *passed, int *failed,
 
     int count = cJSON_GetArraySize(root);
     int file_passed = 0, file_failed = 0;
+    int file_cycle_ok = 0, file_cycle_bad = 0;
 
     for (int i = 0; i < count; i++) {
         if (test_index >= 0 && i != test_index)
@@ -334,8 +335,10 @@ static int run_file(const char *path, int *passed, int *failed,
             uint32_t expected_cycles = get_num(length);
             if (cpu.cycles == expected_cycles) {
                 (*cycle_ok)++;
+                file_cycle_ok++;
             } else {
                 (*cycle_bad)++;
+                file_cycle_bad++;
                 if (test_index >= 0)
                     printf("  CYCLE %s: expected %u, got %u\n",
                            name, expected_cycles, (unsigned)cpu.cycles);
@@ -344,6 +347,12 @@ static int run_file(const char *path, int *passed, int *failed,
 
         if (test_index >= 0)
             break;
+    }
+
+    if (file_cycle_bad > 0) {
+        const char *slash = strrchr(path, '/');
+        const char *fname = slash ? slash + 1 : path;
+        printf("  [cycles] %s: %d ok, %d bad\n", fname, file_cycle_ok, file_cycle_bad);
     }
 
     cJSON_Delete(root);

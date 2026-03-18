@@ -16,6 +16,7 @@
 
 CPU cpu;
 int cpu_write_bus_adj = 0;
+int pending_cycles = 0;
 
 /* Used by cpu_take_exception to unwind and abort the current instruction */
 static jmp_buf exception_buf;
@@ -254,7 +255,7 @@ void cpu_take_addr_err(uint32_t fault_addr, uint16_t ir)
     if (!(saved_sr & 0x2000))
         cpu.usp = cpu.a[7];
     cpu.sr = (saved_sr | 0x2000) & ~0x8000;  /* Set S, clear T */
-    exception_cycles_result = exception_cycles(ADDR_ERR_VECTOR);
+    exception_cycles_result = pending_cycles + exception_cycles(ADDR_ERR_VECTOR);
     /* FC=6 supervisor program, FC=2 user program; I=1 instruction fetch, R=1 read */
     uint8_t inst_fc = (saved_sr & 0x2000) ? 6 : 2;
     uint8_t inst_access_bits = (uint8_t)(0x10 | 0x08 | inst_fc);
@@ -282,7 +283,7 @@ void cpu_take_addr_err_data(uint32_t fault_addr, int is_read)
     if (!(saved_sr & 0x2000))
         cpu.usp = cpu.a[7];
     cpu.sr = (saved_sr | 0x2000) & ~0x8000;
-    exception_cycles_result = exception_cycles(ADDR_ERR_VECTOR);
+    exception_cycles_result = pending_cycles + exception_cycles(ADDR_ERR_VECTOR);
     /* Compute access_bits: R/W(bit4), I/N=0, FC(supervisor=5, user=1) */
     uint8_t fc = (saved_sr & 0x2000) ? 5 : 1;
     uint8_t access_bits = (uint8_t)((is_read ? 0x10 : 0x00) | fc);
@@ -424,6 +425,8 @@ int cpu_step(void)
         return 0;
 
     int was_trace = cpu.sr & 0x8000;
+
+    pending_cycles = 0;
 
 #if defined(__GNUC__) && defined(_WIN32)
     if (__builtin_setjmp(exception_buf) != 0) {
