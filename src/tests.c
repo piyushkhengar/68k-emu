@@ -1372,6 +1372,36 @@ static const uint8_t genesis_vdp_test[0x264] = {
     0x4E, 0x72, 0x27, 0x00,                             /* STOP #0x2700 */
 };
 
+/*
+ * Genesis interrupt test: verifies that VBlank fires a level-6 autovector
+ * interrupt when VDP register 1 bit 5 is set and the CPU mask allows it.
+ * The handler writes a signature to D0 and acknowledges VInt by reading
+ * the VDP status register.  Main code spins until D0 is set, then halts.
+ */
+static const uint8_t genesis_irq_test[0x220] = {
+    0x00, 0xFF, 0x00, 0x00,   /* 0x000: SSP = 0x00FF0000 */
+    0x00, 0x00, 0x02, 0x00,   /* 0x004: PC  = 0x00000200 */
+    /* 0x008..0x077: implicitly zero */
+    [0x078] =
+    0x00, 0x00, 0x01, 0x00,   /* 0x078: Level 6 autovector handler = 0x00000100 */
+    /* 0x07C..0x0FF: implicitly zero */
+
+    /* VBlank handler at 0x100 */
+    [0x100] =
+    0x20, 0x3C, 0x12, 0x34, 0x56, 0x78,               /* MOVE.L #0x12345678, D0 */
+    0x32, 0x39, 0x00, 0xC0, 0x00, 0x04,               /* MOVE.W (0xC00004).L, D1 -- ACK VInt */
+    0x4E, 0x73,                                         /* RTE */
+
+    /* Main code at 0x200 */
+    [0x200] =
+    0x33, 0xFC, 0x81, 0x74, 0x00, 0xC0, 0x00, 0x04,   /* MOVE.W #0x8174, (0xC00004).L -- VDP reg 1 = 0x74 (VInt enable) */
+    0x46, 0xFC, 0x20, 0x00,                             /* MOVE #0x2000, SR -- unmask interrupts */
+    /* loop: */
+    0x4A, 0x80,                                         /* TST.L D0 */
+    0x67, 0xFC,                                         /* BEQ.S loop (-4) */
+    0x4E, 0x72, 0x27, 0x00,                             /* STOP #0x2700 */
+};
+
 /* --- Built-in test table --- */
 
 #define SLICE_MS 10
@@ -1538,6 +1568,7 @@ static int check_test_result(size_t idx)
               vdp.cram[0] == 0x0E00 &&                                          /* CRAM[0] = green backdrop */
               vdp.regs[0] == 0x04 && vdp.regs[1] == 0x74 &&                    /* mode registers */
               vdp.regs[15] == 0x02;                                              /* auto-increment = 2 */
+    case 115: return cpu.d[0] == 0x12345678 && cpu.halted;                       /* genesis_irq: VBlank handler set D0 */
     default: return 0;
     }
 }
@@ -1662,6 +1693,7 @@ static const builtin_test_t builtin_tests[] = {
     { "smoke", smoke_test, sizeof(smoke_test), "Running integration smoke test (BSR/MOVEM/self-mod)", 50 },
     /* Genesis tests (detected by "genesis_" prefix, run via bus instead of flat RAM) */
     { "genesis_vdp", genesis_vdp_test, sizeof(genesis_vdp_test), "Running Genesis VDP test", 20 },
+    { "genesis_irq", genesis_irq_test, sizeof(genesis_irq_test), "Running Genesis interrupt test", 500 },
 };
 
 #define NUM_BUILTIN_TESTS (sizeof(builtin_tests) / sizeof(builtin_tests[0]))
@@ -1726,6 +1758,7 @@ static const unsigned expected_cycles[NUM_BUILTIN_TESTS] = {
     132,  /* trace_mode */    2050,  /* nested_exc */
     550,  /* smoke */
     240,  /* genesis_vdp */
+      0,  /* genesis_irq (cycle count depends on scanline timing) */
 };
 
 const builtin_test_t *find_builtin_test(const char *name)
@@ -1763,6 +1796,8 @@ int run_all_tests(double speed_mhz)
         if (is_genesis) {
             bus_init(t->rom, t->size);
             mem_set_bus(&genesis_bus);
+            if (strstr(t->name, "irq"))
+                vdp.line = 220;
         } else {
             mem_set_bus(NULL);
             mem_reset();
@@ -1772,6 +1807,7 @@ int run_all_tests(double speed_mhz)
 
         int max_steps = t->max_steps ? t->max_steps : 100;
         int steps = 0;
+        int scanline_acc = 0;
 
         while (steps < max_steps) {
             int c = cpu_step();
@@ -1780,6 +1816,15 @@ int run_all_tests(double speed_mhz)
             cpu.cycles += c;
             cycles_this_slice += c;
             steps++;
+
+            if (is_genesis) {
+                scanline_acc += c;
+                while (scanline_acc >= 488) {
+                    scanline_acc -= 488;
+                    vdp_run_scanline(vdp.line);
+                    vdp.line = (vdp.line + 1) % 262;
+                }
+            }
 
             if (speed_mhz > 0) {
                 int slice_ms = SLICE_MS_THROTTLED;

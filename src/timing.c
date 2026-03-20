@@ -369,7 +369,8 @@ int exception_cycles(int vector_num)
     case 11: return 42;  /* (F-Line) */
     case 14: return 44;  /* CHK (trap taken) */
     case 24: return 44;  /* Spurious interrupt */
-    case 25: return 44;  /* Level 1-7 interrupt */
+    case 25: case 26: case 27: case 28: case 29: case 30: case 31:
+        return 44;  /* Level 1-7 autovector interrupts */
     default: return 34;  /* Fallback for unimplemented vectors */
     }
 }

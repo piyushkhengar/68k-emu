@@ -30,6 +30,10 @@ typedef struct {
 
 extern CPU cpu;
 
+/* External interrupt priority level (0-7). Set by hardware (e.g. VDP).
+ * 0 = no interrupt pending. Checked at the start of each cpu_step(). */
+extern int cpu_ipl;
+
 void cpu_init(void);
 void cpu_reset(void);
 

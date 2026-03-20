@@ -15,6 +15,7 @@
 #include <string.h>
 
 CPU cpu;
+int cpu_ipl = 0;
 int cpu_write_bus_adj = 0;
 int pending_cycles = 0;
 
@@ -50,6 +51,7 @@ void cpu_trace_branch_to(uint32_t from_pc, uint32_t to_pc)
 void cpu_init(void)
 {
     memset(&cpu, 0, sizeof(cpu));
+    cpu_ipl = 0;
     trace_jsr_fn = NULL;
     trace_branch_to_fn = NULL;
 }
@@ -421,8 +423,42 @@ static int execute(uint16_t op)
 
 int cpu_step(void)
 {
-    if (cpu.halted)
-        return 0;
+    if (cpu.halted) {
+        if (cpu_ipl == 7 || cpu_ipl > ((cpu.sr >> 8) & 7)) {
+            cpu.halted = 0;
+        } else {
+            return 0;
+        }
+    }
+
+    /* Check for pending external interrupt before instruction fetch.
+     * Level 7 is non-maskable (taken even when mask is 7). */
+    if (cpu_ipl > 0) {
+        int mask = (cpu.sr >> 8) & 7;
+        if (cpu_ipl > mask || cpu_ipl == 7) {
+            int level = cpu_ipl;
+            int vector = 24 + level;
+            uint16_t saved_sr = cpu.sr;
+
+            if (!(saved_sr & 0x2000))
+                cpu.usp = cpu.a[7];
+
+            cpu.sr |= 0x2000;
+            cpu.sr &= ~0x8000;
+            cpu.sr = (cpu.sr & ~0x0700) | (level << 8);
+
+            uint32_t sp = cpu.ssp;
+            sp -= 4;
+            mem_write32(sp, cpu.pc);
+            sp -= 2;
+            mem_write16(sp, saved_sr);
+            cpu.ssp = sp;
+            cpu.a[7] = sp;
+
+            cpu.pc = mem_read32((unsigned)vector * 4);
+            return exception_cycles(vector);
+        }
+    }
 
     int was_trace = cpu.sr & 0x8000;
 

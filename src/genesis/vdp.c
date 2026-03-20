@@ -11,7 +11,10 @@
 
 #include "vdp.h"
 #include "bus.h"
+#include "cpu.h"
 #include <string.h>
+
+static void vdp_update_ipl(void);
 
 /* ------------------------------------------------------------------ */
 /*  Global VDP state                                                   */
@@ -203,6 +206,8 @@ void vdp_control_write(uint16_t val)
             vdp.regs[reg] = val & 0xFF;
         vdp.code = (vdp.code & 0x3C) | ((val >> 14) & 0x03);
         vdp.addr = (vdp.addr & 0xC000) | (val & 0x3FFF);
+        if (reg == 0 || reg == 1)
+            vdp_update_ipl();
         return;
     }
 
@@ -237,6 +242,8 @@ uint16_t vdp_control_read(void)
 
     /* Reading clears the one-shot flags */
     vdp.status &= ~(ST_VINT | ST_SPR_OVF | ST_SPR_COL);
+
+    vdp_update_ipl();
 
     return s;
 }
@@ -290,4 +297,51 @@ uint16_t vdp_hv_read(void)
     uint8_t v = (uint8_t)(vdp.line & 0xFF);
     uint8_t h = (uint8_t)((vdp.hcounter >> 1) & 0xFF);
     return ((uint16_t)v << 8) | h;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Interrupt priority                                                 */
+/* ------------------------------------------------------------------ */
+
+static void vdp_update_ipl(void)
+{
+    int level = 0;
+    if (vdp.hint_pending && (vdp.regs[0] & 0x10))
+        level = 4;
+    if ((vdp.status & ST_VINT) && (vdp.regs[1] & 0x20))
+        level = 6;
+    cpu_ipl = level;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Scanline processing                                                */
+/* ------------------------------------------------------------------ */
+
+#define NTSC_LINES      262
+#define ACTIVE_LINES    224
+
+void vdp_run_scanline(int line)
+{
+    vdp.line = line;
+    vdp.hint_pending = 0;
+
+    if (line == 0)
+        vdp.hint_counter = vdp.regs[10];
+
+    if (line < ACTIVE_LINES) {
+        vdp.status &= ~ST_VBLANK;
+
+        vdp.hint_counter--;
+        if (vdp.hint_counter < 0) {
+            vdp.hint_counter = vdp.regs[10];
+            vdp.hint_pending = 1;
+        }
+    } else if (line == ACTIVE_LINES) {
+        vdp.status |= ST_VBLANK | ST_VINT;
+        vdp.hint_counter = vdp.regs[10];
+    } else {
+        vdp.hint_counter = vdp.regs[10];
+    }
+
+    vdp_update_ipl();
 }

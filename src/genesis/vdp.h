@@ -42,6 +42,9 @@ typedef struct {
 
     int      line;              /* Current scanline (0-261 NTSC) */
     int      hcounter;          /* Horizontal pixel position */
+
+    int      hint_counter;      /* HBlank interrupt countdown (loaded from reg 10) */
+    int      hint_pending;      /* HBlank interrupt line asserted */
 } vdp_t;
 
 extern vdp_t vdp;
@@ -55,5 +58,9 @@ void     vdp_data_write(uint16_t val);
 uint16_t vdp_control_read(void);
 void     vdp_control_write(uint16_t val);
 uint16_t vdp_hv_read(void);
+
+/* Scanline processing -- called once per scanline from the genesis main loop.
+ * Manages VBlank/HBlank flags, HInt counter, and drives cpu_ipl. */
+void     vdp_run_scanline(int line);
 
 #endif /* GENESIS_VDP_H */
