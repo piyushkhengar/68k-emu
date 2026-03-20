@@ -499,9 +499,126 @@ static void render_window(uint32_t *row, int line, int pri,
 }
 
 /* ------------------------------------------------------------------ */
+/*  Sprite rendering                                                   */
+/* ------------------------------------------------------------------ */
+
+/*
+ * SAT entry layout (8 bytes per sprite, up to 80 sprites):
+ *   Word 0 (bytes 0-1): Y position (bits 9-0), offset by 128
+ *   Word 1 (bytes 2-3): bits 11-10 = vsize (0-3 → 1-4 tiles)
+ *                        bits  9-8  = hsize (0-3 → 1-4 tiles)
+ *                        bits  6-0  = link (next sprite index, 0 = end)
+ *   Word 2 (bytes 4-5): bit 15 = priority, bits 14-13 = palette,
+ *                        bit 12 = vflip, bit 11 = hflip,
+ *                        bits 10-0 = pattern index
+ *   Word 3 (bytes 6-7): X position (bits 8-0), offset by 128
+ */
+
+#define MAX_SPRITES_H40  80
+#define MAX_SPRITES_H32  64
+#define SPRITES_PER_LINE_H40  20
+#define SPRITES_PER_LINE_H32  16
+
+static void render_sprites(uint32_t *row, int line, int pri)
+{
+    int h40 = (vdp.regs[12] & 0x81) != 0;
+    int screen_w = h40 ? 320 : 256;
+    int max_sprites = h40 ? MAX_SPRITES_H40 : MAX_SPRITES_H32;
+    int line_limit = h40 ? SPRITES_PER_LINE_H40 : SPRITES_PER_LINE_H32;
+
+    uint16_t sat_base;
+    if (h40)
+        sat_base = (uint16_t)(vdp.regs[5] & 0x7E) << 9;
+    else
+        sat_base = (uint16_t)(vdp.regs[5] & 0x7F) << 9;
+
+    int sprites_on_line = 0;
+    int dot_overflow = 0;
+    int idx = 0;
+
+    for (int count = 0; count < max_sprites; count++) {
+        uint32_t ea = (sat_base + (uint32_t)idx * 8) & 0xFFFF;
+
+        int sy = ((vdp.vram[ea] << 8) | vdp.vram[(ea + 1) & 0xFFFF]) & 0x3FF;
+        sy -= 128;
+
+        uint16_t szlink = (vdp.vram[(ea + 2) & 0xFFFF] << 8) |
+                           vdp.vram[(ea + 3) & 0xFFFF];
+        int vsize = ((szlink >> 8) & 0x03) + 1;
+        int hsize = ((szlink >> 10) & 0x03) + 1;
+        int link  = szlink & 0x7F;
+
+        int sprite_h = vsize * 8;
+        int row_in_sprite = line - sy;
+
+        if (row_in_sprite >= 0 && row_in_sprite < sprite_h) {
+            if (sprites_on_line >= line_limit) {
+                vdp.status |= ST_SPR_OVF;
+                break;
+            }
+            sprites_on_line++;
+
+            uint16_t attr = (vdp.vram[(ea + 4) & 0xFFFF] << 8) |
+                             vdp.vram[(ea + 5) & 0xFFFF];
+            int spri = (attr >> 15) & 1;
+            if (spri != pri) goto next;
+
+            int pal  = (attr >> 13) & 3;
+            int vf   = (attr >> 12) & 1;
+            int hf   = (attr >> 11) & 1;
+            int pat  = attr & 0x7FF;
+
+            int sx = ((vdp.vram[(ea + 6) & 0xFFFF] << 8) |
+                       vdp.vram[(ea + 7) & 0xFFFF]) & 0x1FF;
+            sx -= 128;
+
+            int ty = vf ? (sprite_h - 1 - row_in_sprite) : row_in_sprite;
+            int tile_row = ty >> 3;
+            int fy = ty & 7;
+
+            int sprite_w = hsize * 8;
+            for (int px = 0; px < sprite_w; px++) {
+                int scr_x = sx + px;
+                if (scr_x < 0 || scr_x >= screen_w)
+                    continue;
+
+                int tx_pixel = hf ? (sprite_w - 1 - px) : px;
+                int tile_col = tx_pixel >> 3;
+                int fx = tx_pixel & 7;
+
+                int tile_idx = pat + tile_col * vsize + tile_row;
+
+                uint8_t pixel = pattern_pixel(tile_idx, fx, fy);
+                if (pixel == 0) continue;
+
+                row[scr_x] = cram_to_argb(vdp.cram[pal * 16 + pixel]);
+            }
+
+            dot_overflow += sprite_w;
+            if (dot_overflow >= screen_w)
+                break;
+        }
+
+next:
+        if (link == 0) break;
+        idx = link;
+    }
+}
+
+/* ------------------------------------------------------------------ */
 /*  Scanline composition                                               */
 /* ------------------------------------------------------------------ */
 
+/*
+ * Genesis VDP priority order (back to front):
+ *   1. Backdrop colour
+ *   2. Low-priority Plane B
+ *   3. Low-priority Plane A / Window
+ *   4. Low-priority sprites
+ *   5. High-priority Plane B
+ *   6. High-priority Plane A / Window
+ *   7. High-priority sprites
+ */
 static void render_scanline(int line)
 {
     uint32_t *row = &vdp.framebuffer[line * SCREEN_WIDTH];
@@ -521,10 +638,12 @@ static void render_scanline(int line)
     render_plane(row, line, 1, 0, 0, 0);
     render_plane(row, line, 0, 0, win_start, win_end);
     render_window(row, line, 0, win_start, win_end);
+    render_sprites(row, line, 0);
 
     render_plane(row, line, 1, 1, 0, 0);
     render_plane(row, line, 0, 1, win_start, win_end);
     render_window(row, line, 1, win_start, win_end);
+    render_sprites(row, line, 1);
 }
 
 void vdp_run_scanline(int line)
