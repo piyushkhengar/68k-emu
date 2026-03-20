@@ -10,27 +10,47 @@ ifeq ($(shell echo 'int main(){return 0;}' | $(CC) -x c - -lz -o /dev/null 2>/de
   LDFLAGS += -lz
 endif
 
+# SDL2 (detected automatically; used by `make genesis`)
+SDL2_CFLAGS := $(shell sdl2-config --cflags 2>/dev/null)
+SDL2_LIBS   := $(shell sdl2-config --libs 2>/dev/null)
+
+# Core sources shared by all targets
 SRCS = src/main.c src/core/cpu.c src/core/memory.c src/core/ea.c \
        src/isa/move.c src/isa/alu.c src/isa/branch.c src/isa/control.c \
        src/isa/immediate.c src/isa/logic.c src/isa/shift.c src/isa/bit.c \
        src/isa/movem.c src/isa/movep.c \
        src/genesis/bus.c src/genesis/vdp.c src/genesis/io.c \
+       src/genesis/genesis.c \
        src/tests.c src/timing.c src/timing_tests.c src/processor_tests.c \
        deps/cJSON/cJSON.c
 OBJS = $(SRCS:.c=.o)
 
-.PHONY: all clean test mcl68-test
+.PHONY: all clean test mcl68-test genesis
 
 all: $(TARGET)
 
 $(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
+# Genesis target: rebuild with SDL2 for graphical output
+#   - genesis.c recompiled with -DHAVE_SDL2 (separate .o to avoid conflicts)
+#   - renderer.c compiled with SDL2 headers
+genesis: GENESIS_OBJS = $(filter-out src/genesis/genesis.o,$(OBJS)) \
+                        src/genesis/genesis_sdl.o src/genesis/renderer.o
+genesis: $(filter-out src/genesis/genesis.o,$(OBJS)) src/genesis/genesis_sdl.o src/genesis/renderer.o
+	$(CC) $(CFLAGS) $(SDL2_CFLAGS) -o $(TARGET) $(filter-out src/genesis/genesis.o,$(OBJS)) src/genesis/genesis_sdl.o src/genesis/renderer.o $(LDFLAGS) $(SDL2_LIBS)
+
+src/genesis/genesis_sdl.o: src/genesis/genesis.c
+	$(CC) $(CFLAGS) $(SDL2_CFLAGS) -DHAVE_SDL2 -c -o $@ $<
+
+src/genesis/renderer.o: src/genesis/renderer.c
+	$(CC) $(CFLAGS) $(SDL2_CFLAGS) -c -o $@ $<
+
 %.o: %.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 clean:
-	rm -f $(OBJS) $(TARGET)
+	rm -f $(OBJS) src/genesis/genesis_sdl.o src/genesis/renderer.o $(TARGET)
 
 # SPEED: run tests at given MHz (e.g. make test SPEED=7.09). Omit for hyperspeed.
 SPEED ?=

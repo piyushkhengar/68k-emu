@@ -13,6 +13,7 @@
 #include "processor_tests.h"
 #include "tests.h"
 #include "genesis/bus.h"
+#include "genesis/genesis.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -222,6 +223,11 @@ int main(int argc, char *argv[])
     }
 
     cpu_reset();
+
+    if (genesis_mode) {
+        genesis_run();
+        return 0;
+    }
 
     if (debug && rom_or_test && !test) {
         btst_fail_reported = 0;

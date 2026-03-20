@@ -314,11 +314,35 @@ static void vdp_update_ipl(void)
 }
 
 /* ------------------------------------------------------------------ */
+/*  Colour conversion                                                  */
+/* ------------------------------------------------------------------ */
+
+/* Convert Genesis 9-bit BGR (0BBB0GGG0RRR0) to ARGB8888. */
+static uint32_t cram_to_argb(uint16_t c)
+{
+    uint8_t r = (uint8_t)(((c >>  1) & 7) * 255 / 7);
+    uint8_t g = (uint8_t)(((c >>  5) & 7) * 255 / 7);
+    uint8_t b = (uint8_t)(((c >>  9) & 7) * 255 / 7);
+    return 0xFF000000u | ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
+}
+
+/* ------------------------------------------------------------------ */
 /*  Scanline processing                                                */
 /* ------------------------------------------------------------------ */
 
 #define NTSC_LINES      262
 #define ACTIVE_LINES    224
+#define SCREEN_WIDTH    320
+
+static void render_scanline(int line)
+{
+    uint8_t bg_idx = vdp.regs[7] & 0x3F;
+    uint32_t bg_color = cram_to_argb(vdp.cram[bg_idx]);
+
+    uint32_t *row = &vdp.framebuffer[line * SCREEN_WIDTH];
+    for (int x = 0; x < SCREEN_WIDTH; x++)
+        row[x] = bg_color;
+}
 
 void vdp_run_scanline(int line)
 {
@@ -330,6 +354,8 @@ void vdp_run_scanline(int line)
 
     if (line < ACTIVE_LINES) {
         vdp.status &= ~ST_VBLANK;
+
+        render_scanline(line);
 
         vdp.hint_counter--;
         if (vdp.hint_counter < 0) {

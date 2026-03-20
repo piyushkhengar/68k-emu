@@ -45,6 +45,8 @@ typedef struct {
 
     int      hint_counter;      /* HBlank interrupt countdown (loaded from reg 10) */
     int      hint_pending;      /* HBlank interrupt line asserted */
+
+    uint32_t framebuffer[320 * 224]; /* ARGB8888 output (filled per-scanline) */
 } vdp_t;
 
 extern vdp_t vdp;
