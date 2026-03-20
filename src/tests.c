@@ -7,6 +7,8 @@
 #include "cpu.h"
 #include "cpu_internal.h"
 #include "memory.h"
+#include "genesis/bus.h"
+#include "genesis/vdp.h"
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -1343,6 +1345,33 @@ static const uint8_t smoke_test[] = {
     0x4E, 0x75,               /* RTS */
 };
 
+/*
+ * Genesis VDP test: runs through the Genesis bus, exercises the VDP
+ * control/data port protocol, register writes, VRAM and CRAM writes.
+ * Uses a Genesis-style vector table (SSP at 0x0, PC at 0x4) with
+ * code starting at 0x200.
+ */
+static const uint8_t genesis_vdp_test[0x264] = {
+    0x00, 0xFF, 0x00, 0x00,   /* 0x000: SSP = 0x00FF0000 */
+    0x00, 0x00, 0x02, 0x00,   /* 0x004: PC  = 0x00000200 */
+    /* 0x008 .. 0x1FF: implicitly zero */
+    [0x200] =
+    0x30, 0x39, 0x00, 0xC0, 0x00, 0x04,               /* MOVE.W (0xC00004).L, D0 -- read VDP status */
+    0x33, 0xC0, 0x00, 0xE0, 0x00, 0x00,               /* MOVE.W D0, (0xE00000).L -- store to Work RAM */
+    0x33, 0xFC, 0x80, 0x04, 0x00, 0xC0, 0x00, 0x04,   /* MOVE.W #0x8004, (0xC00004).L -- VDP reg 0 = 0x04 */
+    0x33, 0xFC, 0x81, 0x74, 0x00, 0xC0, 0x00, 0x04,   /* MOVE.W #0x8174, (0xC00004).L -- VDP reg 1 = 0x74 */
+    0x33, 0xFC, 0x8F, 0x02, 0x00, 0xC0, 0x00, 0x04,   /* MOVE.W #0x8F02, (0xC00004).L -- VDP reg 15 = 0x02 */
+    0x33, 0xFC, 0x40, 0x00, 0x00, 0xC0, 0x00, 0x04,   /* MOVE.W #0x4000, (0xC00004).L -- control word 1: VRAM write addr 0 */
+    0x33, 0xFC, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x04,   /* MOVE.W #0x0000, (0xC00004).L -- control word 2 */
+    0x33, 0xFC, 0xDE, 0xAD, 0x00, 0xC0, 0x00, 0x00,   /* MOVE.W #0xDEAD, (0xC00000).L -- write to VRAM */
+    0x33, 0xFC, 0xBE, 0xEF, 0x00, 0xC0, 0x00, 0x00,   /* MOVE.W #0xBEEF, (0xC00000).L -- write to VRAM */
+    0x33, 0xFC, 0xC0, 0x00, 0x00, 0xC0, 0x00, 0x04,   /* MOVE.W #0xC000, (0xC00004).L -- control word 1: CRAM write addr 0 */
+    0x33, 0xFC, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x04,   /* MOVE.W #0x0000, (0xC00004).L -- control word 2 */
+    0x33, 0xFC, 0x0E, 0x00, 0x00, 0xC0, 0x00, 0x00,   /* MOVE.W #0x0E00, (0xC00000).L -- write green to CRAM[0] */
+    0x32, 0x00,                                         /* MOVE.W D0, D1 */
+    0x4E, 0x72, 0x27, 0x00,                             /* STOP #0x2700 */
+};
+
 /* --- Built-in test table --- */
 
 #define SLICE_MS 10
@@ -1502,6 +1531,13 @@ static int check_test_result(size_t idx)
     case 113: return cpu.d[0] == 10 && cpu.d[1] == 20 && cpu.d[2] == 30 &&     /* smoke: MOVEM restored D0-D3 */
               cpu.d[3] == 40 && cpu.d[4] == 100 && cpu.d[5] == 42 &&
               cpu.d[6] == 77;                                                    /* smoke: self-modified code set D6 */
+    case 114: return cpu.d[0] == 0x0208 && cpu.d[1] == 0x0208 &&               /* genesis_vdp: status = VBlank+FIFO empty */
+              cpu.halted &&
+              vdp.vram[0] == 0xDE && vdp.vram[1] == 0xAD &&                    /* VRAM[0..1] = 0xDEAD */
+              vdp.vram[2] == 0xBE && vdp.vram[3] == 0xEF &&                    /* VRAM[2..3] = 0xBEEF */
+              vdp.cram[0] == 0x0E00 &&                                          /* CRAM[0] = green backdrop */
+              vdp.regs[0] == 0x04 && vdp.regs[1] == 0x74 &&                    /* mode registers */
+              vdp.regs[15] == 0x02;                                              /* auto-increment = 2 */
     default: return 0;
     }
 }
@@ -1624,6 +1660,8 @@ static const builtin_test_t builtin_tests[] = {
     { "trace_mode", trace_mode_test, sizeof(trace_mode_test), "Running trace mode exception test", 10 },
     { "nested_exc", nested_exception_test, sizeof(nested_exception_test), "Running nested exception test", 200 },
     { "smoke", smoke_test, sizeof(smoke_test), "Running integration smoke test (BSR/MOVEM/self-mod)", 50 },
+    /* Genesis tests (detected by "genesis_" prefix, run via bus instead of flat RAM) */
+    { "genesis_vdp", genesis_vdp_test, sizeof(genesis_vdp_test), "Running Genesis VDP test", 20 },
 };
 
 #define NUM_BUILTIN_TESTS (sizeof(builtin_tests) / sizeof(builtin_tests[0]))
@@ -1687,6 +1725,7 @@ static const unsigned expected_cycles[NUM_BUILTIN_TESTS] = {
     704,  /* move_mem_btst */  986,  /* btst_dn_imm */
     132,  /* trace_mode */    2050,  /* nested_exc */
     550,  /* smoke */
+    240,  /* genesis_vdp */
 };
 
 const builtin_test_t *find_builtin_test(const char *name)
@@ -1707,10 +1746,28 @@ int run_all_tests(double speed_mhz)
     printf("Running regression tests%s...\n", speed_mhz > 0 ? " at given speed" : "");
     fflush(stdout);
 
+    static const mem_bus_t genesis_bus = {
+        .read8   = bus_read8,
+        .read16  = bus_read16,
+        .read32  = bus_read32,
+        .write8  = bus_write8,
+        .write16 = bus_write16,
+        .write32 = bus_write32,
+    };
+
     for (size_t i = 0; i < NUM_BUILTIN_TESTS; i++) {
         const builtin_test_t *t = &builtin_tests[i];
-        mem_reset();
-        mem_load_rom(t->rom, t->size);
+
+        int is_genesis = (strncmp(t->name, "genesis_", 8) == 0);
+
+        if (is_genesis) {
+            bus_init(t->rom, t->size);
+            mem_set_bus(&genesis_bus);
+        } else {
+            mem_set_bus(NULL);
+            mem_reset();
+            mem_load_rom(t->rom, t->size);
+        }
         cpu_reset();
 
         int max_steps = t->max_steps ? t->max_steps : 100;
@@ -1752,6 +1809,9 @@ int run_all_tests(double speed_mhz)
                    t->name, expected_cycles[i], (unsigned)cpu.cycles);
             failed = 1;
         }
+
+        if (is_genesis)
+            mem_set_bus(NULL);
     }
 
     int timing_fails = run_timing_tests();

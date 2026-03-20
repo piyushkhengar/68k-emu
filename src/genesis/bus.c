@@ -2,12 +2,12 @@
  * Genesis bus: address decoding for the 68000 side.
  *
  * Routes reads and writes to cartridge ROM, work RAM, VDP, I/O, or the
- * Z80 address space.  VDP and I/O are stubs that will be filled in by
- * later phases; for now they return open-bus values so the ROM doesn't
- * crash on first contact.
+ * Z80 address space.  VDP accesses are dispatched to vdp.c.  I/O and
+ * Z80 regions are still stubs.
  */
 
 #include "bus.h"
+#include "vdp.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -50,12 +50,14 @@ int bus_init(const uint8_t *rom_data, size_t rom_size)
     cart_rom_size = (uint32_t)rom_size;
 
     memset(work_ram, 0, WRAM_SIZE);
+    vdp_init();
     return 0;
 }
 
 void bus_reset(void)
 {
     memset(work_ram, 0, WRAM_SIZE);
+    vdp_reset();
 }
 
 /* ------------------------------------------------------------------ */
@@ -89,18 +91,21 @@ uint8_t bus_read8(uint32_t addr)
     if (addr >= 0xA11200 && addr <= 0xA11201)
         return 0x00;
 
-    /* VDP: 0xC00000 - 0xC0000F (stub — returns 0 for data, vblank for status) */
-    if (addr >= 0xC00000 && addr <= 0xC0000F) {
-        /* Status register at control port (C00004/C00005): return vblank=1 so
-         * boot code that polls for vblank doesn't spin forever. */
-        if (addr >= 0xC00004 && addr <= 0xC00007) {
-            /* Bit 3 = vblank, bit 2 = hblank.  Return both set. */
-            if (!(addr & 1))
-                return 0x3E;  /* high byte of status: vblank + hblank + open bits */
-            else
-                return 0x00;  /* low byte */
-        }
-        return 0x00;
+    /* VDP: 0xC00000 - 0xDFFFFF (mirrored every 32 bytes) */
+    if (addr >= 0xC00000 && addr < 0xE00000) {
+        uint16_t val;
+        uint32_t port = addr & 0x1F;
+
+        if (port < 0x04)
+            val = vdp_data_read();
+        else if (port < 0x08)
+            val = vdp_control_read();
+        else if (port < 0x10)
+            val = vdp_hv_read();
+        else
+            return 0xFF;
+
+        return (addr & 1) ? (val & 0xFF) : (val >> 8);
     }
 
     /* Work RAM: 0xE00000 - 0xFFFFFF (64 KB mirrored) */
@@ -127,14 +132,19 @@ uint16_t bus_read16(uint32_t addr)
         return 0xFFFF;
     }
 
+    /* VDP: 0xC00000 - 0xDFFFFF */
+    if (addr >= 0xC00000 && addr < 0xE00000) {
+        uint32_t port = addr & 0x1F;
+        if (port < 0x04) return vdp_data_read();
+        if (port < 0x08) return vdp_control_read();
+        if (port < 0x10) return vdp_hv_read();
+        return 0xFFFF;
+    }
+
     if (addr >= 0xE00000) {
         uint16_t a = addr & 0xFFFF;
         return ((uint16_t)work_ram[a] << 8) | work_ram[(a + 1) & 0xFFFF];
     }
-
-    /* VDP status register: return vblank set */
-    if (addr >= 0xC00004 && addr <= 0xC00006)
-        return 0x3E00;
 
     /* Everything else: compose from two 8-bit reads */
     return ((uint16_t)bus_read8(addr) << 8) | bus_read8(addr + 1);
@@ -171,9 +181,15 @@ void bus_write8(uint32_t addr, uint8_t val)
     if (addr >= 0xA11100 && addr <= 0xA11201)
         return;
 
-    /* VDP: stub — accept and ignore */
-    if (addr >= 0xC00000 && addr <= 0xC0000F)
+    /* VDP: 0xC00000 - 0xDFFFFF */
+    if (addr >= 0xC00000 && addr < 0xE00000) {
+        uint32_t port = addr & 0x1F;
+        if (port < 0x04)
+            vdp_data_write(((uint16_t)val << 8) | val);
+        else if (port < 0x08)
+            vdp_control_write(((uint16_t)val << 8) | val);
         return;
+    }
 
     /* Work RAM */
     if (addr >= 0xE00000) {
@@ -198,9 +214,18 @@ void bus_write16(uint32_t addr, uint16_t val)
         return;
     }
 
-    /* VDP, I/O, Z80: stub — accept and ignore */
-    if ((addr >= 0xC00000 && addr <= 0xC0000F) ||
-        (addr >= 0xA10000 && addr <= 0xA1001F) ||
+    /* VDP: 0xC00000 - 0xDFFFFF */
+    if (addr >= 0xC00000 && addr < 0xE00000) {
+        uint32_t port = addr & 0x1F;
+        if (port < 0x04)
+            vdp_data_write(val);
+        else if (port < 0x08)
+            vdp_control_write(val);
+        return;
+    }
+
+    /* I/O, Z80: stub — accept and ignore */
+    if ((addr >= 0xA10000 && addr <= 0xA1001F) ||
         (addr >= 0xA00000 && addr <= 0xA0FFFF) ||
         (addr >= 0xA11100 && addr <= 0xA11201))
         return;
