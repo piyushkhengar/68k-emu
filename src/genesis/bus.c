@@ -8,6 +8,7 @@
  */
 
 #include "bus.h"
+#include "cpu.h"
 #include "vdp.h"
 #include "io.h"
 #include <stdlib.h>
@@ -62,6 +63,7 @@ int bus_init(const uint8_t *rom_data, size_t rom_size)
     memset(z80_ram, 0, Z80_RAM_SIZE);
     vdp_init();
     io_init();
+    cpu_set_int_ack(vdp_int_ack);
     return 0;
 }
 

@@ -40,4 +40,11 @@ void cpu_reset(void);
 /* Execute one instruction. Returns cycles executed (0 if halted). */
 int cpu_step(void);
 
+/* Interrupt-acknowledge callback.  Called when the CPU takes an autovector
+ * interrupt, with the interrupt level (1-7).  The system layer should use
+ * this to clear the pending interrupt in whatever peripheral asserted it
+ * (e.g. the VDP on a Genesis, the VIA on a Macintosh).
+ * Set to NULL (the default) if no acknowledge handling is needed. */
+void cpu_set_int_ack(void (*fn)(int level));
+
 #endif /* CPU_H */

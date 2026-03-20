@@ -9,7 +9,6 @@
 #include "shift.h"
 #include "memory.h"
 #include "timing.h"
-#include "vdp.h"
 #include <setjmp.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -26,6 +25,7 @@ static int exception_cycles_result;
 
 static void (*trace_jsr_fn)(uint32_t addr);
 static void (*trace_branch_to_fn)(uint32_t from_pc, uint32_t to_pc);
+static void (*int_ack_fn)(int level);
 
 void cpu_set_trace_jsr(void (*fn)(uint32_t addr))
 {
@@ -49,12 +49,18 @@ void cpu_trace_branch_to(uint32_t from_pc, uint32_t to_pc)
         trace_branch_to_fn(from_pc, to_pc);
 }
 
+void cpu_set_int_ack(void (*fn)(int level))
+{
+    int_ack_fn = fn;
+}
+
 void cpu_init(void)
 {
     memset(&cpu, 0, sizeof(cpu));
     cpu_ipl = 0;
     trace_jsr_fn = NULL;
     trace_branch_to_fn = NULL;
+    int_ack_fn = NULL;
 }
 
 void cpu_reset(void)
@@ -434,9 +440,9 @@ int cpu_step(void)
 
     /* Check for pending external interrupt before instruction fetch.
      * Level 7 is non-maskable (taken even when mask is 7).
-     * After taking the interrupt, clear cpu_ipl to simulate the hardware
-     * interrupt-acknowledge cycle.  The VDP will re-assert at the next
-     * VBlank/HBlank edge via vdp_run_scanline. */
+     * After taking the interrupt, call the int_ack callback (if set) so
+     * the external hardware can clear its pending flag.  On a Genesis
+     * this is the VDP; other systems wire their own acknowledge logic. */
     if (cpu_ipl > 0) {
         int mask = (cpu.sr >> 8) & 7;
         if (cpu_ipl > mask || cpu_ipl == 7) {
@@ -461,8 +467,8 @@ int cpu_step(void)
 
             cpu.pc = mem_read32((unsigned)vector * 4);
 
-            if (vector >= 25 && vector <= 31)
-                vdp_int_ack(level);
+            if (int_ack_fn)
+                int_ack_fn(level);
 
             return exception_cycles(vector);
         }
