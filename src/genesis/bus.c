@@ -2,12 +2,13 @@
  * Genesis bus: address decoding for the 68000 side.
  *
  * Routes reads and writes to cartridge ROM, work RAM, VDP, I/O, or the
- * Z80 address space.  VDP accesses are dispatched to vdp.c.  I/O and
- * Z80 regions are still stubs.
+ * Z80 address space.  VDP accesses dispatch to vdp.c, I/O and system
+ * registers dispatch to io.c.  Z80 RAM space is still a stub.
  */
 
 #include "bus.h"
 #include "vdp.h"
+#include "io.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -51,6 +52,7 @@ int bus_init(const uint8_t *rom_data, size_t rom_size)
 
     memset(work_ram, 0, WRAM_SIZE);
     vdp_init();
+    io_init();
     return 0;
 }
 
@@ -58,6 +60,7 @@ void bus_reset(void)
 {
     memset(work_ram, 0, WRAM_SIZE);
     vdp_reset();
+    io_reset();
 }
 
 /* ------------------------------------------------------------------ */
@@ -73,23 +76,13 @@ uint8_t bus_read8(uint32_t addr)
         return 0xFF;
     }
 
-    /* Z80 address space: 0xA00000 - 0xA0FFFF (stub) */
+    /* Z80 address space: 0xA00000 - 0xA0FFFF (stub -- no Z80 emulation yet) */
     if (addr >= 0xA00000 && addr <= 0xA0FFFF)
         return 0xFF;
 
-    /* I/O area: 0xA10000 - 0xA1001F (stub) */
-    if (addr >= 0xA10000 && addr <= 0xA1001F)
-        return 0xFF;
-
-    /* Z80 bus request: 0xA11100 */
-    if (addr == 0xA11100)
-        return 0x01;  /* bus granted */
-    if (addr == 0xA11101)
-        return 0x00;
-
-    /* Z80 reset: 0xA11200 */
-    if (addr >= 0xA11200 && addr <= 0xA11201)
-        return 0x00;
+    /* I/O and system registers: 0xA10000 - 0xA1FFFF */
+    if (addr >= 0xA10000 && addr < 0xA20000)
+        return io_read8(addr);
 
     /* VDP: 0xC00000 - 0xDFFFFF (mirrored every 32 bytes) */
     if (addr >= 0xC00000 && addr < 0xE00000) {
@@ -169,17 +162,15 @@ void bus_write8(uint32_t addr, uint8_t val)
     if (addr < 0x400000)
         return;
 
-    /* Z80 space: stub */
+    /* Z80 address space: stub */
     if (addr >= 0xA00000 && addr <= 0xA0FFFF)
         return;
 
-    /* I/O area: stub — accept and ignore */
-    if (addr >= 0xA10000 && addr <= 0xA1001F)
+    /* I/O and system registers: 0xA10000 - 0xA1FFFF */
+    if (addr >= 0xA10000 && addr < 0xA20000) {
+        io_write8(addr, val);
         return;
-
-    /* Z80 bus request / reset: stub */
-    if (addr >= 0xA11100 && addr <= 0xA11201)
-        return;
+    }
 
     /* VDP: 0xC00000 - 0xDFFFFF */
     if (addr >= 0xC00000 && addr < 0xE00000) {
@@ -224,11 +215,16 @@ void bus_write16(uint32_t addr, uint16_t val)
         return;
     }
 
-    /* I/O, Z80: stub — accept and ignore */
-    if ((addr >= 0xA10000 && addr <= 0xA1001F) ||
-        (addr >= 0xA00000 && addr <= 0xA0FFFF) ||
-        (addr >= 0xA11100 && addr <= 0xA11201))
+    /* Z80 address space: stub */
+    if (addr >= 0xA00000 && addr <= 0xA0FFFF)
         return;
+
+    /* I/O and system registers: route as two byte writes */
+    if (addr >= 0xA10000 && addr < 0xA20000) {
+        io_write8(addr, val >> 8);
+        io_write8(addr + 1, val & 0xFF);
+        return;
+    }
 
     bus_write8(addr, val >> 8);
     bus_write8(addr + 1, val & 0xFF);
