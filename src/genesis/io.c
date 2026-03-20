@@ -130,7 +130,7 @@ uint8_t io_read8(uint32_t addr)
 
     /* Z80 bus request: 0xA11100 */
     if (addr == 0xA11100)
-        return io.z80_bus_granted ? 0x01 : 0x00;
+        return io.z80_bus_granted ? 0x00 : 0x01;
     if (addr == 0xA11101)
         return 0x00;
 

@@ -9,6 +9,7 @@
 #include "shift.h"
 #include "memory.h"
 #include "timing.h"
+#include "vdp.h"
 #include <setjmp.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -432,7 +433,10 @@ int cpu_step(void)
     }
 
     /* Check for pending external interrupt before instruction fetch.
-     * Level 7 is non-maskable (taken even when mask is 7). */
+     * Level 7 is non-maskable (taken even when mask is 7).
+     * After taking the interrupt, clear cpu_ipl to simulate the hardware
+     * interrupt-acknowledge cycle.  The VDP will re-assert at the next
+     * VBlank/HBlank edge via vdp_run_scanline. */
     if (cpu_ipl > 0) {
         int mask = (cpu.sr >> 8) & 7;
         if (cpu_ipl > mask || cpu_ipl == 7) {
@@ -456,6 +460,10 @@ int cpu_step(void)
             cpu.a[7] = sp;
 
             cpu.pc = mem_read32((unsigned)vector * 4);
+
+            if (vector >= 25 && vector <= 31)
+                vdp_int_ack(level);
+
             return exception_cycles(vector);
         }
     }

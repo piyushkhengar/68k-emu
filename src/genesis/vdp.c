@@ -313,6 +313,15 @@ static void vdp_update_ipl(void)
     cpu_ipl = level;
 }
 
+void vdp_int_ack(int level)
+{
+    if (level == 6)
+        vdp.status &= ~ST_VINT;
+    else if (level == 4)
+        vdp.hint_pending = 0;
+    vdp_update_ipl();
+}
+
 /* ------------------------------------------------------------------ */
 /*  Colour conversion                                                  */
 /* ------------------------------------------------------------------ */
@@ -327,21 +336,195 @@ static uint32_t cram_to_argb(uint16_t c)
 }
 
 /* ------------------------------------------------------------------ */
-/*  Scanline processing                                                */
+/*  Tile and plane rendering                                           */
 /* ------------------------------------------------------------------ */
 
 #define NTSC_LINES      262
 #define ACTIVE_LINES    224
 #define SCREEN_WIDTH    320
 
+static void get_plane_size(int *cols, int *rows)
+{
+    static const int tbl[] = { 32, 64, 32, 128 };
+    *cols = tbl[vdp.regs[16] & 0x03];
+    *rows = tbl[(vdp.regs[16] >> 4) & 0x03];
+}
+
+static int get_hscroll(int line, int plane_b)
+{
+    uint16_t base = (uint16_t)(vdp.regs[13] & 0x3F) << 10;
+    int offset;
+    switch (vdp.regs[11] & 0x03) {
+    case 2:  offset = (line & ~7) * 4; break;
+    case 3:  offset = line * 4; break;
+    default: offset = 0; break;
+    }
+    uint16_t addr = (base + offset + (plane_b ? 2 : 0)) & 0xFFFF;
+    return ((vdp.vram[addr] << 8) | vdp.vram[(addr + 1) & 0xFFFF]) & 0x3FF;
+}
+
+static int get_vscroll(int column, int plane_b)
+{
+    if (vdp.regs[11] & 0x04) {
+        int idx = (column >> 4) * 2 + (plane_b ? 1 : 0);
+        return (idx < 40) ? (vdp.vsram[idx] & 0x7FF) : 0;
+    }
+    return vdp.vsram[plane_b ? 1 : 0] & 0x7FF;
+}
+
+static uint8_t pattern_pixel(int pat, int px, int py)
+{
+    uint32_t addr = ((uint32_t)(pat & 0x7FF) * 32 + py * 4 + (px >> 1)) & 0xFFFF;
+    uint8_t byte = vdp.vram[addr];
+    return (px & 1) ? (byte & 0x0F) : (byte >> 4);
+}
+
+static void get_window_bounds(int line, int screen_w, int *start, int *end)
+{
+    *start = 0;
+    *end = 0;
+
+    int wvp = vdp.regs[18] & 0x1F;
+    int in_v;
+    if (vdp.regs[18] & 0x80)
+        in_v = (line >= wvp * 8);
+    else
+        in_v = (wvp > 0 && line < wvp * 8);
+    if (!in_v) return;
+
+    int whp = vdp.regs[17] & 0x1F;
+    int whp_pix = whp * 16;
+    if (vdp.regs[17] & 0x80) {
+        if (whp_pix < screen_w) {
+            *start = whp_pix;
+            *end = screen_w;
+        }
+    } else {
+        if (whp > 0) {
+            *start = 0;
+            *end = (whp_pix < screen_w) ? whp_pix : screen_w;
+        }
+    }
+}
+
+/*
+ * Render one priority pass of a scrolling plane (A or B).
+ * skip_start..skip_end defines a pixel range to skip (used to exclude the
+ * window region when rendering Plane A).
+ */
+static void render_plane(uint32_t *row, int line, int plane_b, int pri,
+                         int skip_start, int skip_end)
+{
+    int pw, ph;
+    get_plane_size(&pw, &ph);
+    int pw_pix = pw * 8;
+    int ph_pix = ph * 8;
+
+    uint16_t nt_base;
+    if (plane_b)
+        nt_base = (uint16_t)(vdp.regs[4] & 0x07) << 13;
+    else
+        nt_base = (uint16_t)(vdp.regs[2] & 0x38) << 10;
+
+    int hs = get_hscroll(line, plane_b);
+    int screen_w = (vdp.regs[12] & 0x81) ? 320 : 256;
+
+    for (int x = 0; x < screen_w; x++) {
+        if (x >= skip_start && x < skip_end)
+            continue;
+
+        int vs = get_vscroll(x, plane_b);
+        int py = (line + vs) & (ph_pix - 1);
+        int px = (x - hs) & (pw_pix - 1);
+
+        int tc = px >> 3, tr = py >> 3;
+        int fx = px & 7, fy = py & 7;
+
+        uint32_t na = (nt_base + (tr * pw + tc) * 2) & 0xFFFF;
+        uint16_t e = ((uint16_t)vdp.vram[na] << 8) | vdp.vram[(na + 1) & 0xFFFF];
+
+        if (((e >> 15) & 1) != pri) continue;
+
+        int pal = (e >> 13) & 3;
+        int vf  = (e >> 12) & 1;
+        int hf  = (e >> 11) & 1;
+        int pat = e & 0x7FF;
+
+        uint8_t pixel = pattern_pixel(pat, hf ? 7 - fx : fx, vf ? 7 - fy : fy);
+        if (pixel == 0) continue;
+
+        row[x] = cram_to_argb(vdp.cram[pal * 16 + pixel]);
+    }
+}
+
+/*
+ * Render one priority pass of the window plane.
+ * The window has its own nametable (no scrolling) and only covers win_start..win_end.
+ */
+static void render_window(uint32_t *row, int line, int pri,
+                          int win_start, int win_end)
+{
+    if (win_start >= win_end) return;
+
+    int screen_w = (vdp.regs[12] & 0x81) ? 320 : 256;
+    int nt_w = (screen_w == 320) ? 64 : 32;
+
+    uint16_t nt_base;
+    if (screen_w == 320)
+        nt_base = (uint16_t)(vdp.regs[3] & 0x3C) << 10;
+    else
+        nt_base = (uint16_t)(vdp.regs[3] & 0x3E) << 10;
+
+    int win_row = line >> 3;
+
+    for (int x = win_start; x < win_end; x++) {
+        int win_col = x >> 3;
+        int fx = x & 7, fy = line & 7;
+
+        uint32_t na = (nt_base + (win_row * nt_w + win_col) * 2) & 0xFFFF;
+        uint16_t e = ((uint16_t)vdp.vram[na] << 8) | vdp.vram[(na + 1) & 0xFFFF];
+
+        if (((e >> 15) & 1) != pri) continue;
+
+        int pal = (e >> 13) & 3;
+        int vf  = (e >> 12) & 1;
+        int hf  = (e >> 11) & 1;
+        int pat = e & 0x7FF;
+
+        uint8_t pixel = pattern_pixel(pat, hf ? 7 - fx : fx, vf ? 7 - fy : fy);
+        if (pixel == 0) continue;
+
+        row[x] = cram_to_argb(vdp.cram[pal * 16 + pixel]);
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Scanline composition                                               */
+/* ------------------------------------------------------------------ */
+
 static void render_scanline(int line)
 {
-    uint8_t bg_idx = vdp.regs[7] & 0x3F;
-    uint32_t bg_color = cram_to_argb(vdp.cram[bg_idx]);
-
     uint32_t *row = &vdp.framebuffer[line * SCREEN_WIDTH];
+
+    uint8_t bg_idx = vdp.regs[7] & 0x3F;
+    uint32_t bg = cram_to_argb(vdp.cram[bg_idx]);
     for (int x = 0; x < SCREEN_WIDTH; x++)
-        row[x] = bg_color;
+        row[x] = bg;
+
+    if (!(vdp.regs[1] & 0x40))
+        return;
+
+    int screen_w = (vdp.regs[12] & 0x81) ? 320 : 256;
+    int win_start, win_end;
+    get_window_bounds(line, screen_w, &win_start, &win_end);
+
+    render_plane(row, line, 1, 0, 0, 0);
+    render_plane(row, line, 0, 0, win_start, win_end);
+    render_window(row, line, 0, win_start, win_end);
+
+    render_plane(row, line, 1, 1, 0, 0);
+    render_plane(row, line, 0, 1, win_start, win_end);
+    render_window(row, line, 1, win_start, win_end);
 }
 
 void vdp_run_scanline(int line)

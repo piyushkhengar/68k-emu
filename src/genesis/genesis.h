@@ -10,5 +10,6 @@
  */
 
 void genesis_run(void);
+void genesis_run_headless(int max_frames);
 
 #endif /* GENESIS_GENESIS_H */

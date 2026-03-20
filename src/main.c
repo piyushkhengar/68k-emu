@@ -58,6 +58,8 @@ static double parse_args(int argc, char *argv[], const char **rom_or_test, int *
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--genesis") == 0) {
             *genesis_mode = 1;
+        } else if (strcmp(argv[i], "--genesis-headless") == 0) {
+            *genesis_mode = 2;
         } else if (strcmp(argv[i], "--debug") == 0) {
             *debug = 1;
         } else if (strcmp(argv[i], "--speed") == 0) {
@@ -224,6 +226,10 @@ int main(int argc, char *argv[])
 
     cpu_reset();
 
+    if (genesis_mode == 2) {
+        genesis_run_headless(max_steps_arg > 0 ? max_steps_arg : 120);
+        return 0;
+    }
     if (genesis_mode) {
         genesis_run();
         return 0;

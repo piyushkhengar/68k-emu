@@ -3,7 +3,8 @@
  *
  * Routes reads and writes to cartridge ROM, work RAM, VDP, I/O, or the
  * Z80 address space.  VDP accesses dispatch to vdp.c, I/O and system
- * registers dispatch to io.c.  Z80 RAM space is still a stub.
+ * registers dispatch to io.c.  Z80 RAM (8 KB) is backed by real storage
+ * so the 68K can load driver code and poll handshake flags.
  */
 
 #include "bus.h"
@@ -26,6 +27,13 @@ static uint32_t cart_rom_size;
 
 #define WRAM_SIZE  0x10000
 static uint8_t work_ram[WRAM_SIZE];
+
+/* ------------------------------------------------------------------ */
+/*  Z80 RAM: 8 KB at 0xA00000, visible to the 68K when bus is granted */
+/* ------------------------------------------------------------------ */
+
+#define Z80_RAM_SIZE  0x2000
+static uint8_t z80_ram[Z80_RAM_SIZE];
 
 /* ------------------------------------------------------------------ */
 /*  Init / Reset                                                       */
@@ -51,6 +59,7 @@ int bus_init(const uint8_t *rom_data, size_t rom_size)
     cart_rom_size = (uint32_t)rom_size;
 
     memset(work_ram, 0, WRAM_SIZE);
+    memset(z80_ram, 0, Z80_RAM_SIZE);
     vdp_init();
     io_init();
     return 0;
@@ -59,6 +68,7 @@ int bus_init(const uint8_t *rom_data, size_t rom_size)
 void bus_reset(void)
 {
     memset(work_ram, 0, WRAM_SIZE);
+    memset(z80_ram, 0, Z80_RAM_SIZE);
     vdp_reset();
     io_reset();
 }
@@ -76,9 +86,15 @@ uint8_t bus_read8(uint32_t addr)
         return 0xFF;
     }
 
-    /* Z80 address space: 0xA00000 - 0xA0FFFF (stub -- no Z80 emulation yet) */
-    if (addr >= 0xA00000 && addr <= 0xA0FFFF)
+    /* Z80 address space: 0xA00000 - 0xA0FFFF */
+    if (addr >= 0xA00000 && addr <= 0xA0FFFF) {
+        uint16_t z_addr = addr & 0xFFFF;
+        if (z_addr < Z80_RAM_SIZE)
+            return z80_ram[z_addr];
+        if (z_addr >= 0x4000 && z_addr <= 0x4003)
+            return 0x00;  /* YM2612 status: not busy */
         return 0xFF;
+    }
 
     /* I/O and system registers: 0xA10000 - 0xA1FFFF */
     if (addr >= 0xA10000 && addr < 0xA20000)
@@ -162,9 +178,13 @@ void bus_write8(uint32_t addr, uint8_t val)
     if (addr < 0x400000)
         return;
 
-    /* Z80 address space: stub */
-    if (addr >= 0xA00000 && addr <= 0xA0FFFF)
+    /* Z80 address space: 0xA00000 - 0xA0FFFF */
+    if (addr >= 0xA00000 && addr <= 0xA0FFFF) {
+        uint16_t z_addr = addr & 0xFFFF;
+        if (z_addr < Z80_RAM_SIZE)
+            z80_ram[z_addr] = val;
         return;
+    }
 
     /* I/O and system registers: 0xA10000 - 0xA1FFFF */
     if (addr >= 0xA10000 && addr < 0xA20000) {
@@ -215,9 +235,12 @@ void bus_write16(uint32_t addr, uint16_t val)
         return;
     }
 
-    /* Z80 address space: stub */
-    if (addr >= 0xA00000 && addr <= 0xA0FFFF)
+    /* Z80 address space: route as two byte writes */
+    if (addr >= 0xA00000 && addr <= 0xA0FFFF) {
+        bus_write8(addr, val >> 8);
+        bus_write8(addr + 1, val & 0xFF);
         return;
+    }
 
     /* I/O and system registers: route as two byte writes */
     if (addr >= 0xA10000 && addr < 0xA20000) {

@@ -65,4 +65,9 @@ uint16_t vdp_hv_read(void);
  * Manages VBlank/HBlank flags, HInt counter, and drives cpu_ipl. */
 void     vdp_run_scanline(int line);
 
+/* Called when the 68K acknowledges a VDP interrupt (level 4 or 6).
+ * Clears the corresponding pending flag so the interrupt doesn't
+ * re-fire until the next VBlank/HBlank edge. */
+void     vdp_int_ack(int level);
+
 #endif /* GENESIS_VDP_H */
