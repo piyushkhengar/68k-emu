@@ -4,9 +4,13 @@
  * Creates a 640x448 window (2x native 320x224) with an ARGB8888 texture.
  * Each frame the VDP framebuffer is uploaded via SDL_UpdateTexture and
  * presented with SDL_RenderCopy + SDL_RenderPresent.
+ *
+ * Keyboard input is captured during event polling and forwarded to the
+ * I/O controller via io_set_pad() for controller port 1.
  */
 
 #include "renderer.h"
+#include "io.h"
 #include <SDL.h>
 #include <stdio.h>
 
@@ -80,6 +84,33 @@ void renderer_present(const uint32_t *framebuffer)
     SDL_RenderPresent(sdl_renderer);
 }
 
+/* Map an SDL key to a PAD_* bit, or 0 if unmapped.
+ *
+ * Default mapping (player 1):
+ *   Arrow keys  → D-pad
+ *   Z           → A
+ *   X           → B
+ *   C           → C
+ *   Enter       → Start
+ */
+static uint8_t key_to_pad(SDL_Keycode sym)
+{
+    switch (sym) {
+    case SDLK_UP:     return PAD_UP;
+    case SDLK_DOWN:   return PAD_DOWN;
+    case SDLK_LEFT:   return PAD_LEFT;
+    case SDLK_RIGHT:  return PAD_RIGHT;
+    case SDLK_z:      return PAD_A;
+    case SDLK_x:      return PAD_B;
+    case SDLK_c:      return PAD_C;
+    case SDLK_RETURN:
+    case SDLK_KP_ENTER: return PAD_START;
+    default:          return 0;
+    }
+}
+
+static uint8_t pad1_state;
+
 int renderer_poll_events(void)
 {
     SDL_Event ev;
@@ -88,6 +119,20 @@ int renderer_poll_events(void)
             return 1;
         if (ev.type == SDL_KEYDOWN && ev.key.keysym.sym == SDLK_ESCAPE)
             return 1;
+
+        if (ev.type == SDL_KEYDOWN && !ev.key.repeat) {
+            uint8_t bit = key_to_pad(ev.key.keysym.sym);
+            if (bit) {
+                pad1_state |= bit;
+                io_set_pad(0, pad1_state);
+            }
+        } else if (ev.type == SDL_KEYUP) {
+            uint8_t bit = key_to_pad(ev.key.keysym.sym);
+            if (bit) {
+                pad1_state &= ~bit;
+                io_set_pad(0, pad1_state);
+            }
+        }
     }
     return 0;
 }

@@ -3,8 +3,8 @@
  *
  * Handles the version register, three controller/expansion ports with
  * TH-based multiplexing for 3-button pads, Z80 bus arbitration, and
- * the TMSS lock register.  Controller button state is hardcoded to
- * "all released" for now -- real input mapping comes in Phase 8.
+ * the TMSS lock register.  Button state is set externally via
+ * io_set_pad() (called from the SDL event loop in renderer.c).
  */
 
 #include "io.h"
@@ -38,6 +38,7 @@ typedef struct {
 
 static struct {
     io_port_t port[3];          /* 0 = ctrl 1, 1 = ctrl 2, 2 = EXP */
+    uint8_t   pad[2];           /* Button state per controller (PAD_* bits) */
     int       z80_bus_granted;
     int       z80_reset_active;
 } io;
@@ -70,28 +71,46 @@ void io_reset(void)
  *   TH=0  →  bit 5:Start  4:A  3:0  2:0  1:Down  0:Up
  *
  * Active low: 1 = released, 0 = pressed.
- * With no buttons pressed:  TH=1 → 0x3F,  TH=0 → 0x33
  * Bits configured as output (ctrl=1) reflect the data register instead.
  */
 static uint8_t controller_read(int idx)
 {
     io_port_t *p = &io.port[idx];
 
-    /* Determine TH level: if bit 6 of ctrl is output, use data reg;
-     * otherwise TH floats high (pulled up). */
     uint8_t th = (p->ctrl & 0x40) ? ((p->data >> 6) & 1) : 1;
 
     uint8_t input;
     if (idx == 2) {
-        input = 0x7F;       /* EXP port: no device */
-    } else if (th) {
-        input = 0x3F;       /* TH=1: all buttons released */
+        input = 0x7F;                   /* EXP port: no device */
     } else {
-        input = 0x33;       /* TH=0: all released, bits 3-2 grounded */
+        uint8_t b = io.pad[idx];        /* PAD_* bits, active-high */
+
+        if (th) {
+            /* TH=1: C B Right Left Down Up  (active low) */
+            input = 0x3F;
+            if (b & PAD_UP)    input &= ~0x01;
+            if (b & PAD_DOWN)  input &= ~0x02;
+            if (b & PAD_LEFT)  input &= ~0x04;
+            if (b & PAD_RIGHT) input &= ~0x08;
+            if (b & PAD_B)     input &= ~0x10;
+            if (b & PAD_C)     input &= ~0x20;
+        } else {
+            /* TH=0: Start A 0 0 Down Up  (active low, bits 3-2 grounded) */
+            input = 0x33;
+            if (b & PAD_UP)    input &= ~0x01;
+            if (b & PAD_DOWN)  input &= ~0x02;
+            if (b & PAD_A)     input &= ~0x10;
+            if (b & PAD_START) input &= ~0x20;
+        }
     }
 
-    /* Output bits come from data register; input bits from controller */
     return (p->data & p->ctrl) | (input & ~p->ctrl);
+}
+
+void io_set_pad(int idx, uint8_t buttons)
+{
+    if (idx >= 0 && idx <= 1)
+        io.pad[idx] = buttons;
 }
 
 /* ------------------------------------------------------------------ */
