@@ -20,6 +20,7 @@ SRCS = src/main.c src/core/cpu.c src/core/memory.c src/core/ea.c \
        src/isa/immediate.c src/isa/logic.c src/isa/shift.c src/isa/bit.c \
        src/isa/movem.c src/isa/movep.c \
        src/genesis/bus.c src/genesis/vdp.c src/genesis/io.c src/genesis/z80.c \
+       src/genesis/psg.c src/genesis/ym2612.c \
        src/genesis/genesis.c \
        src/tests.c src/timing.c src/timing_tests.c src/processor_tests.c \
        deps/cJSON/cJSON.c
@@ -36,9 +37,9 @@ $(TARGET): $(OBJS)
 #   - genesis.c recompiled with -DHAVE_SDL2 (separate .o to avoid conflicts)
 #   - renderer.c compiled with SDL2 headers
 genesis: GENESIS_OBJS = $(filter-out src/genesis/genesis.o,$(OBJS)) \
-                        src/genesis/genesis_sdl.o src/genesis/renderer.o
-genesis: $(filter-out src/genesis/genesis.o,$(OBJS)) src/genesis/genesis_sdl.o src/genesis/renderer.o
-	$(CC) $(CFLAGS) $(SDL2_CFLAGS) -o $(TARGET) $(filter-out src/genesis/genesis.o,$(OBJS)) src/genesis/genesis_sdl.o src/genesis/renderer.o $(LDFLAGS) $(SDL2_LIBS)
+                        src/genesis/genesis_sdl.o src/genesis/renderer.o src/genesis/audio.o
+genesis: $(filter-out src/genesis/genesis.o,$(OBJS)) src/genesis/genesis_sdl.o src/genesis/renderer.o src/genesis/audio.o
+	$(CC) $(CFLAGS) $(SDL2_CFLAGS) -o $(TARGET) $(filter-out src/genesis/genesis.o,$(OBJS)) src/genesis/genesis_sdl.o src/genesis/renderer.o src/genesis/audio.o $(LDFLAGS) $(SDL2_LIBS)
 
 src/genesis/genesis_sdl.o: src/genesis/genesis.c
 	$(CC) $(CFLAGS) $(SDL2_CFLAGS) -DHAVE_SDL2 -c -o $@ $<
@@ -46,11 +47,14 @@ src/genesis/genesis_sdl.o: src/genesis/genesis.c
 src/genesis/renderer.o: src/genesis/renderer.c
 	$(CC) $(CFLAGS) $(SDL2_CFLAGS) -c -o $@ $<
 
+src/genesis/audio.o: src/genesis/audio.c
+	$(CC) $(CFLAGS) $(SDL2_CFLAGS) -DHAVE_SDL2 -c -o $@ $<
+
 %.o: %.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 clean:
-	rm -f $(OBJS) src/genesis/genesis_sdl.o src/genesis/renderer.o $(TARGET)
+	rm -f $(OBJS) src/genesis/genesis_sdl.o src/genesis/renderer.o src/genesis/audio.o $(TARGET)
 
 # SPEED: run tests at given MHz (e.g. make test SPEED=7.09). Omit for hyperspeed.
 SPEED ?=

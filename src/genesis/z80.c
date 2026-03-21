@@ -8,6 +8,8 @@
  */
 
 #include "z80.h"
+#include "psg.h"
+#include "ym2612.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -64,7 +66,7 @@ static uint8_t z80_read(uint16_t addr)
 {
     if (addr < 0x2000) return z80_ram[addr];
     if (addr < 0x4000) return z80_ram[addr & 0x1FFF];
-    if (addr >= 0x4000 && addr <= 0x5FFF) return 0x00; /* YM2612: not busy */
+    if (addr >= 0x4000 && addr <= 0x5FFF) return ym2612_read();
     return 0xFF;
 }
 
@@ -72,7 +74,11 @@ static void z80_write(uint16_t addr, uint8_t val)
 {
     if (addr < 0x2000) { z80_ram[addr] = val; return; }
     if (addr < 0x4000) { z80_ram[addr & 0x1FFF] = val; return; }
-    /* YM2612 / PSG / bank writes: silently ignore */
+    if (addr >= 0x4000 && addr <= 0x5FFF) {
+        ym2612_write(addr & 3, val);
+        return;
+    }
+    if (addr == 0x7F11) { psg_write(val); return; }
 }
 
 static uint8_t fetch(void) { return z80_read(z.pc++); }

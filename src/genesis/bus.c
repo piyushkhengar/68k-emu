@@ -12,6 +12,8 @@
 #include "vdp.h"
 #include "io.h"
 #include "z80.h"
+#include "psg.h"
+#include "ym2612.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -57,6 +59,8 @@ int bus_init(const uint8_t *rom_data, size_t rom_size)
 
     memset(work_ram, 0, WRAM_SIZE);
     z80_init();
+    psg_init();
+    ym2612_init();
     vdp_init();
     io_init();
     cpu_set_int_ack(vdp_int_ack);
@@ -67,6 +71,8 @@ void bus_reset(void)
 {
     memset(work_ram, 0, WRAM_SIZE);
     z80_reset();
+    psg_reset();
+    ym2612_reset();
     vdp_reset();
     io_reset();
 }
@@ -90,7 +96,7 @@ uint8_t bus_read8(uint32_t addr)
         if (z_addr < 0x2000)
             return z80_ram_read(z_addr);
         if (z_addr >= 0x4000 && z_addr <= 0x4003)
-            return 0x00;  /* YM2612 status: not busy */
+            return ym2612_read();
         return 0xFF;
     }
 
@@ -181,6 +187,8 @@ void bus_write8(uint32_t addr, uint8_t val)
         uint16_t z_addr = addr & 0xFFFF;
         if (z_addr < 0x2000)
             z80_ram_write(z_addr, val);
+        else if (z_addr >= 0x4000 && z_addr <= 0x4003)
+            ym2612_write(z_addr & 3, val);
         return;
     }
 
@@ -197,6 +205,8 @@ void bus_write8(uint32_t addr, uint8_t val)
             vdp_data_write(((uint16_t)val << 8) | val);
         else if (port < 0x08)
             vdp_control_write(((uint16_t)val << 8) | val);
+        else if (port == 0x11)
+            psg_write(val);
         return;
     }
 
@@ -230,6 +240,8 @@ void bus_write16(uint32_t addr, uint16_t val)
             vdp_data_write(val);
         else if (port < 0x08)
             vdp_control_write(val);
+        else if (port == 0x10 || port == 0x11)
+            psg_write(val & 0xFF);
         return;
     }
 

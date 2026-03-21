@@ -22,6 +22,7 @@
 
 #ifdef HAVE_SDL2
 #include "renderer.h"
+#include "audio.h"
 
 void genesis_run(void)
 {
@@ -29,6 +30,8 @@ void genesis_run(void)
         fprintf(stderr, "genesis: renderer init failed\n");
         return;
     }
+    if (audio_init() < 0)
+        fprintf(stderr, "genesis: audio init failed (continuing without sound)\n");
 
     printf("Genesis: running (close window or press Escape to quit)\n");
 
@@ -56,6 +59,7 @@ void genesis_run(void)
                 }
             }
             vdp_run_scanline(line);
+            audio_run_scanline();
         }
 
         frame++;
@@ -73,9 +77,11 @@ void genesis_run(void)
         prev_pc = cpu.pc;
 
         renderer_present(vdp.framebuffer);
+        audio_push_frame();
         quit = renderer_poll_events();
     }
 
+    audio_shutdown();
     renderer_shutdown();
     printf("Genesis: exited\n");
 }
