@@ -11,6 +11,7 @@
 #include "cpu.h"
 #include "vdp.h"
 #include "io.h"
+#include "z80.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -29,12 +30,7 @@ static uint32_t cart_rom_size;
 #define WRAM_SIZE  0x10000
 static uint8_t work_ram[WRAM_SIZE];
 
-/* ------------------------------------------------------------------ */
-/*  Z80 RAM: 8 KB at 0xA00000, visible to the 68K when bus is granted */
-/* ------------------------------------------------------------------ */
-
-#define Z80_RAM_SIZE  0x2000
-static uint8_t z80_ram[Z80_RAM_SIZE];
+/* Z80 RAM is owned by z80.c; accessed here via z80_ram_read/write. */
 
 /* ------------------------------------------------------------------ */
 /*  Init / Reset                                                       */
@@ -60,7 +56,7 @@ int bus_init(const uint8_t *rom_data, size_t rom_size)
     cart_rom_size = (uint32_t)rom_size;
 
     memset(work_ram, 0, WRAM_SIZE);
-    memset(z80_ram, 0, Z80_RAM_SIZE);
+    z80_init();
     vdp_init();
     io_init();
     cpu_set_int_ack(vdp_int_ack);
@@ -70,7 +66,7 @@ int bus_init(const uint8_t *rom_data, size_t rom_size)
 void bus_reset(void)
 {
     memset(work_ram, 0, WRAM_SIZE);
-    memset(z80_ram, 0, Z80_RAM_SIZE);
+    z80_reset();
     vdp_reset();
     io_reset();
 }
@@ -91,8 +87,8 @@ uint8_t bus_read8(uint32_t addr)
     /* Z80 address space: 0xA00000 - 0xA0FFFF */
     if (addr >= 0xA00000 && addr <= 0xA0FFFF) {
         uint16_t z_addr = addr & 0xFFFF;
-        if (z_addr < Z80_RAM_SIZE)
-            return z80_ram[z_addr];
+        if (z_addr < 0x2000)
+            return z80_ram_read(z_addr);
         if (z_addr >= 0x4000 && z_addr <= 0x4003)
             return 0x00;  /* YM2612 status: not busy */
         return 0xFF;
@@ -183,8 +179,8 @@ void bus_write8(uint32_t addr, uint8_t val)
     /* Z80 address space: 0xA00000 - 0xA0FFFF */
     if (addr >= 0xA00000 && addr <= 0xA0FFFF) {
         uint16_t z_addr = addr & 0xFFFF;
-        if (z_addr < Z80_RAM_SIZE)
-            z80_ram[z_addr] = val;
+        if (z_addr < 0x2000)
+            z80_ram_write(z_addr, val);
         return;
     }
 

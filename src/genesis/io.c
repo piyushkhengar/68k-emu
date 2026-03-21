@@ -8,6 +8,7 @@
  */
 
 #include "io.h"
+#include "z80.h"
 #include <string.h>
 
 /* ------------------------------------------------------------------ */
@@ -113,6 +114,11 @@ void io_set_pad(int idx, uint8_t buttons)
         io.pad[idx] = buttons;
 }
 
+int io_z80_bus_held(void)
+{
+    return io.z80_bus_granted;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Register read/write                                                */
 /* ------------------------------------------------------------------ */
@@ -188,15 +194,26 @@ void io_write8(uint32_t addr, uint8_t val)
         return;
     }
 
-    /* Z80 bus request */
-    if (addr == 0xA11100 || addr == 0xA11101) {
-        io.z80_bus_granted = 1;     /* Always grant immediately */
+    /* Z80 bus request: bit 0 of even byte ($A11100) controls request.
+     * When the 68K writes 1 → request bus (Z80 halts, 68K can access Z80 RAM).
+     * When the 68K writes 0 → release bus (Z80 can run). */
+    if (addr == 0xA11100) {
+        if (val & 0x01) {
+            io.z80_bus_granted = 1;
+        } else {
+            io.z80_bus_granted = 0;
+        }
         return;
     }
+    if (addr == 0xA11101)
+        return;
 
-    /* Z80 reset */
+    /* Z80 reset: bit 0 = 0 → assert reset, 1 → deassert (Z80 starts). */
     if (addr >= 0xA11200 && addr <= 0xA11201) {
+        int was_reset = io.z80_reset_active;
         io.z80_reset_active = !(val & 0x01);
+        if (was_reset && !io.z80_reset_active)
+            z80_release_reset();
         return;
     }
 

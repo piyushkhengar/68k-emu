@@ -12,10 +12,13 @@
 #include "vdp.h"
 #include "cpu.h"
 #include "bus.h"
+#include "z80.h"
+#include "io.h"
 #include <stdio.h>
 
-#define NTSC_LINES          262
-#define CYCLES_PER_SCANLINE 488
+#define NTSC_LINES              262
+#define CYCLES_PER_SCANLINE     488
+#define Z80_CYCLES_PER_SCANLINE 228   /* ~3.58 MHz vs 7.67 MHz ≈ 488/2.14 */
 
 #ifdef HAVE_SDL2
 #include "renderer.h"
@@ -43,6 +46,14 @@ void genesis_run(void)
                 }
                 cpu.cycles += c;
                 cycles_this_line += c;
+            }
+            if (z80_is_running() && !io_z80_bus_held()) {
+                int z_cycles = 0;
+                while (z_cycles < Z80_CYCLES_PER_SCANLINE) {
+                    int c = z80_step();
+                    if (c == 0) break;
+                    z_cycles += c;
+                }
             }
             vdp_run_scanline(line);
         }
@@ -84,13 +95,21 @@ void genesis_run_headless(int max_frames)
 
     uint32_t prev_pc = 0;
     for (int frame = 1; frame <= max_frames; frame++) {
-        for (int line = 0; line < 262; line++) {
+        for (int line = 0; line < NTSC_LINES; line++) {
             int cycles_this_line = 0;
-            while (cycles_this_line < 488) {
+            while (cycles_this_line < CYCLES_PER_SCANLINE) {
                 int c = cpu_step();
-                if (c == 0) { cycles_this_line = 488; break; }
+                if (c == 0) { cycles_this_line = CYCLES_PER_SCANLINE; break; }
                 cpu.cycles += c;
                 cycles_this_line += c;
+            }
+            if (z80_is_running() && !io_z80_bus_held()) {
+                int z_cycles = 0;
+                while (z_cycles < Z80_CYCLES_PER_SCANLINE) {
+                    int c = z80_step();
+                    if (c == 0) break;
+                    z_cycles += c;
+                }
             }
             vdp_run_scanline(line);
         }

@@ -25,6 +25,9 @@
 void io_init(void);
 void io_reset(void);
 
+/* Returns non-zero when the 68K holds the Z80 bus (Z80 cannot execute). */
+int  io_z80_bus_held(void);
+
 uint8_t io_read8(uint32_t addr);
 void    io_write8(uint32_t addr, uint8_t val);
 

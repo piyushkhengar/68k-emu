@@ -19,7 +19,7 @@ SRCS = src/main.c src/core/cpu.c src/core/memory.c src/core/ea.c \
        src/isa/move.c src/isa/alu.c src/isa/branch.c src/isa/control.c \
        src/isa/immediate.c src/isa/logic.c src/isa/shift.c src/isa/bit.c \
        src/isa/movem.c src/isa/movep.c \
-       src/genesis/bus.c src/genesis/vdp.c src/genesis/io.c \
+       src/genesis/bus.c src/genesis/vdp.c src/genesis/io.c src/genesis/z80.c \
        src/genesis/genesis.c \
        src/tests.c src/timing.c src/timing_tests.c src/processor_tests.c \
        deps/cJSON/cJSON.c
