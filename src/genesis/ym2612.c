@@ -10,8 +10,10 @@
  */
 
 #include "ym2612.h"
+#include "z80.h"
 #include <string.h>
 #include <math.h>
+#include <stdio.h>
 
 #define YM_CHANNELS 6
 #define YM_OPERATORS 4
@@ -123,6 +125,9 @@ static struct {
     uint32_t eg_timer;      /* global EG timer (counts at FM rate / 3) */
     uint8_t  eg_div3;       /* 0-2 divider for EG timer */
     int      tables_built;
+    /* debug counters */
+    int      dbg_dac_writes;
+    int      dbg_frame;
 } ym;
 
 /* ------------------------------------------------------------------ */
@@ -135,8 +140,10 @@ void ym2612_init(void)
     for (int c = 0; c < YM_CHANNELS; c++) {
         ym.ch[c].pan_left = 1;
         ym.ch[c].pan_right = 1;
-        for (int o = 0; o < YM_OPERATORS; o++)
+        for (int o = 0; o < YM_OPERATORS; o++) {
             ym.ch[c].op[o].eg_level = ENV_QUIET;
+            ym.ch[c].op[o].eg_phase = EG_RELEASE;
+        }
     }
     if (!ym.tables_built) {
         build_tables();
@@ -152,8 +159,10 @@ void ym2612_reset(void)
     for (int c = 0; c < YM_CHANNELS; c++) {
         ym.ch[c].pan_left = 1;
         ym.ch[c].pan_right = 1;
-        for (int o = 0; o < YM_OPERATORS; o++)
+        for (int o = 0; o < YM_OPERATORS; o++) {
             ym.ch[c].op[o].eg_level = ENV_QUIET;
+            ym.ch[c].op[o].eg_phase = EG_RELEASE;
+        }
     }
 }
 
@@ -262,6 +271,7 @@ void ym2612_write(uint8_t port, uint8_t val)
         }
         case 0x2A:
             ym.dac_data = val;
+            ym.dbg_dac_writes++;
             break;
         case 0x2B:
             ym.dac_enable = (val >> 7) & 1;
@@ -538,6 +548,13 @@ static void ym_tick(int32_t *left, int32_t *right)
 
     *left = l;
     *right = r;
+}
+
+void ym2612_debug_frame(void)
+{
+    ym.dbg_frame++;
+    (void)z80_debug_steps();
+    ym.dbg_dac_writes = 0;
 }
 
 void ym2612_run_samples(int32_t *buf, int count, int sample_rate)

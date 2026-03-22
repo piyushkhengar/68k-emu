@@ -8,6 +8,7 @@
  */
 
 #include "z80.h"
+#include "bus.h"
 #include "psg.h"
 #include "ym2612.h"
 #include <string.h>
@@ -19,6 +20,14 @@
 
 #define Z80_RAM_SIZE  0x2000
 static uint8_t z80_ram[Z80_RAM_SIZE];
+
+/* 68K ROM bank register: 9-bit serial shift register at $6000.
+ * Each write shifts bit 0 of the value in from the top (MSB first).
+ * The resulting value selects bits 23..15 of the 68K address visible
+ * in the Z80 bank window at $8000-$FFFF. */
+static uint32_t z80_bank_reg;
+static int      z80_bank_shift;
+static int      z80_dbg_steps;
 
 /* ------------------------------------------------------------------ */
 /*  Z80 flags                                                          */
@@ -38,6 +47,8 @@ static uint8_t z80_ram[Z80_RAM_SIZE];
 static struct {
     uint8_t  a, f;
     uint8_t  b, c, d, e, h, l;
+    uint8_t  a2, f2;
+    uint8_t  b2, c2, d2, e2, h2, l2;
     uint16_t sp, pc;
     uint16_t ix, iy;
     uint8_t  iff1, iff2;
@@ -67,6 +78,10 @@ static uint8_t z80_read(uint16_t addr)
     if (addr < 0x2000) return z80_ram[addr];
     if (addr < 0x4000) return z80_ram[addr & 0x1FFF];
     if (addr >= 0x4000 && addr <= 0x5FFF) return ym2612_read();
+    if (addr >= 0x8000) {
+        uint32_t m68k_addr = ((uint32_t)z80_bank_reg << 15) | (addr & 0x7FFF);
+        return bus_read8(m68k_addr);
+    }
     return 0xFF;
 }
 
@@ -76,6 +91,12 @@ static void z80_write(uint16_t addr, uint8_t val)
     if (addr < 0x4000) { z80_ram[addr & 0x1FFF] = val; return; }
     if (addr >= 0x4000 && addr <= 0x5FFF) {
         ym2612_write(addr & 3, val);
+        return;
+    }
+    if (addr >= 0x6000 && addr < 0x6100) {
+        z80_bank_reg = (z80_bank_reg >> 1) | ((val & 1) << 8);
+        z80_bank_shift++;
+        if (z80_bank_shift >= 9) z80_bank_shift = 0;
         return;
     }
     if (addr == 0x7F11) { psg_write(val); return; }
@@ -680,6 +701,7 @@ int z80_step(void)
     if (!z.running || z.halted)
         return 0;
 
+    z80_dbg_steps++;
     uint8_t op = fetch();
 
     /* LD r, r' block: 0x40-0x7F (except 0x76 = HALT) */
@@ -853,8 +875,13 @@ int z80_step(void)
         return 7;
     }
 
-    /* EX AF, AF' (stub: ignore alternate set) */
-    case 0x08: return 4;
+    /* EX AF, AF' */
+    case 0x08: {
+        uint8_t ta = z.a, tf = z.f;
+        z.a = z.a2; z.f = z.f2;
+        z.a2 = ta; z.f2 = tf;
+        return 4;
+    }
     /* EX DE, HL */
     case 0xEB: {
         uint16_t t = rp_de();
@@ -862,8 +889,17 @@ int z80_step(void)
         set_hl(t);
         return 4;
     }
-    /* EXX (stub: ignore alternate set) */
-    case 0xD9: return 4;
+    /* EXX */
+    case 0xD9: {
+        uint8_t t;
+        t = z.b; z.b = z.b2; z.b2 = t;
+        t = z.c; z.c = z.c2; z.c2 = t;
+        t = z.d; z.d = z.d2; z.d2 = t;
+        t = z.e; z.e = z.e2; z.e2 = t;
+        t = z.h; z.h = z.h2; z.h2 = t;
+        t = z.l; z.l = z.l2; z.l2 = t;
+        return 4;
+    }
     /* EX (SP), HL */
     case 0xE3: {
         uint16_t v = z80_read(z.sp) | ((uint16_t)z80_read(z.sp + 1) << 8);
@@ -986,6 +1022,8 @@ void z80_init(void)
 {
     memset(&z, 0, sizeof(z));
     memset(z80_ram, 0, Z80_RAM_SIZE);
+    z80_bank_reg = 0;
+    z80_bank_shift = 0;
 }
 
 void z80_reset(void)
@@ -1012,6 +1050,15 @@ int z80_is_running(void)
 {
     return z.running && !z.halted;
 }
+
+int z80_debug_steps(void)
+{
+    int v = z80_dbg_steps;
+    z80_dbg_steps = 0;
+    return v;
+}
+
+uint16_t z80_get_pc(void) { return z.pc; }
 
 /* ------------------------------------------------------------------ */
 /*  68K bus access to Z80 RAM                                          */

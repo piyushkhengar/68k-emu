@@ -14,6 +14,7 @@
 #include "bus.h"
 #include "z80.h"
 #include "io.h"
+#include "ym2612.h"
 #include <stdio.h>
 
 #define NTSC_LINES              262
@@ -78,6 +79,7 @@ void genesis_run(void)
 
         renderer_present(vdp.framebuffer);
         audio_push_frame();
+        ym2612_debug_frame();
         quit = renderer_poll_events();
     }
 
@@ -120,6 +122,7 @@ void genesis_run_headless(int max_frames)
             vdp_run_scanline(line);
         }
 
+        ym2612_debug_frame();
         int show = (frame <= 5) || (frame <= max_frames && cpu.pc != prev_pc);
         if (show) {
             printf("Frame %3d: PC=%08X SR=%04X D0=%08X A7=%08X %s\n",

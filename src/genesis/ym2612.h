@@ -26,4 +26,7 @@ uint8_t ym2612_read(void);
  * (int32_t to avoid overflow during mixing). */
 void    ym2612_run_samples(int32_t *buf, int count, int sample_rate);
 
+/* Debug: print per-frame DAC/channel diagnostics (call once per frame) */
+void    ym2612_debug_frame(void);
+
 #endif /* GENESIS_YM2612_H */

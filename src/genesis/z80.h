@@ -28,6 +28,10 @@ int  z80_step(void);
 
 int  z80_is_running(void);
 
+/* Debug: return and reset the per-frame Z80 step counter */
+int  z80_debug_steps(void);
+uint16_t z80_get_pc(void);
+
 /* 68K bus access to Z80 RAM (used by bus.c when 68K reads/writes $A00000). */
 uint8_t z80_ram_read(uint16_t addr);
 void    z80_ram_write(uint16_t addr, uint8_t val);

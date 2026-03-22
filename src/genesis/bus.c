@@ -185,9 +185,9 @@ void bus_write8(uint32_t addr, uint8_t val)
     /* Z80 address space: 0xA00000 - 0xA0FFFF */
     if (addr >= 0xA00000 && addr <= 0xA0FFFF) {
         uint16_t z_addr = addr & 0xFFFF;
-        if (z_addr < 0x2000)
+        if (z_addr < 0x2000) {
             z80_ram_write(z_addr, val);
-        else if (z_addr >= 0x4000 && z_addr <= 0x4003)
+        } else if (z_addr >= 0x4000 && z_addr <= 0x4003)
             ym2612_write(z_addr & 3, val);
         return;
     }
