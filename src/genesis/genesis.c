@@ -1,5 +1,5 @@
 /*
- * Genesis system main loop.
+ * Genesis system main loop and system_t implementation.
  *
  * Runs the 68K CPU and VDP in lockstep at NTSC timing: 262 scanlines per
  * frame, ~488 68K cycles per scanline, 60 frames per second.  After each
@@ -16,6 +16,48 @@
 #include "io.h"
 #include "ym2612.h"
 #include <stdio.h>
+
+/* ------------------------------------------------------------------ */
+/*  system_t implementation                                            */
+/* ------------------------------------------------------------------ */
+
+static const mem_bus_t genesis_bus = {
+    .read8   = bus_read8,
+    .read16  = bus_read16,
+    .read32  = bus_read32,
+    .write8  = bus_write8,
+    .write16 = bus_write16,
+    .write32 = bus_write32,
+};
+
+static int genesis_init(const uint8_t *rom, size_t size)
+{
+    if (bus_init(rom, size) < 0)
+        return -1;
+    mem_set_bus(&genesis_bus);
+    return 0;
+}
+
+static void genesis_reset(void)
+{
+    bus_reset();
+}
+
+static void genesis_shutdown(void)
+{
+    mem_set_bus(NULL);
+}
+
+const system_t system_genesis = {
+    .name        = "genesis",
+    .description = "Sega Genesis / Mega Drive",
+    .init        = genesis_init,
+    .reset       = genesis_reset,
+    .shutdown    = genesis_shutdown,
+    .run         = genesis_run,
+    .run_headless = genesis_run_headless,
+    .bus         = &genesis_bus,
+};
 
 #define NTSC_LINES              262
 #define CYCLES_PER_SCANLINE     488

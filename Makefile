@@ -14,16 +14,20 @@ endif
 SDL2_CFLAGS := $(shell sdl2-config --cflags 2>/dev/null)
 SDL2_LIBS   := $(shell sdl2-config --libs 2>/dev/null)
 
-# Core sources shared by all targets
-SRCS = src/main.c src/core/cpu.c src/core/memory.c src/core/ea.c \
-       src/isa/move.c src/isa/alu.c src/isa/branch.c src/isa/control.c \
-       src/isa/immediate.c src/isa/logic.c src/isa/shift.c src/isa/bit.c \
-       src/isa/movem.c src/isa/movep.c \
-       src/genesis/bus.c src/genesis/vdp.c src/genesis/io.c src/genesis/z80.c \
-       src/genesis/psg.c src/genesis/ym2612.c \
-       src/genesis/genesis.c \
-       src/tests.c src/timing.c src/timing_tests.c src/processor_tests.c \
-       deps/cJSON/cJSON.c
+# ---- Source groups ------------------------------------------------
+CORE_SRCS = src/main.c src/system.c \
+            src/core/cpu.c src/core/memory.c src/core/ea.c \
+            src/isa/move.c src/isa/alu.c src/isa/branch.c src/isa/control.c \
+            src/isa/immediate.c src/isa/logic.c src/isa/shift.c src/isa/bit.c \
+            src/isa/movem.c src/isa/movep.c \
+            src/tests.c src/timing.c src/timing_tests.c src/processor_tests.c \
+            deps/cJSON/cJSON.c
+
+GENESIS_SRCS = src/genesis/bus.c src/genesis/vdp.c src/genesis/io.c \
+               src/genesis/z80.c src/genesis/psg.c src/genesis/ym2612.c \
+               src/genesis/genesis.c src/genesis/genesis_tests.c
+
+SRCS = $(CORE_SRCS) $(GENESIS_SRCS)
 OBJS = $(SRCS:.c=.o)
 
 .PHONY: all clean test mcl68-test genesis
@@ -36,8 +40,6 @@ $(TARGET): $(OBJS)
 # Genesis target: rebuild with SDL2 for graphical output
 #   - genesis.c recompiled with -DHAVE_SDL2 (separate .o to avoid conflicts)
 #   - renderer.c compiled with SDL2 headers
-genesis: GENESIS_OBJS = $(filter-out src/genesis/genesis.o,$(OBJS)) \
-                        src/genesis/genesis_sdl.o src/genesis/renderer.o src/genesis/audio.o
 genesis: $(filter-out src/genesis/genesis.o,$(OBJS)) src/genesis/genesis_sdl.o src/genesis/renderer.o src/genesis/audio.o
 	$(CC) $(CFLAGS) $(SDL2_CFLAGS) -o $(TARGET) $(filter-out src/genesis/genesis.o,$(OBJS)) src/genesis/genesis_sdl.o src/genesis/renderer.o src/genesis/audio.o $(LDFLAGS) $(SDL2_LIBS)
 
@@ -54,7 +56,7 @@ src/genesis/audio.o: src/genesis/audio.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 clean:
-	rm -f $(OBJS) src/genesis/genesis_sdl.o src/genesis/renderer.o src/genesis/audio.o $(TARGET)
+	rm -f $(OBJS) src/genesis/genesis_sdl.o src/genesis/renderer.o src/genesis/audio.o src/system.o $(TARGET)
 
 # SPEED: run tests at given MHz (e.g. make test SPEED=7.09). Omit for hyperspeed.
 SPEED ?=

@@ -5,6 +5,10 @@
  * Without a ROM, runs a tiny built-in NOP loop.
  * --speed 0 or omitted: hyperspeed (no throttling)
  * --speed 7.09: PAL Amiga speed (7.09 MHz)
+ *
+ * System emulation:
+ *   ./68k-emu --system genesis rom.bin
+ *   ./68k-emu --system genesis --headless rom.bin
  */
 
 #include "cpu.h"
@@ -12,8 +16,7 @@
 #include "memory.h"
 #include "processor_tests.h"
 #include "tests.h"
-#include "genesis/bus.h"
-#include "genesis/genesis.h"
+#include "system.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -44,7 +47,8 @@ static void print_cpu_state(void)
 /* Parse argv; returns speed_mhz (0 = unlimited). */
 static double parse_args(int argc, char *argv[], const char **rom_or_test, int *run_all,
                          const char **processor_tests, const char **processor_tests_filter,
-                         int *max_steps_out, int *debug, int *genesis_mode)
+                         int *max_steps_out, int *debug,
+                         const char **system_name, int *headless)
 {
     double speed_mhz = 0;
     *rom_or_test = NULL;
@@ -53,13 +57,16 @@ static double parse_args(int argc, char *argv[], const char **rom_or_test, int *
     *processor_tests_filter = NULL;
     *max_steps_out = -1;
     *debug = 0;
-    *genesis_mode = 0;
+    *system_name = NULL;
+    *headless = 0;
 
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--genesis") == 0) {
-            *genesis_mode = 1;
-        } else if (strcmp(argv[i], "--genesis-headless") == 0) {
-            *genesis_mode = 2;
+        if (strcmp(argv[i], "--system") == 0) {
+            if (i + 1 < argc) {
+                *system_name = argv[++i];
+            }
+        } else if (strcmp(argv[i], "--headless") == 0) {
+            *headless = 1;
         } else if (strcmp(argv[i], "--debug") == 0) {
             *debug = 1;
         } else if (strcmp(argv[i], "--speed") == 0) {
@@ -143,8 +150,12 @@ int main(int argc, char *argv[])
     const char *processor_tests_filter = NULL;
     int max_steps_arg = -1;
     int debug = 0;
-    int genesis_mode = 0;
-    double speed_mhz = parse_args(argc, argv, &rom_or_test, &run_all, &processor_tests, &processor_tests_filter, &max_steps_arg, &debug, &genesis_mode);
+    const char *system_name = NULL;
+    int headless = 0;
+    double speed_mhz = parse_args(argc, argv, &rom_or_test, &run_all,
+                                  &processor_tests, &processor_tests_filter,
+                                  &max_steps_arg, &debug,
+                                  &system_name, &headless);
 
     if (processor_tests) {
         return run_processor_tests(processor_tests, processor_tests_filter);
@@ -154,11 +165,19 @@ int main(int argc, char *argv[])
     }
 
     const builtin_test_t *test = NULL;
-    if (rom_or_test && !genesis_mode)
+    if (rom_or_test && !system_name)
         test = find_builtin_test(rom_or_test);
 
-    if (genesis_mode && rom_or_test) {
-        /* Genesis mode: load ROM through the bus */
+    const system_t *sys = NULL;
+    if (system_name) {
+        sys = system_find(system_name);
+        if (!sys) {
+            fprintf(stderr, "Unknown system: %s\n", system_name);
+            return 1;
+        }
+    }
+
+    if (sys && rom_or_test) {
         FILE *f = fopen(rom_or_test, "rb");
         if (!f) {
             perror(rom_or_test);
@@ -176,25 +195,15 @@ int main(int argc, char *argv[])
         fread(rom, 1, size, f);
         fclose(f);
 
-        if (bus_init(rom, (size_t)size) < 0) {
+        if (sys->init(rom, (size_t)size) < 0) {
             free(rom);
             return 1;
         }
         free(rom);
 
-        static const mem_bus_t genesis_bus = {
-            .read8   = bus_read8,
-            .read16  = bus_read16,
-            .read32  = bus_read32,
-            .write8  = bus_write8,
-            .write16 = bus_write16,
-            .write32 = bus_write32,
-        };
-        mem_set_bus(&genesis_bus);
-
-        printf("Genesis: loaded %s (%ld bytes)\n", rom_or_test, size);
-    } else if (genesis_mode) {
-        fprintf(stderr, "Usage: %s --genesis <rom.bin>\n", argv[0]);
+        printf("%s: loaded %s (%ld bytes)\n", sys->description, rom_or_test, size);
+    } else if (sys) {
+        fprintf(stderr, "Usage: %s --system %s <rom.bin>\n", argv[0], sys->name);
         return 1;
     } else if (test) {
         mem_load_rom(test->rom, test->size);
@@ -226,12 +235,12 @@ int main(int argc, char *argv[])
 
     cpu_reset();
 
-    if (genesis_mode == 2) {
-        genesis_run_headless(max_steps_arg > 0 ? max_steps_arg : 120);
-        return 0;
-    }
-    if (genesis_mode) {
-        genesis_run();
+    if (sys) {
+        if (headless)
+            sys->run_headless(max_steps_arg > 0 ? max_steps_arg : 120);
+        else
+            sys->run();
+        sys->shutdown();
         return 0;
     }
 
@@ -253,9 +262,9 @@ int main(int argc, char *argv[])
     } else if (test) {
         max_steps = test->max_steps ? test->max_steps : 100;
     } else if (rom_or_test) {
-        max_steps = 500000000;  /* ROM file: allow long execution (e.g. MCL68 test suite) */
+        max_steps = 500000000;
     } else {
-        max_steps = 100;       /* nop_loop default */
+        max_steps = 100;
     }
     uint64_t cycles_this_frame = 0;
     double frame_start = get_monotonic_sec();
@@ -271,7 +280,7 @@ int main(int argc, char *argv[])
             cpu.cycles += c;
             cycles_this_frame += c;
             steps++;
-            if (rom_or_test && cpu.pc == 0xF000)  /* MCL68 ALL_DONE */
+            if (rom_or_test && cpu.pc == 0xF000)
                 break;
 
             if (cycles_this_frame >= cycles_per_frame) {
@@ -289,17 +298,14 @@ int main(int argc, char *argv[])
                 break;
             cpu.cycles += c;
             steps++;
-            if (rom_or_test && cpu.pc == 0xF000)  /* MCL68 ALL_DONE */
+            if (rom_or_test && cpu.pc == 0xF000)
                 break;
         }
     }
 
     printf("Executed %d instructions. PC=0x%08X %s\n",
            steps, cpu.pc, cpu.halted ? "(halted)" : "");
-    if (genesis_mode) {
-        print_cpu_state();
-        printf("Cycles: %u\n", (unsigned)cpu.cycles);
-    } else if (rom_or_test && !test) {
+    if (rom_or_test && !test) {
         if (cpu.pc == 0xF000)
             printf("MCL68: ALL TESTS PASSED\n");
         else
