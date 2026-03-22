@@ -28,6 +28,7 @@ static uint8_t z80_ram[Z80_RAM_SIZE];
 static uint32_t z80_bank_reg;
 static int      z80_bank_shift;
 static int      z80_dbg_steps;
+static int      z80_dbg_ram_writes;
 
 /* ------------------------------------------------------------------ */
 /*  Z80 flags                                                          */
@@ -51,10 +52,12 @@ static struct {
     uint8_t  b2, c2, d2, e2, h2, l2;
     uint16_t sp, pc;
     uint16_t ix, iy;
+    uint8_t  i;          /* interrupt vector register */
     uint8_t  iff1, iff2;
     uint8_t  im;
     int      halted;
     int      running;
+    int      int_pending; /* maskable INT line asserted */
 } z;
 
 /* ------------------------------------------------------------------ */
@@ -544,9 +547,13 @@ static int exec_ed(void)
     case 0x56: z.im = 1; return 8;  /* IM 1 */
     case 0x5E: z.im = 2; return 8;  /* IM 2 */
 
-    case 0x47: /* LD I, A (stub) */  return 9;
+    case 0x47: /* LD I, A */  z.i = z.a; return 9;
     case 0x4F: /* LD R, A (stub) */  return 9;
-    case 0x57: /* LD A, I (stub) */  z.a = 0; z.f = (z.f & ZF_C) | (z.a ? 0 : ZF_Z); return 9;
+    case 0x57: /* LD A, I */
+        z.a = z.i;
+        z.f = (z.f & ZF_C) | (z.a & ZF_S) | (z.a ? 0 : ZF_Z)
+            | (z.iff2 ? ZF_PV : 0);
+        return 9;
     case 0x5F: /* LD A, R (stub) */  z.a = 0; z.f = (z.f & ZF_C) | (z.a ? 0 : ZF_Z); return 9;
 
     case 0x43: { /* LD (nn), BC */
@@ -674,6 +681,63 @@ static int exec_ed(void)
         return 16;
     }
 
+    /* SBC HL, rp */
+    case 0x42: case 0x52: case 0x62: case 0x72: {
+        int p = (op >> 4) & 3;
+        uint16_t val16 = read_rp(p);
+        int c = (z.f & ZF_C) ? 1 : 0;
+        uint32_t hl = rp_hl();
+        uint32_t r32 = hl - val16 - c;
+        uint16_t result = r32 & 0xFFFF;
+        z.f = ZF_N
+            | (result >> 8 & ZF_S)
+            | (result ? 0 : ZF_Z)
+            | ((hl ^ val16) & (hl ^ result) & 0x8000 ? ZF_PV : 0)
+            | ((int)(hl & 0x0FFF) < (int)(val16 & 0x0FFF) + c ? ZF_H : 0)
+            | (r32 > 0xFFFF ? ZF_C : 0);
+        set_hl(result);
+        return 15;
+    }
+
+    /* ADC HL, rp */
+    case 0x4A: case 0x5A: case 0x6A: case 0x7A: {
+        int p = (op >> 4) & 3;
+        uint16_t val16 = read_rp(p);
+        int c = (z.f & ZF_C) ? 1 : 0;
+        uint32_t hl = rp_hl();
+        uint32_t r32 = hl + val16 + c;
+        uint16_t result = r32 & 0xFFFF;
+        z.f = (result >> 8 & ZF_S)
+            | (result ? 0 : ZF_Z)
+            | (~(hl ^ val16) & (hl ^ result) & 0x8000 ? ZF_PV : 0)
+            | ((hl & 0x0FFF) + (val16 & 0x0FFF) + c > 0x0FFF ? ZF_H : 0)
+            | (r32 > 0xFFFF ? ZF_C : 0);
+        set_hl(result);
+        return 15;
+    }
+
+    /* RRD */
+    case 0x67: {
+        uint8_t mem = z80_read(rp_hl());
+        uint8_t old_a = z.a;
+        z.a = (old_a & 0xF0) | (mem & 0x0F);
+        mem = ((old_a & 0x0F) << 4) | (mem >> 4);
+        z80_write(rp_hl(), mem);
+        z.f = (z.f & ZF_C) | sz_flags(z.a);
+        return 18;
+    }
+
+    /* RLD */
+    case 0x6F: {
+        uint8_t mem = z80_read(rp_hl());
+        uint8_t old_a = z.a;
+        z.a = (old_a & 0xF0) | (mem >> 4);
+        mem = ((mem & 0x0F) << 4) | (old_a & 0x0F);
+        z80_write(rp_hl(), mem);
+        z.f = (z.f & ZF_C) | sz_flags(z.a);
+        return 18;
+    }
+
     case 0x40: case 0x48: case 0x50: case 0x58:
     case 0x60: case 0x68: case 0x78: {
         /* IN r, (C) - stub: read 0 */
@@ -687,6 +751,26 @@ static int exec_ed(void)
         /* OUT (C), r - stub: ignore */
         return 12;
 
+    /* OUTI */
+    case 0xA3: {
+        uint8_t v = z80_read(rp_hl());
+        z80_write(0x4000 | (z.c & 3), v);
+        set_hl(rp_hl() + 1);
+        z.b--;
+        z.f = ZF_N | (z.b ? 0 : ZF_Z);
+        return 16;
+    }
+    /* OTIR */
+    case 0xB3: {
+        uint8_t v = z80_read(rp_hl());
+        z80_write(0x4000 | (z.c & 3), v);
+        set_hl(rp_hl() + 1);
+        z.b--;
+        z.f = ZF_N | ZF_Z;
+        if (z.b) { z.pc -= 2; z.f &= ~ZF_Z; return 21; }
+        return 16;
+    }
+
     default:
         return 8; /* unknown ED, treat as NOP pair */
     }
@@ -698,8 +782,31 @@ static int exec_ed(void)
 
 int z80_step(void)
 {
-    if (!z.running || z.halted)
+    if (!z.running)
         return 0;
+
+    /* Handle pending maskable interrupt */
+    if (z.int_pending && z.iff1) {
+        z.int_pending = 0;
+        z.iff1 = z.iff2 = 0;
+        z.halted = 0;
+        switch (z.im) {
+        case 0: /* IM 0: RST 38 (assume $FF on data bus) */
+        case 1: /* IM 1: always RST 38 */
+            push16(z.pc);
+            z.pc = 0x0038;
+            return 13;
+        case 2: { /* IM 2: vectored — address = (I << 8) | data_bus */
+            push16(z.pc);
+            uint16_t vec_addr = ((uint16_t)z.i << 8) | 0xFF;
+            z.pc = z80_read(vec_addr) | ((uint16_t)z80_read(vec_addr + 1) << 8);
+            return 19;
+        }
+        }
+    }
+
+    if (z.halted)
+        return 4; /* HALT burns cycles while waiting for interrupt */
 
     z80_dbg_steps++;
     uint8_t op = fetch();
@@ -1033,10 +1140,12 @@ void z80_reset(void)
     z.a = z.f = 0;
     z.b = z.c = z.d = z.e = z.h = z.l = 0;
     z.ix = z.iy = 0;
+    z.i = 0;
     z.iff1 = z.iff2 = 0;
     z.im = 0;
     z.halted = 0;
     z.running = 0;
+    z.int_pending = 0;
 }
 
 void z80_release_reset(void)
@@ -1044,11 +1153,17 @@ void z80_release_reset(void)
     z.pc = 0;
     z.halted = 0;
     z.running = 1;
+    z.int_pending = 0;
+}
+
+void z80_assert_int(void)
+{
+    z.int_pending = 1;
 }
 
 int z80_is_running(void)
 {
-    return z.running && !z.halted;
+    return z.running;
 }
 
 int z80_debug_steps(void)
@@ -1072,4 +1187,12 @@ uint8_t z80_ram_read(uint16_t addr)
 void z80_ram_write(uint16_t addr, uint8_t val)
 {
     z80_ram[addr & (Z80_RAM_SIZE - 1)] = val;
+    z80_dbg_ram_writes++;
+}
+
+int z80_debug_ram_writes(void)
+{
+    int v = z80_dbg_ram_writes;
+    z80_dbg_ram_writes = 0;
+    return v;
 }

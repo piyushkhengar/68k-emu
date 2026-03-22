@@ -208,14 +208,17 @@ void io_write8(uint32_t addr, uint8_t val)
     if (addr == 0xA11101)
         return;
 
-    /* Z80 reset: bit 0 = 0 → assert reset, 1 → deassert (Z80 starts). */
-    if (addr >= 0xA11200 && addr <= 0xA11201) {
+    /* Z80 reset: bit 0 of even byte ($A11200) controls reset line.
+     * Odd address ($A11201) is ignored, like the bus request register. */
+    if (addr == 0xA11200) {
         int was_reset = io.z80_reset_active;
         io.z80_reset_active = !(val & 0x01);
         if (was_reset && !io.z80_reset_active)
             z80_release_reset();
         return;
     }
+    if (addr == 0xA11201)
+        return;
 
     /* TMSS: accept and ignore */
     if (addr >= 0xA14000 && addr <= 0xA14003)

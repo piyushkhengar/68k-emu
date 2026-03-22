@@ -60,6 +60,7 @@ const system_t system_genesis = {
 };
 
 #define NTSC_LINES              262
+#define NTSC_VBLANK_LINE        224
 #define CYCLES_PER_SCANLINE     488
 #define Z80_CYCLES_PER_SCANLINE 228   /* ~3.58 MHz vs 7.67 MHz ≈ 488/2.14 */
 
@@ -93,6 +94,8 @@ void genesis_run(void)
                 cpu.cycles += c;
                 cycles_this_line += c;
             }
+            if (line == NTSC_VBLANK_LINE)
+                z80_assert_int();
             if (z80_is_running() && !io_z80_bus_held()) {
                 int z_cycles = 0;
                 while (z_cycles < Z80_CYCLES_PER_SCANLINE) {
@@ -153,6 +156,8 @@ void genesis_run_headless(int max_frames)
                 cpu.cycles += c;
                 cycles_this_line += c;
             }
+            if (line == NTSC_VBLANK_LINE)
+                z80_assert_int();
             if (z80_is_running() && !io_z80_bus_held()) {
                 int z_cycles = 0;
                 while (z_cycles < Z80_CYCLES_PER_SCANLINE) {

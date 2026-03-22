@@ -23,13 +23,17 @@ void z80_init(void);
 void z80_reset(void);
 void z80_release_reset(void);
 
-/* Execute one Z80 instruction. Returns cycle count, or 0 if halted. */
+/* Execute one Z80 instruction. Returns cycle count, or 0 if not running. */
 int  z80_step(void);
 
 int  z80_is_running(void);
 
-/* Debug: return and reset the per-frame Z80 step counter */
+/* Assert the maskable interrupt line (VBlank from VDP). */
+void z80_assert_int(void);
+
+/* Debug: return and reset the per-frame Z80 step/write counters */
 int  z80_debug_steps(void);
+int  z80_debug_ram_writes(void);
 uint16_t z80_get_pc(void);
 
 /* 68K bus access to Z80 RAM (used by bus.c when 68K reads/writes $A00000). */

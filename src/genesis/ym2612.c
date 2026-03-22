@@ -125,8 +125,19 @@ static struct {
     uint32_t eg_timer;      /* global EG timer (counts at FM rate / 3) */
     uint8_t  eg_div3;       /* 0-2 divider for EG timer */
     int      tables_built;
+
+    /* Timers */
+    uint16_t timer_a;       /* Timer A 10-bit reload value (regs $24/$25) */
+    uint8_t  timer_b;       /* Timer B 8-bit reload value (reg $26) */
+    int32_t  timer_a_cnt;   /* Timer A down-counter (period = 1024 - timer_a) */
+    int32_t  timer_b_cnt;   /* Timer B down-counter (period = (256 - timer_b) << 4) */
+    uint8_t  timer_a_enable;/* Timer A overflow sets status flag */
+    uint8_t  timer_b_enable;/* Timer B overflow sets status flag */
+    uint8_t  ch3_mode;      /* Channel 3 special frequency mode */
+
     /* debug counters */
     int      dbg_dac_writes;
+    int      dbg_ym_writes;   /* total data register writes per frame */
     int      dbg_frame;
 } ym;
 
@@ -243,6 +254,7 @@ void ym2612_write(uint8_t port, uint8_t val)
 
     uint8_t reg = ym.addr_latch[part];
     ym.regs[part][reg] = val;
+    ym.dbg_ym_writes++;
 
     /* Global registers (part 0 only, $20-$2F) */
     if (part == 0 && reg >= 0x20 && reg < 0x30) {
@@ -251,8 +263,34 @@ void ym2612_write(uint8_t port, uint8_t val)
             ym.lfo_enable = (val >> 3) & 1;
             ym.lfo_freq = val & 7;
             break;
-        case 0x27:
+        case 0x24: /* Timer A MSB (bits 9-2) */
+            ym.timer_a = (ym.timer_a & 0x003) | ((uint16_t)val << 2);
             break;
+        case 0x25: /* Timer A LSB (bits 1-0) */
+            ym.timer_a = (ym.timer_a & 0x3FC) | (val & 3);
+            break;
+        case 0x26: /* Timer B */
+            ym.timer_b = val;
+            break;
+        case 0x27: { /* Timer control / Channel 3 mode */
+            ym.ch3_mode = (val >> 6) & 3;
+            /* Reset overflow flags */
+            if (val & 0x10) ym.status &= ~0x01;
+            if (val & 0x20) ym.status &= ~0x02;
+            /* Timer enable (allow overflow to set status flag) */
+            ym.timer_a_enable = (val >> 2) & 1;
+            ym.timer_b_enable = (val >> 3) & 1;
+            /* Load timers (start counting if not already running) */
+            if (val & 0x01) {
+                if (ym.timer_a_cnt <= 0)
+                    ym.timer_a_cnt = 1024 - ym.timer_a;
+            }
+            if (val & 0x02) {
+                if (ym.timer_b_cnt <= 0)
+                    ym.timer_b_cnt = (256 - ym.timer_b) << 4;
+            }
+            break;
+        }
         case 0x28: {
             int ch_idx = val & 3;
             if (ch_idx == 3) break;
@@ -352,7 +390,7 @@ uint8_t ym2612_read(void)
 /*  Envelope generator                                                 */
 /* ------------------------------------------------------------------ */
 
-static void eg_step(ym_op_t *op)
+static void eg_step(ym_op_t *op, int keycode)
 {
     int rate;
     switch (op->eg_phase) {
@@ -362,7 +400,16 @@ static void eg_step(ym_op_t *op)
     case EG_RELEASE: rate = (op->release_rate * 2) + 1; break;
     default:         rate = 0; break;
     }
-    if (rate == 0) return;
+
+    /* Apply key scale rate: higher notes get faster envelopes */
+    if (rate > 0 && op->key_scale < 3) {
+        int ks_shift = 3 - op->key_scale;
+        rate += (keycode >> ks_shift);
+    } else if (rate > 0 && op->key_scale == 3) {
+        rate += keycode;  /* no shift = maximum effect */
+    }
+
+    if (rate <= 0) return;
     if (rate > 63) rate = 63;
 
     /* Shift determines how often the EG updates for this rate.
@@ -448,9 +495,13 @@ static int32_t synth_channel(ym_ch_t *ch)
 {
     ym_op_t *op = ch->op;
 
-    for (int i = 0; i < YM_OPERATORS; i++) {
+    for (int i = 0; i < YM_OPERATORS; i++)
         op[i].phase += op[i].freq_inc;
-        eg_step(&op[i]);
+
+    /* EG only updates when the /3 divider ticks (eg_div3 wraps to 0) */
+    if (ym.eg_div3 == 0) {
+        for (int i = 0; i < YM_OPERATORS; i++)
+            eg_step(&op[i], ch->keycode);
     }
 
     int32_t fb;
@@ -532,6 +583,26 @@ static void ym_tick(int32_t *left, int32_t *right)
         ym.eg_timer++;
     }
 
+    /* Timer A: counts down once per FM sample */
+    if (ym.timer_a_cnt > 0) {
+        ym.timer_a_cnt--;
+        if (ym.timer_a_cnt <= 0) {
+            if (ym.timer_a_enable)
+                ym.status |= 0x01;
+            ym.timer_a_cnt = 1024 - ym.timer_a;
+        }
+    }
+
+    /* Timer B: period pre-scaled by 16, also counts once per FM sample */
+    if (ym.timer_b_cnt > 0) {
+        ym.timer_b_cnt--;
+        if (ym.timer_b_cnt <= 0) {
+            if (ym.timer_b_enable)
+                ym.status |= 0x02;
+            ym.timer_b_cnt = (256 - ym.timer_b) << 4;
+        }
+    }
+
     int32_t l = 0, r = 0;
 
     for (int c = 0; c < YM_CHANNELS; c++) {
@@ -555,6 +626,7 @@ void ym2612_debug_frame(void)
     ym.dbg_frame++;
     (void)z80_debug_steps();
     ym.dbg_dac_writes = 0;
+    ym.dbg_ym_writes = 0;
 }
 
 void ym2612_run_samples(int32_t *buf, int count, int sample_rate)
