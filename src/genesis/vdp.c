@@ -532,6 +532,7 @@ static void render_sprites(uint32_t *row, int line, int pri)
     else
         sat_base = (uint16_t)(vdp.regs[5] & 0x7F) << 9;
 
+    uint8_t sprite_covered[320] = {0};
     int sprites_on_line = 0;
     int dot_overflow = 0;
     int idx = 0;
@@ -561,6 +562,13 @@ static void render_sprites(uint32_t *row, int line, int pri)
             uint16_t attr = (vdp.vram[(ea + 4) & 0xFFFF] << 8) |
                              vdp.vram[(ea + 5) & 0xFFFF];
             int spri = (attr >> 15) & 1;
+
+            int sx_raw = ((vdp.vram[(ea + 6) & 0xFFFF] << 8) |
+                           vdp.vram[(ea + 7) & 0xFFFF]) & 0x1FF;
+
+            if (sx_raw == 0)
+                break;
+
             if (spri != pri) goto next;
 
             int pal  = (attr >> 13) & 3;
@@ -568,9 +576,7 @@ static void render_sprites(uint32_t *row, int line, int pri)
             int hf   = (attr >> 11) & 1;
             int pat  = attr & 0x7FF;
 
-            int sx = ((vdp.vram[(ea + 6) & 0xFFFF] << 8) |
-                       vdp.vram[(ea + 7) & 0xFFFF]) & 0x1FF;
-            sx -= 128;
+            int sx = sx_raw - 128;
 
             int ty = vf ? (sprite_h - 1 - row_in_sprite) : row_in_sprite;
             int tile_row = ty >> 3;
@@ -582,6 +588,9 @@ static void render_sprites(uint32_t *row, int line, int pri)
                 if (scr_x < 0 || scr_x >= screen_w)
                     continue;
 
+                if (sprite_covered[scr_x])
+                    continue;
+
                 int tx_pixel = hf ? (sprite_w - 1 - px) : px;
                 int tile_col = tx_pixel >> 3;
                 int fx = tx_pixel & 7;
@@ -591,6 +600,7 @@ static void render_sprites(uint32_t *row, int line, int pri)
                 uint8_t pixel = pattern_pixel(tile_idx, fx, fy);
                 if (pixel == 0) continue;
 
+                sprite_covered[scr_x] = 1;
                 row[scr_x] = cram_to_argb(vdp.cram[pal * 16 + pixel]);
             }
 
