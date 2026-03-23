@@ -27,6 +27,15 @@ static void (*trace_jsr_fn)(uint32_t addr);
 static void (*trace_branch_to_fn)(uint32_t from_pc, uint32_t to_pc);
 static void (*int_ack_fn)(int level);
 
+/* Top-nibble dispatch table — mutable so higher-model ISA installers can patch
+ * entries at cpu_init() time without touching this file.  Populated in cpu_init(). */
+typedef int (*op_handler_fn)(uint16_t op);
+static op_handler_fn dispatch_top[16];
+
+/* Forward declarations for file-static dispatch helpers defined later in this file. */
+static int op_line1010(uint16_t op);
+static int dispatch_Fxxx(uint16_t op);
+
 void cpu_set_trace_jsr(void (*fn)(uint32_t addr))
 {
     trace_jsr_fn = fn;
@@ -54,13 +63,56 @@ void cpu_set_int_ack(void (*fn)(int level))
     int_ack_fn = fn;
 }
 
-void cpu_init(void)
+/* Derive the cpu_features_t bitfield from a cpu_model_t. */
+static cpu_features_t features_for_model(cpu_model_t model)
+{
+    cpu_features_t f = {0};
+    /* Each case falls through to accumulate all features up to that model. */
+    switch (model) {
+    case CPU_MODEL_68060:
+    case CPU_MODEL_68040: f.has_fpu          = 1; /* fall through */
+    case CPU_MODEL_68030:
+    case CPU_MODEL_68020: f.has_msp          = 1;
+                          f.has_trapcc       = 1;
+                          f.has_32bit_muldiv = 1;
+                          f.has_bitfield     = 1;
+                          f.has_32bit_addr   = 1;
+                          f.has_full_ea      = 1; /* fall through */
+    case CPU_MODEL_68010: f.has_movec        = 1;
+                          f.has_vbr          = 1; /* fall through */
+    case CPU_MODEL_68000: break;
+    }
+    return f;
+}
+
+void cpu_init(cpu_model_t model)
 {
     memset(&cpu, 0, sizeof(cpu));
+    cpu.model    = model;
+    cpu.features = features_for_model(model);
+    /* cpu.vbr is already 0 after memset — correct for all models at reset. */
     cpu_ipl = 0;
     trace_jsr_fn = NULL;
     trace_branch_to_fn = NULL;
     int_ack_fn = NULL;
+
+    /* Build the mutable top-level dispatch table (68000 baseline). */
+    dispatch_top[0x0] = dispatch_0xxx;
+    dispatch_top[0x1] = dispatch_move_b;
+    dispatch_top[0x2] = dispatch_move_l;
+    dispatch_top[0x3] = dispatch_move_w;
+    dispatch_top[0x4] = dispatch_4xxx;
+    dispatch_top[0x5] = dispatch_5xxx;
+    dispatch_top[0x6] = op_bcc;
+    dispatch_top[0x7] = op_moveq;
+    dispatch_top[0x8] = dispatch_8xxx;
+    dispatch_top[0x9] = dispatch_9xxx;
+    dispatch_top[0xA] = op_line1010;
+    dispatch_top[0xB] = dispatch_Bxxx;
+    dispatch_top[0xC] = dispatch_Cxxx;
+    dispatch_top[0xD] = dispatch_add;
+    dispatch_top[0xE] = dispatch_Exxx;
+    dispatch_top[0xF] = dispatch_Fxxx;
 }
 
 void cpu_reset(void)
@@ -250,7 +302,7 @@ static void push_addr_err_frame(uint32_t fault_addr, uint16_t ir,
     sp -= 2; mem_write16(sp, func_code);
     cpu.ssp = sp;
     cpu.a[7] = sp;
-    cpu.pc = mem_read32((unsigned)ADDR_ERR_VECTOR * 4);
+    cpu.pc = read_vector(ADDR_ERR_VECTOR);
 }
 
 /*
@@ -336,8 +388,8 @@ void cpu_take_exception(int vector_num, int cycles_before_fault)
     cpu.ssp = sp;
     cpu.a[7] = sp;
 
-    /* Load handler address from vector table */
-    cpu.pc = mem_read32((unsigned)vector_num * 4);
+    /* Load handler address from vector table (VBR-relative on 68010+) */
+    cpu.pc = read_vector(vector_num);
 
     /* Unwind to cpu_step and abort the current instruction */
 #if defined(__GNUC__) && defined(_WIN32)
@@ -393,8 +445,6 @@ static int op_line1111(uint16_t op)
     return 0;  /* unreachable */
 }
 
-typedef int (*op_handler_fn)(uint16_t op);
-
 /* Dispatch for 0xFxxx: 0xF0-F3 = ADD, 0xF4-FF = Line 1111. */
 static int dispatch_Fxxx(uint16_t op)
 {
@@ -403,25 +453,9 @@ static int dispatch_Fxxx(uint16_t op)
     return dispatch_add(op);
 }
 
-/* Top-nibble dispatch table. Index = op >> 12. */
-static const op_handler_fn dispatch_top[16] = {
-    [0x0] = dispatch_0xxx,
-    [0x1] = dispatch_move_b,
-    [0x3] = dispatch_move_w,
-    [0x2] = dispatch_move_l,
-    [0x4] = dispatch_4xxx,
-    [0x5] = dispatch_5xxx,
-    [0x6] = op_bcc,
-    [0x7] = op_moveq,
-    [0x8] = dispatch_8xxx,
-    [0x9] = dispatch_9xxx,
-    [0xA] = op_line1010,
-    [0xB] = dispatch_Bxxx,
-    [0xC] = dispatch_Cxxx,
-    [0xD] = dispatch_add,
-    [0xE] = dispatch_Exxx,
-    [0xF] = dispatch_Fxxx,
-};
+/* Top-nibble dispatch table — mutable so that higher-model ISA installers can
+ * patch in their handlers at cpu_init() time without touching this file. */
+static op_handler_fn dispatch_top[16];
 
 static int execute(uint16_t op)
 {
@@ -465,7 +499,7 @@ int cpu_step(void)
             cpu.ssp = sp;
             cpu.a[7] = sp;
 
-            cpu.pc = mem_read32((unsigned)vector * 4);
+            cpu.pc = read_vector(vector);
 
             if (int_ack_fn)
                 int_ack_fn(level);
@@ -503,7 +537,7 @@ int cpu_step(void)
         mem_write16(sp, saved_sr);
         cpu.a[7] = sp;
         cpu.ssp = sp;
-        cpu.pc = mem_read32(TRACE_VECTOR * 4);
+        cpu.pc = read_vector(TRACE_VECTOR);
         cycles += exception_cycles(TRACE_VECTOR);
     }
 

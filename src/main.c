@@ -142,7 +142,7 @@ static void sleep_sec(double sec)
 int main(int argc, char *argv[])
 {
     mem_init();
-    cpu_init();
+    cpu_init(CPU_MODEL_68000);
 
     const char *rom_or_test = NULL;
     int run_all = 0;

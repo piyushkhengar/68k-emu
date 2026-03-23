@@ -29,6 +29,14 @@ extern int cpu_write_bus_adj;
  * include pre-fault instruction cycles in the total exception time. */
 extern int pending_cycles;
 
+/* Read an exception vector from the vector table.  On the 68000 VBR is always
+ * 0, so this is identical to mem_read32(vec * 4).  On 68010+ software may
+ * have relocated the vector table via MOVEC VBR. */
+static inline uint32_t read_vector(int vec)
+{
+    return mem_read32(cpu.vbr + (uint32_t)vec * 4);
+}
+
 /* Fetch helpers - advance PC and return value */
 uint16_t fetch16(void);
 uint32_t fetch32(void);
