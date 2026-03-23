@@ -30,7 +30,7 @@ GENESIS_SRCS = src/genesis/bus.c src/genesis/vdp.c src/genesis/io.c \
 SRCS = $(CORE_SRCS) $(GENESIS_SRCS)
 OBJS = $(SRCS:.c=.o)
 
-.PHONY: all clean test mcl68-test genesis
+.PHONY: all clean test mcl68-test genesis processor-tests processor-tests-68010
 
 all: $(TARGET)
 
@@ -80,6 +80,24 @@ PROC_FILTER ?=
 processor-tests: $(TARGET)
 	@if [ -d "$(PROC_TESTS)" ]; then \
 		./$(TARGET) --processor-tests "$(PROC_TESTS)" $(if $(PROC_FILTER),$(PROC_FILTER),) || exit 1; \
+	else \
+		echo "ProcessorTests not found at $(PROC_TESTS)"; \
+		echo "Clone: git clone https://github.com/SingleStepTests/680x0 ProcessorTests"; \
+		exit 1; \
+	fi
+
+# ProcessorTests against 68010: runs the 68000 test corpus in 68010 mode.
+# ~975k/1M tests pass. The ~24k failures are all expected: TRAP, TRAPV, CHK, RTE, and
+# div-by-zero paths push/pop an 8-byte exception frame on 68010 vs 6 bytes on 68000.
+# No real 68010-specific test corpus exists yet (see README for details).
+processor-tests-68010: $(TARGET)
+	@if [ -d "$(PROC_TESTS)" ]; then \
+		./$(TARGET) --cpu 68010 --processor-tests "$(PROC_TESTS)" $(if $(PROC_FILTER),$(PROC_FILTER),); \
+		EXIT=$$?; \
+		echo ""; \
+		echo "Note: failures in TRAP/TRAPV/CHK/RTE/DIVU(div0) are expected --"; \
+		echo "  68010 uses an 8-byte exception frame; these tests were captured on 68000 hardware."; \
+		exit $$EXIT; \
 	else \
 		echo "ProcessorTests not found at $(PROC_TESTS)"; \
 		echo "Clone: git clone https://github.com/SingleStepTests/680x0 ProcessorTests"; \
