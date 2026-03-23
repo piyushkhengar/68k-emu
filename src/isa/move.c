@@ -6,7 +6,7 @@
 /*
  * MOVE encoding: dest EA in bits 11-6 (mode 9-11, reg 6-8), source EA in bits 5-0 (mode 3-5, reg 0-2).
  * Generic MOVE: fetch from source EA, store to dest EA.
- * Exception: MOVE.L #imm, d(An) has dest extension word (displacement) before source (immediate).
+ * Extension words are always source-before-destination per 68000 spec.
  */
 
 static int op_move_generic(uint16_t op, int size)
@@ -36,32 +36,6 @@ static int op_move_generic(uint16_t op, int size)
     return move_cycles(src_mode, src_reg, dst_mode, dst_reg, size);
 }
 
-/* MOVE.L #imm, d(An): dest displacement comes before source immediate in extension words. */
-static int op_move_l_imm_disp_an(uint16_t op)
-{
-    int addr_reg = ea_reg_from_op_dest(op);
-    int32_t disp = (int16_t)fetch16();
-    uint32_t addr = cpu.a[addr_reg] + disp;
-    uint32_t val = fetch32();
-    mem_write32(addr, val);
-    set_nz_from_val(val, 4);
-    return move_cycles(7, 4, 5, addr_reg, 4);  /* #imm to d(An) */
-}
-
-/*
- * Valid EA combinations (whitelist for reference).
- * Source: Dn (0), (An) (2), (An)+ (3), -(An) (4), d(An) (5), #imm (7,4).
- * Dest:   Dn (0), (An) (2), (An)+ (3), -(An) (4), d(An) (5).
- * MOVE.L #imm,d(An) is special-cased: dest ext word (disp) comes before source (imm).
- */
-
-/* MOVE.L #imm, d(An): source EA 0x3C (#imm), dest EA mode 5 (d(An)) in bits 8-6. */
-static int is_move_l_imm_to_disp_an(uint16_t op)
-{
-    (void)op;
-    return 0;
-}
-
 int dispatch_move_b(uint16_t op)
 {
     return op_move_generic(op, 1);
@@ -74,7 +48,5 @@ int dispatch_move_w(uint16_t op)
 
 int dispatch_move_l(uint16_t op)
 {
-    if (is_move_l_imm_to_disp_an(op))
-        return op_move_l_imm_disp_an(op);
     return op_move_generic(op, 4);
 }

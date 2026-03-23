@@ -124,15 +124,12 @@ static int32_t psg_tick(void)
     if (psg.noise_counter <= 0) {
         psg.noise_counter = noise_freq_from_ctrl();
         if (!psg.noise_counter) psg.noise_counter = 1;
-        psg.noise_polarity = -psg.noise_polarity;
-        if (psg.noise_polarity > 0) {
-            int tap;
-            if (psg.noise_ctrl & 0x04)
-                tap = (psg.noise_shift & 1) ^ ((psg.noise_shift >> 3) & 1);
-            else
-                tap = psg.noise_shift & 1;
-            psg.noise_shift = (psg.noise_shift >> 1) | (tap << 15);
-        }
+        int tap;
+        if (psg.noise_ctrl & 0x04)
+            tap = (psg.noise_shift & 1) ^ ((psg.noise_shift >> 3) & 1);
+        else
+            tap = psg.noise_shift & 1;
+        psg.noise_shift = (psg.noise_shift >> 1) | (tap << 15);
     }
     out += vol_table[psg.volume[3]] * ((psg.noise_shift & 1) ? 1 : -1);
 

@@ -502,6 +502,7 @@ int cpu_step(void)
         mem_write32(sp + 2, cpu.pc);
         mem_write16(sp, saved_sr);
         cpu.a[7] = sp;
+        cpu.ssp = sp;
         cpu.pc = mem_read32(TRACE_VECTOR * 4);
         cycles += exception_cycles(TRACE_VECTOR);
     }

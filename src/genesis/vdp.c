@@ -90,9 +90,9 @@ static void prefetch(void)
 
 static void dma_68k_to_vdp(void)
 {
-    uint16_t len = vdp.regs[19] | ((uint16_t)vdp.regs[20] << 8);
+    uint32_t len = vdp.regs[19] | ((uint32_t)vdp.regs[20] << 8);
     if (len == 0)
-        len = 0xFFFF;
+        len = 65536;
 
     uint32_t src = ((uint32_t)vdp.regs[21]            |
                     ((uint32_t)vdp.regs[22] << 8)      |
@@ -135,9 +135,9 @@ static void dma_68k_to_vdp(void)
  */
 static void dma_vram_fill(uint16_t val)
 {
-    uint16_t len = vdp.regs[19] | ((uint16_t)vdp.regs[20] << 8);
+    uint32_t len = vdp.regs[19] | ((uint32_t)vdp.regs[20] << 8);
     if (len == 0)
-        len = 0xFFFF;
+        len = 65536;
 
     uint8_t fill = val >> 8;
 
@@ -156,9 +156,9 @@ static void dma_vram_fill(uint16_t val)
 
 static void dma_vram_copy(void)
 {
-    uint16_t len = vdp.regs[19] | ((uint16_t)vdp.regs[20] << 8);
+    uint32_t len = vdp.regs[19] | ((uint32_t)vdp.regs[20] << 8);
     if (len == 0)
-        len = 0xFFFF;
+        len = 65536;
 
     uint16_t src = vdp.regs[21] | ((uint16_t)vdp.regs[22] << 8);
 
@@ -678,7 +678,12 @@ void vdp_run_scanline(int line)
         vdp.status |= ST_VBLANK | ST_VINT;
         vdp.hint_counter = vdp.regs[10];
     } else {
-        vdp.hint_counter = vdp.regs[10];
+        /* Vblank lines: HINT counter continues to count down (same as active lines). */
+        vdp.hint_counter--;
+        if (vdp.hint_counter < 0) {
+            vdp.hint_counter = vdp.regs[10];
+            vdp.hint_pending = 1;
+        }
     }
 
     vdp_update_ipl();

@@ -68,7 +68,7 @@ static void build_tables(void)
         }
     }
     for (int i = 0; i < 256; i++) {
-        double p = pow(2.0, 1.0 - i / 256.0) * 4096.0;
+        double p = pow(2.0, -i / 256.0) * 4096.0;
         pow_table[i] = (uint16_t)(p + 0.5);
     }
 }
