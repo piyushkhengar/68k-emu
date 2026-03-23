@@ -8,6 +8,7 @@
 #include "cpu_internal.h"
 #include "memory.h"
 #include "genesis/genesis_tests.h"
+#include "tests_68010.h"
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -1764,6 +1765,10 @@ int run_all_tests(double speed_mhz)
 
     int timing_fails = run_timing_tests();
     if (timing_fails)
+        failed = 1;
+
+    int fails_68010 = run_68010_tests();
+    if (fails_68010)
         failed = 1;
 
     if (failed)

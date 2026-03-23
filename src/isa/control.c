@@ -124,6 +124,76 @@ static int op_rts(uint16_t op)
     return CYCLES_RTS;
 }
 
+/* MOVEC: move to/from control register. 68010+. Privileged.
+ * 0x4E7A = MOVEC Rc, Rn  (control register -> general register)
+ * 0x4E7B = MOVEC Rn, Rc  (general register -> control register)
+ * Extension word: bit15=D/A (0=Dn,1=An), bits14-12=register, bits11-0=control reg. */
+static int op_movec(uint16_t op)
+{
+    if (!cpu.features.has_movec)
+        return op_unimplemented(op);
+    if (!require_supervisor())
+        return 0;
+    uint16_t ext = fetch16();
+    int da  = (ext >> 15) & 1;
+    int reg = (ext >> 12) & 7;
+    int cr  = ext & 0xFFF;
+
+    if (op & 1) {
+        /* MOVEC Rn, Rc (0x4E7B): general -> control */
+        uint32_t val = da ? cpu.a[reg] : cpu.d[reg];
+        switch (cr) {
+        case 0x000: cpu.sfc = val & 7; break;
+        case 0x001: cpu.dfc = val & 7; break;
+        case 0x800: cpu.usp = val;     break;
+        case 0x801: cpu.vbr = val;     break;
+        default: return op_unimplemented(op);
+        }
+        return 10;
+    } else {
+        /* MOVEC Rc, Rn (0x4E7A): control -> general */
+        uint32_t val;
+        switch (cr) {
+        case 0x000: val = cpu.sfc; break;
+        case 0x001: val = cpu.dfc; break;
+        case 0x800: val = cpu.usp; break;
+        case 0x801: val = cpu.vbr; break;
+        default: return op_unimplemented(op);
+        }
+        if (da) { cpu.a[reg] = val; if (reg == 7) sync_a7_to_sp(); }
+        else      cpu.d[reg] = val;
+        return 12;
+    }
+}
+
+/* RTD #disp: return and deallocate. 68010+.
+ * PC = [SSP]; SSP += 4 + sign_extend(disp). */
+static int op_rtd(uint16_t op)
+{
+    if (!cpu.features.has_movec)
+        return op_unimplemented(op);
+    int32_t disp = (int32_t)(int16_t)fetch16();
+    uint32_t sp = cpu.ssp;
+    pending_cycles += 8;
+    cpu.pc = mem_read32(sp);
+    cpu.ssp = sp + 4 + disp;
+    cpu.a[7] = cpu.ssp;
+    if (cpu.pc & 1)
+        cpu_take_addr_err(cpu.pc, op);
+    return 16;
+}
+
+/* BKPT #n (0x4848-0x484F): breakpoint. 68010+.
+ * Performs a breakpoint acknowledge bus cycle; in emulation, takes the
+ * illegal instruction exception (vector 4). */
+static int op_bkpt(uint16_t op)
+{
+    (void)op;
+    cpu.pc -= 2;
+    cpu_take_exception(ILLEGAL_VECTOR, 4);
+    return 0;  /* unreachable */
+}
+
 #define CYCLES_RTE  20
 
 /* TRAP #n: software interrupt. 0x4E40-0x4E4F. Vector 32+n. Total = 34 cycles. */
@@ -135,19 +205,44 @@ static int op_trap(uint16_t op)
 }
 
 /* RTE: return from exception. 0x4E73. Supervisor only.
- * 68000: only implemented SR bits are restored. High byte: mask 0xA7 (T1,S,I2,I1,I0);
- * low byte (CCR): mask 0x1F (X,N,Z,V,C). Unimplemented bits read as 0. */
+ * 68000: pops SR (2 bytes) then PC (4 bytes) — 6-byte frame.
+ * 68010+: pops format/vector word, PC, then SR — 8-byte format-0 frame.
+ * SR mask: high byte 0xA7 (T1,S,I2,I1,I0), low byte 0x1F (X,N,Z,V,C). */
 static int op_rte(uint16_t op)
 {
     if (!require_supervisor())
         return 0;
     uint32_t sp = cpu.ssp;
-    pending_cycles += 8;
-    uint16_t sr = mem_read16(sp);
-    pending_cycles += 4;
+    uint16_t sr;
+
+    if (cpu.features.has_vbr) {
+        /* 68010+ format-0 frame: format/vector word + PC + SR (8 bytes). */
+        pending_cycles += 4;
+        uint16_t fmt_word = mem_read16(sp);
+        sp += 2;
+        if ((fmt_word >> 12) != 0) {
+            /* Unsupported frame format — take format error (vector 14). */
+            cpu.ssp = sp - 2;
+            cpu_take_exception(14, 0);
+            return 0;
+        }
+        pending_cycles += 8;
+        cpu.pc = mem_read32(sp);
+        sp += 4;
+        pending_cycles += 4;
+        sr = mem_read16(sp);
+        sp += 2;
+    } else {
+        /* 68000 frame: SR + PC (6 bytes). */
+        pending_cycles += 8;
+        sr = mem_read16(sp);
+        pending_cycles += 4;
+        cpu.pc = mem_read32(sp + 2);
+        sp += 6;
+    }
+
     cpu.sr = ((sr >> 8) & 0xA7) << 8 | (sr & 0x1F);
-    cpu.pc = mem_read32(sp + 2);
-    cpu.ssp = sp + 6;
+    cpu.ssp = sp;
     cpu.a[7] = (cpu.sr & 0x2000) ? cpu.ssp : cpu.usp;
     if (cpu.pc & 1)
         cpu_take_addr_err(cpu.pc, op);
@@ -357,9 +452,12 @@ static int op_negx(uint16_t op)
     return ((d.size == 4) ? 12 : 8) + ea_cycles(d.ea_mode, d.ea_reg, d.size);
 }
 
-/* MOVE.W SR, <ea>. 0x40C0-0x43FF. Dest EA in bits 5-0. Data alterable only. Unprivileged on 68000. */
+/* MOVE.W SR, <ea>. 0x40C0-0x43FF. Dest EA in bits 5-0. Data alterable only.
+ * Unprivileged on 68000; privileged on 68010+. */
 static int op_move_from_sr(uint16_t op)
 {
+    if (cpu.features.has_vbr && !require_supervisor())
+        return 0;
     int ea_mode = ea_mode_from_op(op);
     int ea_reg = ea_reg_from_op(op);
     /* Data alterable: Dn, (An), (An)+, -(An), d(An), (d8,An,Xn), abs.w, abs.l. Reject An, #imm, d(PC), (d8,PC,Xn). */
@@ -504,6 +602,8 @@ int dispatch_4xxx(uint16_t op)
     if (op == 0x4E73) return op_rte(op);
     if (op == 0x4E77) return op_rtr(op);
     if (op == 0x4E75) return op_rts(op);
+    if (op == 0x4E74) return op_rtd(op);        /* RTD (68010+) */
+    if (op == 0x4E7A || op == 0x4E7B) return op_movec(op);  /* MOVEC (68010+) */
     if (op == 0x4E71) return op_nop(op);
     if ((op & 0xFFC0) == 0x44C0 || (op & 0xFFC0) == 0x42C0) return op_move_ccr(op);  /* MOVE to CCR: 0x44C0 (ProcessorTests), 0x42C0 (Motorola) */
     if ((op & 0xFF00) == 0x4400) return op_neg(op);   /* NEG 0x4400-0x44BF */
@@ -516,7 +616,8 @@ int dispatch_4xxx(uint16_t op)
     if (((op & 0xFFC0) == 0x4C80 || (op & 0xFFC0) == 0x4CC0) && movem_load_ea_valid((op >> 3) & 7, op & 7))
         return op_movem_load(op);   /* MOVEM.w 0x4C80-0x4CBF, MOVEM.l 0x4CC0-0x4CFF */
     if ((op & 0xFF80) == 0x4880) return op_ext(op);
-    if ((op & 0xFFF8) == 0x4840) return op_swap(op);   /* SWAP before PEA: 0x4840-0x4847 */
+    if ((op & 0xFFF8) == 0x4840) return op_swap(op);   /* SWAP: 0x4840-0x4847 */
+    if ((op & 0xFFF8) == 0x4848 && cpu.features.has_vbr) return op_bkpt(op); /* BKPT #n (68010+) */
     if ((op & 0xFFC0) == 0x4840) return op_pea(op);    /* PEA: 0x4848-0x487F */
     if ((op & 0xFFC0) == 0x4800) return op_nbcd(op);
     if (op == 0x4AFC) return op_illegal(op);  /* ILLEGAL: explicit vector 4 */

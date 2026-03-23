@@ -130,6 +130,8 @@ void cpu_reset(void)
     cpu.sr = 0x2700;           /* Supervisor mode, interrupts disabled */
     cpu.halted = 0;
     cpu.cycles = 0;
+    /* 68010+: VBR resets to 0 on hardware reset. */
+    cpu.vbr = 0;
 }
 
 /*
@@ -276,6 +278,35 @@ void set_nzvc_sub_sized(uint32_t result, uint32_t dest_val, uint32_t source_val,
 }
 
 /*
+ * Push the standard exception stack frame and update SSP/A7.
+ *
+ * 68000: 6-byte frame — stack layout after push (low addr = SSP):
+ *   [SSP+0] SR (2 bytes)
+ *   [SSP+2] PC (4 bytes)
+ *
+ * 68010+ format-0 (short) frame: 8 bytes — stack layout after push:
+ *   [SSP+0] format/vector word  (bits 15-12 = 0, bits 11-0 = vector*4)
+ *   [SSP+2] PC (4 bytes)
+ *   [SSP+6] SR (2 bytes)
+ */
+static void push_exc_frame(uint32_t pc, uint16_t saved_sr, int vector_num)
+{
+    uint32_t sp = cpu.ssp;
+    if (cpu.features.has_vbr) {
+        /* 68010+: push SR first (high address), then PC, then format word (low address). */
+        sp -= 2; mem_write16(sp, saved_sr);
+        sp -= 4; mem_write32(sp, pc);
+        sp -= 2; mem_write16(sp, (uint16_t)(vector_num * 4));  /* format=0 */
+    } else {
+        /* 68000: push PC, then SR. */
+        sp -= 4; mem_write32(sp, pc);
+        sp -= 2; mem_write16(sp, saved_sr);
+    }
+    cpu.ssp = sp;
+    cpu.a[7] = sp;
+}
+
+/*
  * Push 14-byte address error exception frame and vector.
  * fault_addr: the odd address (full 32-bit).
  * ir:         opcode word of the faulting instruction.
@@ -374,21 +405,13 @@ void cpu_take_exception(int vector_num, int cycles_before_fault)
     if (!(saved_sr & 0x2000))
         cpu.usp = cpu.a[7];
 
-    /* Switch to supervisor mode (S bit) */
-    cpu.sr |= 0x2000;
+    /* Switch to supervisor mode (S=1) and clear trace (T=0). */
+    cpu.sr = (cpu.sr | 0x2000) & ~0x8000;
 
     exception_cycles_result = cycles_before_fault + exception_cycles(vector_num);
 
-    /* Push PC (4 bytes), then SR (2 bytes) to SSP. Stack grows downward. */
-    uint32_t sp = cpu.ssp;
-    sp -= 4;
-    mem_write32(sp, cpu.pc);
-    sp -= 2;
-    mem_write16(sp, saved_sr);
-    cpu.ssp = sp;
-    cpu.a[7] = sp;
-
-    /* Load handler address from vector table (VBR-relative on 68010+) */
+    /* Push exception frame and load handler from vector table. */
+    push_exc_frame(cpu.pc, saved_sr, vector_num);
     cpu.pc = read_vector(vector_num);
 
     /* Unwind to cpu_step and abort the current instruction */
@@ -487,18 +510,9 @@ int cpu_step(void)
             if (!(saved_sr & 0x2000))
                 cpu.usp = cpu.a[7];
 
-            cpu.sr |= 0x2000;
-            cpu.sr &= ~0x8000;
+            cpu.sr = (cpu.sr | 0x2000) & ~0x8000;
             cpu.sr = (cpu.sr & ~0x0700) | (level << 8);
-
-            uint32_t sp = cpu.ssp;
-            sp -= 4;
-            mem_write32(sp, cpu.pc);
-            sp -= 2;
-            mem_write16(sp, saved_sr);
-            cpu.ssp = sp;
-            cpu.a[7] = sp;
-
+            push_exc_frame(cpu.pc, saved_sr, vector);
             cpu.pc = read_vector(vector);
 
             if (int_ack_fn)
@@ -527,16 +541,10 @@ int cpu_step(void)
 
     if (was_trace && !cpu.halted) {
         uint16_t saved_sr = cpu.sr;
-        if (!(saved_sr & 0x2000)) {
+        if (!(saved_sr & 0x2000))
             cpu.usp = cpu.a[7];
-            cpu.a[7] = cpu.ssp;
-        }
         cpu.sr = (saved_sr | 0x2000) & ~0x8000;
-        uint32_t sp = cpu.a[7] - 6;
-        mem_write32(sp + 2, cpu.pc);
-        mem_write16(sp, saved_sr);
-        cpu.a[7] = sp;
-        cpu.ssp = sp;
+        push_exc_frame(cpu.pc, saved_sr, TRACE_VECTOR);
         cpu.pc = read_vector(TRACE_VECTOR);
         cycles += exception_cycles(TRACE_VECTOR);
     }
