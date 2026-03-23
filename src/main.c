@@ -9,6 +9,11 @@
  * System emulation:
  *   ./68k-emu --system genesis rom.bin
  *   ./68k-emu --system genesis --headless rom.bin
+ *
+ * CPU model selection (default: 68000):
+ *   ./68k-emu --cpu 68000 --system genesis rom.bin
+ *   ./68k-emu --cpu 68010 --system genesis rom.bin
+ *   (68010/020/030/040/060 not yet implemented — flag accepted for future use)
  */
 
 #include "cpu.h"
@@ -44,11 +49,24 @@ static void print_cpu_state(void)
            cpu.d[0], cpu.d[1], cpu.d[2], cpu.a[7], cpu.sr);
 }
 
+static cpu_model_t parse_cpu_model(const char *name)
+{
+    if (strcmp(name, "68000") == 0) return CPU_MODEL_68000;
+    if (strcmp(name, "68010") == 0) return CPU_MODEL_68010;
+    if (strcmp(name, "68020") == 0) return CPU_MODEL_68020;
+    if (strcmp(name, "68030") == 0) return CPU_MODEL_68030;
+    if (strcmp(name, "68040") == 0) return CPU_MODEL_68040;
+    if (strcmp(name, "68060") == 0) return CPU_MODEL_68060;
+    fprintf(stderr, "Unknown CPU model '%s'; defaulting to 68000\n", name);
+    return CPU_MODEL_68000;
+}
+
 /* Parse argv; returns speed_mhz (0 = unlimited). */
 static double parse_args(int argc, char *argv[], const char **rom_or_test, int *run_all,
                          const char **processor_tests, const char **processor_tests_filter,
                          int *max_steps_out, int *debug,
-                         const char **system_name, int *headless)
+                         const char **system_name, int *headless,
+                         cpu_model_t *cpu_model)
 {
     double speed_mhz = 0;
     *rom_or_test = NULL;
@@ -59,9 +77,13 @@ static double parse_args(int argc, char *argv[], const char **rom_or_test, int *
     *debug = 0;
     *system_name = NULL;
     *headless = 0;
+    *cpu_model = CPU_MODEL_68000;
 
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--system") == 0) {
+        if (strcmp(argv[i], "--cpu") == 0) {
+            if (i + 1 < argc)
+                *cpu_model = parse_cpu_model(argv[++i]);
+        } else if (strcmp(argv[i], "--system") == 0) {
             if (i + 1 < argc) {
                 *system_name = argv[++i];
             }
@@ -142,7 +164,6 @@ static void sleep_sec(double sec)
 int main(int argc, char *argv[])
 {
     mem_init();
-    cpu_init(CPU_MODEL_68000);
 
     const char *rom_or_test = NULL;
     int run_all = 0;
@@ -152,10 +173,14 @@ int main(int argc, char *argv[])
     int debug = 0;
     const char *system_name = NULL;
     int headless = 0;
+    cpu_model_t cpu_model = CPU_MODEL_68000;
     double speed_mhz = parse_args(argc, argv, &rom_or_test, &run_all,
                                   &processor_tests, &processor_tests_filter,
                                   &max_steps_arg, &debug,
-                                  &system_name, &headless);
+                                  &system_name, &headless,
+                                  &cpu_model);
+
+    cpu_init(cpu_model);
 
     if (processor_tests) {
         return run_processor_tests(processor_tests, processor_tests_filter);
