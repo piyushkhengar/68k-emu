@@ -22,21 +22,66 @@ static void mem_write_sized(uint32_t addr, int size, uint32_t value)
     else mem_write32(addr, value);
 }
 
-/* 68K brief extension word for (d8,An,Xn). Per Musashi/M68000:
- * Bits 15-12: D/A (bit 15) + register (14-12). Bits 11-9: W/L (11) + scale (10-9).
- * Bit 8: 0 (brief). Bits 7-0: 8-bit displacement (sign-extended). */
+/* Decode indexed addressing mode extension word.
+ *
+ * Both extension word formats share the same upper byte layout:
+ *   [15]    D/A       — 0 = data register, 1 = address register
+ *   [14-12] Xn        — index register number (0-7)
+ *   [11]    W/L       — 0 = sign-extend Xn as 16-bit word, 1 = use full 32-bit long
+ *   [10-9]  SCALE     — shift index left by this many bits (×1/×2/×4/×8)
+ *   [8]     EXT TYPE  — 0 = brief extension word, 1 = full extension word (68020+)
+ *
+ * Brief extension word (bit 8 = 0, all models):
+ *   [7-0]   8-bit signed displacement added directly to the address.
+ *   Scale bits are always 0 on 68000/68010, so the shift is a no-op there.
+ *
+ * Full extension word (bit 8 = 1, 68020+ only, guarded by has_full_ea):
+ *   [7]     BS — base suppress: if set, ignore the An/PC base and use 0 instead
+ *   [6]     IS — index suppress: if set, ignore the Xn index and use 0 instead
+ *   [5-4]   BD — base displacement size: 01=none, 10=fetch signed word, 11=fetch signed long
+ *   [2]     I/IS — memory indirect flag (not yet implemented; falls through to op_unimplemented)
+ *   [1-0]   OD — outer displacement size: 00=none (direct), else memory-indirect
+ */
 static uint32_t decode_indexed_addr(uint32_t base)
 {
     uint16_t ext = fetch16();
-    int32_t disp = (int8_t)(ext & 0xFF);
-    int idx_reg = (ext >> 12) & 7;
+
+    /* Common upper-byte fields shared by both extension word types. */
+    int idx_reg     = (ext >> 12) & 7;
     int idx_is_addr = (ext >> 15) & 1;
-    int idx_long = (ext >> 11) & 1;
+    int idx_long    = (ext >> 11) & 1;
+    int scale       = (ext >> 9) & 3;   /* always 0 on 68000/010 — shift is a no-op */
+
     uint32_t idx_val = idx_is_addr ? cpu.a[idx_reg] : cpu.d[idx_reg];
     if (!idx_long)
-        idx_val = (uint32_t)(int32_t)(int16_t)(idx_val & 0xFFFF);
-    /* 68000: full 32-bit address calculation; 24-bit mask for memory access is in mem_* */
-    return base + disp + idx_val;
+        idx_val = (uint32_t)(int32_t)(int16_t)(idx_val & 0xFFFF);  /* sign-extend 16→32 */
+
+    if ((ext & 0x0100) && cpu.features.has_full_ea) {
+        /* ---- Full extension word (68020+) ---- */
+        int bs    = (ext >> 7) & 1;  /* base suppress */
+        int is_   = (ext >> 6) & 1;  /* index suppress */
+        int bd_sz = (ext >> 4) & 3;  /* base displacement size field */
+        int od_sz =  ext       & 3;  /* outer displacement size field */
+
+        /* Fetch base displacement: none(01), signed word(10), or signed long(11). */
+        int32_t bd = 0;
+        if (bd_sz == 2) bd = (int32_t)(int16_t)fetch16();
+        else if (bd_sz == 3) bd = (int32_t)fetch32();
+
+        /* Memory-indirect modes (OD != 0) require an extra memory read.
+         * Not implemented yet — fall through to the illegal-instruction handler. */
+        if (od_sz != 0)
+            return (uint32_t)op_unimplemented(cpu.ir);
+
+        uint32_t b = bs ? 0 : base;               /* suppress or keep base */
+        uint32_t i = is_ ? 0 : (idx_val << scale); /* suppress or scale index */
+        return b + (uint32_t)bd + i;
+    }
+
+    /* ---- Brief extension word (all models) ---- */
+    int32_t disp = (int8_t)(ext & 0xFF);  /* 8-bit signed displacement */
+    idx_val <<= scale;                     /* scale is 0 on 68000/010, so no change there */
+    return base + (uint32_t)disp + idx_val;
 }
 
 /* Returns 1 if addr was resolved (memory EA), 0 otherwise. */
