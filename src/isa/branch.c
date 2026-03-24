@@ -31,30 +31,47 @@ int branch_condition_met(uint8_t cond)
     }
 }
 
-/* Bcc: branch on condition. 0x6xxx, cond in bits 11-8. 8-bit disp in low byte; if 0, fetch 16-bit. BSR pushes return addr.
- * Base PC for displacement: 8-bit = addr of opcode+2 (PC on entry); 16-bit = addr of extension word (PC before fetch16).
- * After fetch16() for 16-bit, PC points past extension; target = (PC-2) + disp. */
+/* Bcc / BSR: branch on condition (0x6xxx).  cond in bits 11-8.
+ *
+ * Three displacement encodings share the same opcode:
+ *   low byte != 0 and != 0xFF  — 8-bit signed displacement in the low byte
+ *   low byte == 0              — fetch a 16-bit signed displacement word
+ *   low byte == 0xFF           — 68020+ only: fetch a 32-bit signed displacement long
+ *
+ * In all cases the displacement is measured from opcode_addr + 2.  After we
+ * fetch the extra word(s) the PC has advanced further, so we subtract:
+ *   adj = 0  for 8-bit  (PC is already at opcode+2, nothing extra fetched)
+ *   adj = 2  for 16-bit (PC advanced 2 bytes past the displacement word)
+ *   adj = 4  for 32-bit (PC advanced 4 bytes past the displacement long)
+ *
+ * On 68000/68010, low byte 0xFF is treated as a signed -1 displacement, which
+ * lands on an odd address and triggers an address error — same as before. */
 int op_bcc(uint16_t op)
 {
     uint8_t cond = (op >> 8) & 0x0F;
     int32_t disp;
-    int is_16bit = 0;
+    int adj = 0;
 
-    if ((op & 0xFF) != 0) {
+    if ((op & 0xFF) == 0xFF && cpu.features.has_full_ea) {
+        /* 68020+ 32-bit displacement */
+        disp = (int32_t)fetch32();
+        adj  = 4;
+    } else if ((op & 0xFF) != 0) {
+        /* 8-bit displacement */
         disp = (int8_t)(op & 0xFF);
     } else {
+        /* 16-bit displacement */
         disp = (int16_t)fetch16();
-        is_16bit = 1;
+        adj  = 2;
     }
 
     if (cond == 0x1) {
-        /* BSR: push return address, then prefetch at target.
-         * 68000 sequence: push(8 bus) + idle(2) + prefetch(4). */
+        /* BSR: push return address, then jump. */
         uint32_t sp = cpu_sp() - 4;
         mem_write32(sp, cpu.pc);
         cpu_sp_set(sp);
         pending_cycles += 10;
-        cpu.pc += disp - (is_16bit ? 2 : 0);
+        cpu.pc += disp - adj;
         if (cpu.pc & 1)
             cpu_take_addr_err(cpu.pc, op);
         return CYCLES_BSR;
@@ -63,13 +80,13 @@ int op_bcc(uint16_t op)
         int taken = branch_condition_met(cond);
         if (taken) {
             uint32_t from = cpu.pc;
-            cpu.pc += disp - (is_16bit ? 2 : 0);
+            cpu.pc += disp - adj;
             cpu_trace_branch_to(from, cpu.pc);
             if (cpu.pc & 1) {
                 pending_cycles += 2;
                 cpu_take_addr_err(cpu.pc, op);
             }
         }
-        return taken ? CYCLES_BCC_TAKEN : (is_16bit ? 12 : CYCLES_BCC_NOT);
+        return taken ? CYCLES_BCC_TAKEN : (adj == 2 ? 12 : CYCLES_BCC_NOT);
     }
 }

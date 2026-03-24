@@ -148,6 +148,44 @@ static const uint8_t rom_full_ext[] = {
     0xCA, 0xFE, 0xBA, 0xBE,
 };
 
+/*
+ * Test 4: BRA.L — 32-bit branch displacement
+ *
+ * On 68020+, when the low byte of a Bcc/BRA/BSR opcode is 0xFF, the next
+ * four bytes are a signed 32-bit displacement rather than an 8-bit -1.
+ * This allows branches to any address in the 32-bit address space.
+ *
+ * Layout:
+ *   0x10: BRA.L  disp=0x0E  → target = (0x10+2) + 0x0E = 0x20
+ *   0x16: MOVEQ #0xFF, D0   ← must NOT be reached (branch skips over it)
+ *   0x18: BRA.S .           ← also not reached
+ *   0x1A-0x1F: padding
+ *   0x20: MOVEQ #1, D0      ← branch lands here
+ *   0x22: BRA.S .           ← halt
+ *
+ * Opcode 0x60FF = BRA with low byte 0xFF (the 32-bit displacement marker).
+ * Followed by 32-bit displacement 0x0000000E (14 decimal).
+ *
+ * Expected: D0 = 1  (proves the branch was taken to 0x20, not fallen through)
+ */
+static const uint8_t rom_bra_l[] = {
+    0x00, 0x00, 0x10, 0x00,   /* SP = 0x1000 */
+    0x00, 0x00, 0x00, 0x10,   /* PC = 0x0010 */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  /* padding */
+    /* 0x10: BRA.L  — opcode 0x60FF, then 32-bit displacement */
+    0x60, 0xFF, 0x00, 0x00, 0x00, 0x0E,
+    /* 0x16: MOVEQ #0xFF, D0  — NOT reached if branch was taken */
+    0x70, 0xFF,
+    /* 0x18: BRA.S .          — NOT reached */
+    0x60, 0xFE,
+    /* 0x1A-0x1F: padding */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    /* 0x20: MOVEQ #1, D0     — branch should land here */
+    0x70, 0x01,
+    /* 0x22: BRA.S .          — halt */
+    0x60, 0xFE,
+};
+
 /* ------------------------------------------------------------------ */
 /* Test table                                                          */
 /* ------------------------------------------------------------------ */
@@ -164,6 +202,7 @@ static const test68020_t tests[] = {
     { "brief_scale",      rom_brief_scale,      sizeof(rom_brief_scale),      "Brief ext: long index × 4",            10 },
     { "brief_word_scale", rom_brief_word_scale, sizeof(rom_brief_word_scale), "Brief ext: word index × 2 + disp8",    10 },
     { "full_ext_bd16",    rom_full_ext,         sizeof(rom_full_ext),         "Full ext: word base displacement",      10 },
+    { "bra_l",            rom_bra_l,            sizeof(rom_bra_l),            "BRA.L 32-bit displacement",             5  },
 };
 
 #define NUM_TESTS (sizeof(tests) / sizeof(tests[0]))
@@ -178,6 +217,7 @@ static int check_result(size_t idx)
     case 0: return cpu.a[2] == 0x1014;          /* A2 = 0x1000 + (5<<2) + 0 */
     case 1: return cpu.a[1] == 0x1018;          /* A1 = 0x1000 + (4<<1) + 0x10 */
     case 2: return cpu.d[1] == 0xCAFEBABE;      /* D1 = value at [A0 + D0 + BD] */
+    case 3: return cpu.d[0] == 1;               /* D0 = 1: landed at 0x20, not 0x16 */
     default: return 0;
     }
 }
