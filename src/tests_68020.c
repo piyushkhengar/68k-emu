@@ -295,6 +295,106 @@ static const uint8_t rom_divu_l[] = {
     0x60, 0xFE,
 };
 
+/*
+ * Test 8: BFEXTU — zero-extract a bitfield from a data register
+ *
+ *   MOVE.L  #0x12345678, D0     ; source register
+ *   BFEXTU  D0{4:8}, D1        ; extract 8 bits starting at offset 4 into D1
+ *   BRA.S   .
+ *
+ * D0 = 0x12345678 = 0001_0010_0011_0100_0101_0110_0111_1000
+ *                   ^--- offset 0 (MSB)
+ * Bits at offset 4-11 (MSB-first):
+ *   offset 4 = register bit 27 = 0
+ *   offset 5 = register bit 26 = 0
+ *   offset 6 = register bit 25 = 1
+ *   offset 7 = register bit 24 = 0
+ *   offset 8 = register bit 23 = 0
+ *   offset 9 = register bit 22 = 0
+ *   offset10 = register bit 21 = 1
+ *   offset11 = register bit 20 = 1
+ *   = 0b0010_0011 = 0x23
+ *
+ * Opcode: 0xE9C0 (BFEXTU, EA=D0 mode=0 reg=0)
+ * Extension word: Dn=D1 (001), DO=0, offset=4 (00100→bit8=1), DW=0, width=8 (01000→bit3=1)
+ *   = 0b 0_001_0_00100_0_01000 = 0x1108
+ *
+ * Expected: D1 = 0x23
+ */
+static const uint8_t rom_bfextu_reg[] = {
+    0x00, 0x00, 0x10, 0x00,   /* SP = 0x1000 */
+    0x00, 0x00, 0x00, 0x10,   /* PC = 0x0010 */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  /* padding */
+    /* 0x10: MOVE.L #0x12345678, D0  (opcode 0x203C, then 32-bit immediate) */
+    0x20, 0x3C, 0x12, 0x34, 0x56, 0x78,
+    /* 0x16: BFEXTU D0{4:8}, D1  (opcode 0xE9C0, ext 0x1108) */
+    0xE9, 0xC0, 0x11, 0x08,
+    /* 0x1A: BRA.S . */
+    0x60, 0xFE,
+};
+
+/*
+ * Test 9: BFSET — set a bitfield in a data register to all 1s
+ *
+ *   MOVEQ   #0, D0           ; start with all zeros
+ *   BFSET   D0{0:4}          ; set bits at offset 0-3 (top 4 bits) to 1
+ *   BRA.S   .
+ *
+ * BFSET sets all bits in the field to 1.  Bits 0-3 from MSB = register bits
+ * 31-28, so the result is 0b 1111_0000...0000 = 0xF0000000.
+ *
+ * Opcode: 0xEEC0 (BFSET, EA=D0 mode=0 reg=0)
+ * Extension word: Dn=don't care (000), DO=0, offset=0 (00000→0), DW=0, width=4 (00100→bit2=1)
+ *   = 0b 0_000_0_00000_0_00100 = 0x0004
+ *
+ * Expected: D0 = 0xF0000000
+ */
+static const uint8_t rom_bfset_reg[] = {
+    0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x10,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    /* 0x10: MOVEQ #0, D0 */
+    0x70, 0x00,
+    /* 0x12: BFSET D0{0:4}  (opcode 0xEEC0, ext 0x0004) */
+    0xEE, 0xC0, 0x00, 0x04,
+    /* 0x16: BRA.S . */
+    0x60, 0xFE,
+};
+
+/*
+ * Test 10: BFEXTU — zero-extract a bitfield from memory
+ *
+ *   MOVEA.L #0x20, A0         ; A0 points to data in ROM
+ *   BFEXTU  (A0){0:8}, D0    ; extract first byte at [A0] into D0
+ *   BRA.S   .
+ *   (data at 0x20: 0xAB 0xCD 0xEF 0x01)
+ *
+ * The bitfield starts at offset 0, width 8: this is simply the byte at A0.
+ * mem[0x20] = 0xAB, so D0 should be 0xAB after the instruction.
+ *
+ * Opcode: 0xE9D0 (BFEXTU, EA=(A0) mode=2 reg=0)
+ *   bits 5-3 = 010 (mode 2), bits 2-0 = 000 (A0) → lower byte = 0xD0
+ * Extension word: Dn=D0 (000), DO=0, offset=0 (0), DW=0, width=8 (01000→bit3=1)
+ *   = 0x0008
+ *
+ * Expected: D0 = 0xAB
+ */
+static const uint8_t rom_bfextu_mem[] = {
+    0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x10,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    /* 0x10: MOVEA.L #0x20, A0 */
+    0x20, 0x7C, 0x00, 0x00, 0x00, 0x20,
+    /* 0x16: BFEXTU (A0){0:8}, D0  (opcode 0xE9D0, ext 0x0008) */
+    0xE9, 0xD0, 0x00, 0x08,
+    /* 0x1A: BRA.S . */
+    0x60, 0xFE,
+    /* 0x1C-0x1F: padding to reach 0x20 */
+    0x00, 0x00, 0x00, 0x00,
+    /* 0x20: data bytes */
+    0xAB, 0xCD, 0xEF, 0x01,
+};
+
 /* ------------------------------------------------------------------ */
 /* Test table                                                          */
 /* ------------------------------------------------------------------ */
@@ -315,6 +415,9 @@ static const test68020_t tests[] = {
     { "mulu_l",           rom_mulu_l,           sizeof(rom_mulu_l),           "MULU.L 32-bit unsigned multiply",       5  },
     { "muls_l",           rom_muls_l,           sizeof(rom_muls_l),           "MULS.L 32-bit signed multiply",         5  },
     { "divu_l",           rom_divu_l,           sizeof(rom_divu_l),           "DIVU.L 64-bit unsigned divide",         7  },
+    { "bfextu_reg",       rom_bfextu_reg,       sizeof(rom_bfextu_reg),       "BFEXTU: extract 8 bits from register",  5  },
+    { "bfset_reg",        rom_bfset_reg,        sizeof(rom_bfset_reg),        "BFSET: set 4 bits in register",         5  },
+    { "bfextu_mem",       rom_bfextu_mem,       sizeof(rom_bfextu_mem),       "BFEXTU: extract 8 bits from memory",    5  },
 };
 
 #define NUM_TESTS (sizeof(tests) / sizeof(tests[0]))
@@ -333,6 +436,9 @@ static int check_result(size_t idx)
     case 4: return cpu.d[0] == 42;              /* MULU.L: 6 × 7 = 42 */
     case 5: return cpu.d[0] == 0xFFFFFFF1;      /* MULS.L: 5 × -3 = -15 */
     case 6: return cpu.d[0] == 14 && cpu.d[1] == 2;  /* DIVU.L: 100 / 7 = q14 r2 */
+    case 7: return cpu.d[1] == 0x23;                 /* BFEXTU reg: D0{4:8} = 0x23 */
+    case 8: return cpu.d[0] == 0xF0000000;           /* BFSET reg: D0{0:4} = 0xF... */
+    case 9: return cpu.d[0] == 0xAB;                 /* BFEXTU mem: [A0]{0:8} = 0xAB */
     default: return 0;
     }
 }

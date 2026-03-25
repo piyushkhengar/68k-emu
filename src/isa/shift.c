@@ -6,6 +6,7 @@
 
 #include "cpu_internal.h"
 #include "ea.h"
+#include "bit.h"
 #include "alu.h"
 #include "memory.h"
 #include "timing.h"
@@ -457,5 +458,9 @@ static int dispatch_shift(uint16_t op)
 /* 0xExxx: route to shift or ADD. 0xE is shift/rotate space; ADD uses 0xD. Route all 0xExxx to shift. */
 int dispatch_Exxx(uint16_t op)
 {
+    /* BFxxx bitfield instructions occupy 0xE8C0-0xEFFF (68020+ only).
+     * Bits 15-11 = 11101 and bits 7-6 = 11 → mask 0xF8C0, value 0xE8C0. */
+    if ((op & 0xF8C0) == 0xE8C0 && cpu.features.has_full_ea)
+        return op_bitfield(op);
     return dispatch_shift(op);
 }
