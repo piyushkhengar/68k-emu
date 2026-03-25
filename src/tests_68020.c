@@ -395,6 +395,70 @@ static const uint8_t rom_bfextu_mem[] = {
     0xAB, 0xCD, 0xEF, 0x01,
 };
 
+/*
+ * Test 11: MOVEC round-trip for CACR (Cache Control Register, 0x002)
+ *
+ *   MOVEQ  #1, D0          ; value to write
+ *   MOVEC  D0, CACR        ; D0 → CACR  (opcode 0x4E7B, ext 0x0002)
+ *   MOVEC  CACR, D1        ; CACR → D1  (opcode 0x4E7A, ext 0x1002)
+ *   BRA.S  .
+ *
+ * Extension word layout for MOVEC Rn, Rc (0x4E7B):
+ *   bit 15  = 0  (D0 is a data register, not an address register)
+ *   bits 14-12 = 000  (register D0)
+ *   bits 11-0  = 0x002  (CACR)
+ *   = 0x0002
+ *
+ * Extension word for MOVEC Rc, Rn (0x4E7A):
+ *   bit 15  = 0  (D1 is a data register)
+ *   bits 14-12 = 001  (register D1)
+ *   bits 11-0  = 0x002  (CACR)
+ *   = 0x1002
+ *
+ * Expected: D1 = 1  (round-trips the value through CACR)
+ */
+static const uint8_t rom_movec_cacr[] = {
+    0x00, 0x00, 0x10, 0x00,   /* SP = 0x1000 */
+    0x00, 0x00, 0x00, 0x10,   /* PC = 0x0010 */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  /* padding */
+    /* 0x10: MOVEQ #1, D0 */
+    0x70, 0x01,
+    /* 0x12: MOVEC D0, CACR  (write D0 → control reg 0x002) */
+    0x4E, 0x7B, 0x00, 0x02,
+    /* 0x16: MOVEC CACR, D1  (read control reg 0x002 → D1) */
+    0x4E, 0x7A, 0x10, 0x02,
+    /* 0x1A: BRA.S . */
+    0x60, 0xFE,
+};
+
+/*
+ * Test 12: MOVEC round-trip for MSP (Master Stack Pointer, 0x803)
+ *
+ *   MOVEQ  #5, D0          ; value to write
+ *   MOVEC  D0, MSP         ; D0 → MSP  (opcode 0x4E7B, ext 0x0803)
+ *   MOVEC  MSP, D1         ; MSP → D1  (opcode 0x4E7A, ext 0x1803)
+ *   BRA.S  .
+ *
+ * Extension words:
+ *   MOVEC D0, MSP:  D/A=0, reg=D0=000, cr=0x803 → 0x0803
+ *   MOVEC MSP, D1:  D/A=0, reg=D1=001, cr=0x803 → 0x1803
+ *
+ * Expected: D1 = 5
+ */
+static const uint8_t rom_movec_msp[] = {
+    0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x10,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    /* 0x10: MOVEQ #5, D0 */
+    0x70, 0x05,
+    /* 0x12: MOVEC D0, MSP  (write D0 → control reg 0x803) */
+    0x4E, 0x7B, 0x08, 0x03,
+    /* 0x16: MOVEC MSP, D1  (read control reg 0x803 → D1) */
+    0x4E, 0x7A, 0x18, 0x03,
+    /* 0x1A: BRA.S . */
+    0x60, 0xFE,
+};
+
 /* ------------------------------------------------------------------ */
 /* Test table                                                          */
 /* ------------------------------------------------------------------ */
@@ -418,6 +482,8 @@ static const test68020_t tests[] = {
     { "bfextu_reg",       rom_bfextu_reg,       sizeof(rom_bfextu_reg),       "BFEXTU: extract 8 bits from register",  5  },
     { "bfset_reg",        rom_bfset_reg,        sizeof(rom_bfset_reg),        "BFSET: set 4 bits in register",         5  },
     { "bfextu_mem",       rom_bfextu_mem,       sizeof(rom_bfextu_mem),       "BFEXTU: extract 8 bits from memory",    5  },
+    { "movec_cacr",       rom_movec_cacr,       sizeof(rom_movec_cacr),       "MOVEC round-trip: CACR (0x002)",        6  },
+    { "movec_msp",        rom_movec_msp,        sizeof(rom_movec_msp),        "MOVEC round-trip: MSP (0x803)",         6  },
 };
 
 #define NUM_TESTS (sizeof(tests) / sizeof(tests[0]))
@@ -438,7 +504,9 @@ static int check_result(size_t idx)
     case 6: return cpu.d[0] == 14 && cpu.d[1] == 2;  /* DIVU.L: 100 / 7 = q14 r2 */
     case 7: return cpu.d[1] == 0x23;                 /* BFEXTU reg: D0{4:8} = 0x23 */
     case 8: return cpu.d[0] == 0xF0000000;           /* BFSET reg: D0{0:4} = 0xF... */
-    case 9: return cpu.d[0] == 0xAB;                 /* BFEXTU mem: [A0]{0:8} = 0xAB */
+    case 9:  return cpu.d[0] == 0xAB;                /* BFEXTU mem: [A0]{0:8} = 0xAB */
+    case 10: return cpu.d[1] == 1;                   /* MOVEC CACR round-trip */
+    case 11: return cpu.d[1] == 5;                   /* MOVEC MSP round-trip */
     default: return 0;
     }
 }

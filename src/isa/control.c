@@ -127,7 +127,17 @@ static int op_rts(uint16_t op)
 /* MOVEC: move to/from control register. 68010+. Privileged.
  * 0x4E7A = MOVEC Rc, Rn  (control register -> general register)
  * 0x4E7B = MOVEC Rn, Rc  (general register -> control register)
- * Extension word: bit15=D/A (0=Dn,1=An), bits14-12=register, bits11-0=control reg. */
+ * Extension word: bit15=D/A (0=Dn,1=An), bits14-12=register, bits11-0=control reg.
+ *
+ * Control register numbers:
+ *   0x000  SFC   Source Function Code          (68010+)
+ *   0x001  DFC   Destination Function Code     (68010+)
+ *   0x002  CACR  Cache Control Register        (68020+)
+ *   0x800  USP   User Stack Pointer            (68010+)
+ *   0x801  VBR   Vector Base Register          (68010+)
+ *   0x802  CAAR  Cache Address Register        (68020+)
+ *   0x803  MSP   Master Stack Pointer          (68020+)
+ *   0x804  ISP   Interrupt Stack Pointer       (68020+, maps to SSP here) */
 static int op_movec(uint16_t op)
 {
     if (!cpu.features.has_movec)
@@ -140,24 +150,40 @@ static int op_movec(uint16_t op)
     int cr  = ext & 0xFFF;
 
     if (op & 1) {
-        /* MOVEC Rn, Rc (0x4E7B): general -> control */
+        /* MOVEC Rn, Rc (0x4E7B): general register -> control register */
         uint32_t val = da ? cpu.a[reg] : cpu.d[reg];
         switch (cr) {
-        case 0x000: cpu.sfc = val & 7; break;
-        case 0x001: cpu.dfc = val & 7; break;
-        case 0x800: cpu.usp = val;     break;
-        case 0x801: cpu.vbr = val;     break;
+        case 0x000: cpu.sfc  = val & 7; break;
+        case 0x001: cpu.dfc  = val & 7; break;
+        case 0x002: if (!cpu.features.has_full_ea) return op_unimplemented(op);
+                    cpu.cacr = val;     break;
+        case 0x800: cpu.usp  = val;     break;
+        case 0x801: cpu.vbr  = val;     break;
+        case 0x802: if (!cpu.features.has_full_ea) return op_unimplemented(op);
+                    cpu.caar = val;     break;
+        case 0x803: if (!cpu.features.has_msp)     return op_unimplemented(op);
+                    cpu.msp  = val;     break;
+        case 0x804: if (!cpu.features.has_msp)     return op_unimplemented(op);
+                    cpu.ssp  = val;     break;  /* ISP = supervisor stack pointer */
         default: return op_unimplemented(op);
         }
         return 10;
     } else {
-        /* MOVEC Rc, Rn (0x4E7A): control -> general */
+        /* MOVEC Rc, Rn (0x4E7A): control register -> general register */
         uint32_t val;
         switch (cr) {
-        case 0x000: val = cpu.sfc; break;
-        case 0x001: val = cpu.dfc; break;
-        case 0x800: val = cpu.usp; break;
-        case 0x801: val = cpu.vbr; break;
+        case 0x000: val = cpu.sfc;  break;
+        case 0x001: val = cpu.dfc;  break;
+        case 0x002: if (!cpu.features.has_full_ea) return op_unimplemented(op);
+                    val = cpu.cacr; break;
+        case 0x800: val = cpu.usp;  break;
+        case 0x801: val = cpu.vbr;  break;
+        case 0x802: if (!cpu.features.has_full_ea) return op_unimplemented(op);
+                    val = cpu.caar; break;
+        case 0x803: if (!cpu.features.has_msp)     return op_unimplemented(op);
+                    val = cpu.msp;  break;
+        case 0x804: if (!cpu.features.has_msp)     return op_unimplemented(op);
+                    val = cpu.ssp;  break;  /* ISP = supervisor stack pointer */
         default: return op_unimplemented(op);
         }
         if (da) { cpu.a[reg] = val; if (reg == 7) sync_a7_to_sp(); }
