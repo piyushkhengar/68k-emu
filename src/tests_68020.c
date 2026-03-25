@@ -186,6 +186,115 @@ static const uint8_t rom_bra_l[] = {
     0x60, 0xFE,
 };
 
+/*
+ * Test 5: MULU.L — 32-bit unsigned multiply
+ *
+ *   MOVEQ  #6, D0          ; D0 = 6  (multiplicand, held in Dl)
+ *   MOVEQ  #7, D1          ; D1 = 7  (source operand, via register EA)
+ *   MULU.L D1, D0          ; D0 = D0 * D1 = 42  (32-bit result)
+ *   BRA.S  .
+ *
+ * MULU.L opcode: 0x4C00 | EA(D1)
+ *   EA for D1 = mode 0, reg 1 → bits 5-0 = 0b000001 = 0x01
+ *   Opcode = 0x4C01
+ *
+ * Extension word (32-bit unsigned, Dl=D0):
+ *   bits 14-12 = 000  (Dh, unused in 32-bit mode)
+ *   bit  11    = 0    (unsigned)
+ *   bit  9     = 0    (32-bit result)
+ *   bits  2-0  = 000  (Dl = D0)
+ *   = 0x0000
+ *
+ * Expected: D0 = 42
+ */
+static const uint8_t rom_mulu_l[] = {
+    0x00, 0x00, 0x10, 0x00,   /* SP = 0x1000 */
+    0x00, 0x00, 0x00, 0x10,   /* PC = 0x0010 */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  /* padding */
+    /* 0x10: MOVEQ #6, D0 */
+    0x70, 0x06,
+    /* 0x12: MOVEQ #7, D1 */
+    0x72, 0x07,
+    /* 0x14: MULU.L D1, D0  (opcode 0x4C01, ext 0x0000) */
+    0x4C, 0x01, 0x00, 0x00,
+    /* 0x18: BRA.S . */
+    0x60, 0xFE,
+};
+
+/*
+ * Test 6: MULS.L — 32-bit signed multiply with immediate source
+ *
+ *   MOVEQ  #5, D0            ; D0 = 5  (multiplicand)
+ *   MULS.L #0xFFFFFFFD, D0   ; D0 = 5 * (-3) = -15 = 0xFFFFFFF1
+ *   BRA.S  .
+ *
+ * MULS.L #imm, D0 opcode: 0x4C00 | EA(#imm)
+ *   EA for #imm = mode 7, reg 4 → bits 5-0 = 0b111100 = 0x3C
+ *   Opcode = 0x4C3C
+ *
+ * Extension word (32-bit signed, Dl=D0):
+ *   bit 11 = 1  (signed)
+ *   bit  9 = 0  (32-bit result)
+ *   bits 2-0 = 000  (Dl = D0)
+ *   = 0x0800
+ *
+ * Followed by 32-bit immediate 0xFFFFFFFD (= -3 in two's complement).
+ *
+ * Expected: D0 = 0xFFFFFFF1  (= -15)
+ */
+static const uint8_t rom_muls_l[] = {
+    0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x10,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    /* 0x10: MOVEQ #5, D0 */
+    0x70, 0x05,
+    /* 0x12: MULS.L #0xFFFFFFFD, D0  (opcode 0x4C3C, ext 0x0800, imm 0xFFFFFFFD) */
+    0x4C, 0x3C, 0x08, 0x00, 0xFF, 0xFF, 0xFF, 0xFD,
+    /* 0x1A: BRA.S . */
+    0x60, 0xFE,
+};
+
+/*
+ * Test 7: DIVU.L — 64-bit unsigned divide
+ *
+ *   MOVEQ  #100, D0       ; D0 = 100  (low 32 bits of 64-bit dividend)
+ *   MOVEQ  #0,   D1       ; D1 = 0    (high 32 bits of 64-bit dividend)
+ *   MOVEQ  #7,   D2       ; D2 = 7    (divisor, via register EA)
+ *   DIVU.L D2, D1:D0      ; 64-bit dividend D1:D0 = 100 / 7
+ *   BRA.S  .
+ *
+ * DIVU.L D2, D1:D0 opcode: 0x4C40 | EA(D2)
+ *   EA for D2 = mode 0, reg 2 → bits 5-0 = 0b000010 = 0x02
+ *   Opcode = 0x4C42
+ *
+ * Extension word (unsigned, Dr=D1, Dq=D0):
+ *   bits 14-12 = 001  (Dr = D1, holds HIGH 32 bits of dividend, receives remainder)
+ *   bit  11    = 0    (unsigned)
+ *   bits  2-0  = 000  (Dq = D0, holds LOW 32 bits of dividend, receives quotient)
+ *   = 0x1000
+ *
+ * Since Dr (D1) != Dq (D0), the full 64-bit divide path is used:
+ *   64-bit dividend = (D1 << 32) | D0 = (0 << 32) | 100 = 100
+ *   100 / 7 = quotient 14, remainder 2
+ *
+ * Expected: D0 = 14 (quotient), D1 = 2 (remainder)
+ */
+static const uint8_t rom_divu_l[] = {
+    0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x10,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    /* 0x10: MOVEQ #100, D0  (100 = 0x64) */
+    0x70, 0x64,
+    /* 0x12: MOVEQ #0, D1 */
+    0x72, 0x00,
+    /* 0x14: MOVEQ #7, D2 */
+    0x74, 0x07,
+    /* 0x16: DIVU.L D2, D1:D0  (opcode 0x4C42, ext 0x1000) */
+    0x4C, 0x42, 0x10, 0x00,
+    /* 0x1A: BRA.S . */
+    0x60, 0xFE,
+};
+
 /* ------------------------------------------------------------------ */
 /* Test table                                                          */
 /* ------------------------------------------------------------------ */
@@ -203,6 +312,9 @@ static const test68020_t tests[] = {
     { "brief_word_scale", rom_brief_word_scale, sizeof(rom_brief_word_scale), "Brief ext: word index × 2 + disp8",    10 },
     { "full_ext_bd16",    rom_full_ext,         sizeof(rom_full_ext),         "Full ext: word base displacement",      10 },
     { "bra_l",            rom_bra_l,            sizeof(rom_bra_l),            "BRA.L 32-bit displacement",             5  },
+    { "mulu_l",           rom_mulu_l,           sizeof(rom_mulu_l),           "MULU.L 32-bit unsigned multiply",       5  },
+    { "muls_l",           rom_muls_l,           sizeof(rom_muls_l),           "MULS.L 32-bit signed multiply",         5  },
+    { "divu_l",           rom_divu_l,           sizeof(rom_divu_l),           "DIVU.L 64-bit unsigned divide",         7  },
 };
 
 #define NUM_TESTS (sizeof(tests) / sizeof(tests[0]))
@@ -218,6 +330,9 @@ static int check_result(size_t idx)
     case 1: return cpu.a[1] == 0x1018;          /* A1 = 0x1000 + (4<<1) + 0x10 */
     case 2: return cpu.d[1] == 0xCAFEBABE;      /* D1 = value at [A0 + D0 + BD] */
     case 3: return cpu.d[0] == 1;               /* D0 = 1: landed at 0x20, not 0x16 */
+    case 4: return cpu.d[0] == 42;              /* MULU.L: 6 × 7 = 42 */
+    case 5: return cpu.d[0] == 0xFFFFFFF1;      /* MULS.L: 5 × -3 = -15 */
+    case 6: return cpu.d[0] == 14 && cpu.d[1] == 2;  /* DIVU.L: 100 / 7 = q14 r2 */
     default: return 0;
     }
 }

@@ -613,6 +613,8 @@ int dispatch_4xxx(uint16_t op)
     if ((op >> 8) >= 0x41 && (op >> 8) <= 0x4F && ((op >> 8) & 1)) return op_lea(op);  /* LEA */
     if (((op & 0xFFC0) == 0x4880 || (op & 0xFFC0) == 0x48C0) && movem_store_ea_valid((op >> 3) & 7, op & 7))
         return op_movem_store(op);   /* MOVEM.w 0x4880-0x48BF, MOVEM.l 0x48C0-0x48FF */
+    if ((op & 0xFF80) == 0x4C00 && cpu.features.has_32bit_muldiv)
+        return op_muldivl(op);      /* MULU.L/MULS.L 0x4C00-0x4C3F, DIVU.L/DIVS.L 0x4C40-0x4C7F (68020+) */
     if (((op & 0xFFC0) == 0x4C80 || (op & 0xFFC0) == 0x4CC0) && movem_load_ea_valid((op >> 3) & 7, op & 7))
         return op_movem_load(op);   /* MOVEM.w 0x4C80-0x4CBF, MOVEM.l 0x4CC0-0x4CFF */
     if ((op & 0xFF80) == 0x4880) return op_ext(op);

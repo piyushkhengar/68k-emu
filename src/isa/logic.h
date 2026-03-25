@@ -17,4 +17,7 @@ int op_eor(uint16_t op);
 /* NBCD: called from dispatch_4xxx. 0x4800-0x483F. */
 int op_nbcd(uint16_t op);
 
+/* MULU.L/MULS.L/DIVU.L/DIVS.L: called from dispatch_4xxx. 0x4C00-0x4C7F (68020+). */
+int op_muldivl(uint16_t op);
+
 #endif /* LOGIC_H */

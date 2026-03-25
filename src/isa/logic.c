@@ -364,6 +364,154 @@ static int op_divs(uint16_t op)
     return divs_cycles(d.ea_mode, d.ea_reg, dividend, divisor_s);
 }
 
+/* MULU.L / MULS.L: 32×32 → 32 or 64-bit multiply. Opcodes 0x4C00-0x4C3F.
+ *
+ * Extension word layout:
+ *   bits 14-12  Dh   — high 32-bit result register (only used in 64-bit mode)
+ *   bit  11     S    — 0=unsigned, 1=signed
+ *   bit  9      64   — 0=32-bit result in Dl, 1=64-bit result in Dh:Dl
+ *   bits  2-0   Dl   — low result register; also holds the multiplicand on entry
+ *
+ * Source operand (32-bit) comes from the EA field of the opcode.
+ * Multiplicand is always taken from Dl (the low result register).
+ *
+ * In 32-bit mode, V is set if the full 64-bit product does not fit in 32 bits.
+ * In 64-bit mode, V is always cleared; N and Z reflect the full 64-bit result.
+ * C is always cleared; X is unaffected. */
+static int op_mull(uint16_t op)
+{
+    int ea_mode = (op >> 3) & 7;
+    int ea_reg  =  op       & 7;
+    if (ea_is_an(ea_mode))
+        return op_unimplemented(op);
+
+    uint16_t ext    = fetch16();
+    int dh        = (ext >> 12) & 7;  /* high result register */
+    int is_signed = (ext >> 11) & 1;
+    int is_64bit  = (ext >>  9) & 1;
+    int dl        =  ext        & 7;  /* low result register and multiplicand */
+
+    uint32_t src  = ea_fetch_value(ea_mode, ea_reg, 4);
+    uint32_t mult = cpu.d[dl];  /* multiplicand always comes from Dl */
+
+    cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);
+
+    if (is_signed) {
+        int64_t full = (int64_t)(int32_t)mult * (int64_t)(int32_t)src;
+        uint32_t lo  = (uint32_t)((uint64_t)full & 0xFFFFFFFF);
+        uint32_t hi  = (uint32_t)((uint64_t)full >> 32);
+        cpu.d[dl] = lo;
+        if (is_64bit) {
+            cpu.d[dh] = hi;
+            if (full < 0)  cpu.sr |= SR_N;
+            if (full == 0) cpu.sr |= SR_Z;
+        } else {
+            /* V set if result overflows 32 signed bits: upper half must equal
+             * the sign extension of bit 31, i.e. all-zeros or all-ones. */
+            if ((int32_t)hi != (int32_t)lo >> 31) cpu.sr |= SR_V;
+            set_nz_from_val(lo, 4);
+        }
+    } else {
+        uint64_t full = (uint64_t)mult * (uint64_t)src;
+        uint32_t lo   = (uint32_t)(full & 0xFFFFFFFF);
+        uint32_t hi   = (uint32_t)(full >> 32);
+        cpu.d[dl] = lo;
+        if (is_64bit) {
+            cpu.d[dh] = hi;
+            if (full >> 63) cpu.sr |= SR_N;   /* MSB of 64-bit result */
+            if (full == 0)  cpu.sr |= SR_Z;
+        } else {
+            if (hi != 0)    cpu.sr |= SR_V;   /* non-zero upper half = overflow */
+            set_nz_from_val(lo, 4);
+        }
+    }
+    return 20;
+}
+
+/* DIVU.L / DIVS.L: 32÷32 or 64÷32 → 32q:32r divide. Opcodes 0x4C40-0x4C7F.
+ *
+ * Extension word layout:
+ *   bits 14-12  Dr   — remainder register; also holds the HIGH 32 bits of the
+ *                      64-bit dividend on entry (only when Dr != Dq)
+ *   bit  11     S    — 0=unsigned, 1=signed
+ *   bits  2-0   Dq   — quotient register; also holds the LOW 32 bits of the
+ *                      64-bit dividend on entry; receives quotient on exit
+ *
+ * If Dr == Dq: 32÷32 → 32-bit quotient only (remainder is discarded).
+ * If Dr != Dq: Dr:Dq is the 64-bit dividend (Dr=high 32 bits, Dq=low 32 bits);
+ *              on exit Dq = quotient, Dr = remainder.
+ *
+ * Divide by zero takes exception vector 5.
+ * V is set (and Dq/Dr are unchanged) if the quotient overflows 32 bits. */
+static int op_divl(uint16_t op)
+{
+    uint32_t instr_pc = cpu.pc - 2;  /* save instruction start before further fetches */
+    int ea_mode = (op >> 3) & 7;
+    int ea_reg  =  op       & 7;
+    if (ea_is_an(ea_mode))
+        return op_unimplemented(op);
+
+    uint16_t ext    = fetch16();
+    int dr        = (ext >> 12) & 7;  /* remainder register / high word of dividend */
+    int is_signed = (ext >> 11) & 1;
+    int dq        =  ext        & 7;  /* quotient register / low word of dividend */
+
+    uint32_t divisor = ea_fetch_value(ea_mode, ea_reg, 4);
+    if (divisor == 0) {
+        cpu.pc = instr_pc;
+        cpu_take_exception(DIVIDE_BY_ZERO_VECTOR, pending_cycles + 4);
+        return 0;
+    }
+
+    cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);
+
+    if (dr == dq) {
+        /* 32÷32 → 32-bit quotient only, remainder is discarded */
+        if (is_signed) {
+            int32_t q = (int32_t)cpu.d[dq] / (int32_t)divisor;
+            cpu.d[dq] = (uint32_t)q;
+            set_nz_from_val((uint32_t)q, 4);
+        } else {
+            uint32_t q = cpu.d[dq] / divisor;
+            cpu.d[dq] = q;
+            set_nz_from_val(q, 4);
+        }
+    } else {
+        /* 64÷32: form the 64-bit dividend from Dr (high) and Dq (low) */
+        if (is_signed) {
+            int64_t dvd = ((int64_t)(int32_t)cpu.d[dr] << 32) | (uint64_t)cpu.d[dq];
+            int64_t q   = dvd / (int64_t)(int32_t)divisor;
+            if (q > (int64_t)0x7FFFFFFF || q < -(int64_t)0x80000000) {
+                cpu.sr |= SR_V;
+                return 20;
+            }
+            cpu.d[dq] = (uint32_t)(int32_t)q;
+            cpu.d[dr] = (uint32_t)(int32_t)(dvd % (int64_t)(int32_t)divisor);
+            set_nz_from_val(cpu.d[dq], 4);
+        } else {
+            uint64_t dvd = ((uint64_t)cpu.d[dr] << 32) | (uint64_t)cpu.d[dq];
+            uint64_t q   = dvd / (uint64_t)divisor;
+            if (q > 0xFFFFFFFF) {
+                cpu.sr |= SR_V;
+                return 20;
+            }
+            cpu.d[dq] = (uint32_t)q;
+            cpu.d[dr] = (uint32_t)(dvd % (uint64_t)divisor);
+            set_nz_from_val(cpu.d[dq], 4);
+        }
+    }
+    return 20;
+}
+
+/* Dispatcher called from dispatch_4xxx for 0x4C00-0x4C7F.
+ * Bit 6 of the opcode selects multiply (0) or divide (1). */
+int op_muldivl(uint16_t op)
+{
+    if (op & 0x0040)
+        return op_divl(op);
+    return op_mull(op);
+}
+
 /* EOR: Dn to EA only. result = ea_val ^ Dn. When EA is Dn, preserve upper bits.
  * Dn: 4 (b/w), 8 (L). Memory: 8 + ea (b/w), 12 + ea (L). */
 int op_eor(uint16_t op)
