@@ -459,6 +459,36 @@ static const uint8_t rom_movec_msp[] = {
     0x60, 0xFE,
 };
 
+/*
+ * Test 13: EXTB.L — sign-extend byte directly to longword (68020+)
+ *
+ *   MOVE.L  #0x12345680, D0   ; low byte = 0x80 = -128 signed
+ *   EXTB.L  D0                ; sign-extend byte to 32 bits
+ *   BRA.S   .
+ *
+ * EXTB.L differs from EXT.L in that it skips the intermediate word step.
+ * EXT.L would sign-extend the *word* 0x5680 → 0x00005680 (positive).
+ * EXTB.L sign-extends the *byte* 0x80 → 0xFFFFFF80 (negative).
+ *
+ * Opcode: 0x49C0 | Dn
+ *   Bit 8 = 1 distinguishes EXTB.L from EXT.L (0x48C0, bit 8 = 0).
+ *   opmode = bits 7-6 = 11 (same as EXT.L).
+ *   Dn = D0 = 0 → 0x49C0
+ *
+ * Expected: D0 = 0xFFFFFF80, N=1, Z=0
+ */
+static const uint8_t rom_extb_l[] = {
+    0x00, 0x00, 0x10, 0x00,   /* SP = 0x1000 */
+    0x00, 0x00, 0x00, 0x10,   /* PC = 0x0010 */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  /* padding */
+    /* 0x10: MOVE.L #0x12345680, D0  (opcode 0x203C then 32-bit immediate) */
+    0x20, 0x3C, 0x12, 0x34, 0x56, 0x80,
+    /* 0x16: EXTB.L D0  (opcode 0x49C0) */
+    0x49, 0xC0,
+    /* 0x18: BRA.S . */
+    0x60, 0xFE,
+};
+
 /* ------------------------------------------------------------------ */
 /* Test table                                                          */
 /* ------------------------------------------------------------------ */
@@ -484,6 +514,7 @@ static const test68020_t tests[] = {
     { "bfextu_mem",       rom_bfextu_mem,       sizeof(rom_bfextu_mem),       "BFEXTU: extract 8 bits from memory",    5  },
     { "movec_cacr",       rom_movec_cacr,       sizeof(rom_movec_cacr),       "MOVEC round-trip: CACR (0x002)",        6  },
     { "movec_msp",        rom_movec_msp,        sizeof(rom_movec_msp),        "MOVEC round-trip: MSP (0x803)",         6  },
+    { "extb_l",           rom_extb_l,           sizeof(rom_extb_l),           "EXTB.L: byte sign-extend to long",      4  },
 };
 
 #define NUM_TESTS (sizeof(tests) / sizeof(tests[0]))
@@ -507,6 +538,7 @@ static int check_result(size_t idx)
     case 9:  return cpu.d[0] == 0xAB;                /* BFEXTU mem: [A0]{0:8} = 0xAB */
     case 10: return cpu.d[1] == 1;                   /* MOVEC CACR round-trip */
     case 11: return cpu.d[1] == 5;                   /* MOVEC MSP round-trip */
+    case 12: return cpu.d[0] == 0xFFFFFF80;          /* EXTB.L: 0x80 sign-extended to long */
     default: return 0;
     }
 }

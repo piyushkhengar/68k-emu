@@ -545,27 +545,32 @@ static int op_clr(uint16_t op)
 #define CYCLES_LINK      16
 #define CYCLES_UNLK      12
 
-/* EXT.W Dn: sign-extend byte to word. EXT.L Dn: sign-extend word to long. 0x4880-0x48FF. */
+/* EXT.W / EXT.L / EXTB.L: sign-extend a data register.
+ *   EXT.W  (0x4880-0x4887, opmode=2): byte  -> word  (high word of Dn preserved)
+ *   EXT.L  (0x48C0-0x48C7, opmode=3, bit8=0): word  -> long
+ *   EXTB.L (0x49C0-0x49C7, opmode=3, bit8=1): byte  -> long  (68020+, skips the word step) */
 static int op_ext(uint16_t op)
 {
-    int dn = op & 7;
-    int opmode = (op >> 6) & 3;
+    int dn      = op & 7;
+    int opmode  = (op >> 6) & 3;
     uint32_t result;
 
     if (opmode == 2) {
         /* EXT.W: byte -> word, preserve high word of Dn */
         int8_t b = (int8_t)(cpu.d[dn] & 0xFF);
         result = (cpu.d[dn] & 0xFFFF0000u) | ((uint32_t)(int32_t)(int16_t)b & 0xFFFF);
+    } else if (opmode == 3 && (op & 0x0100)) {
+        /* EXTB.L (68020+): sign-extend the low byte directly to a full 32-bit long.
+         * Bit 8 of the opcode distinguishes this from EXT.L (bit 8 = 0). */
+        result = (uint32_t)(int32_t)(int8_t)(cpu.d[dn] & 0xFF);
     } else if (opmode == 3) {
         /* EXT.L: word -> long */
-        int16_t w = (int16_t)(cpu.d[dn] & 0xFFFF);
-        result = (uint32_t)(int32_t)w;
+        result = (uint32_t)(int32_t)(int16_t)(cpu.d[dn] & 0xFFFF);
     } else {
         return op_unimplemented(op);
     }
     cpu.d[dn] = result;
     cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);
-    /* N,Z reflect the sign-extended operand (word for EXT.W, long for EXT.L) */
     set_nz_from_val(opmode == 2 ? (result & 0xFFFF) : result, opmode == 2 ? 2 : 4);
     return CYCLES_EXT_SWAP;
 }
@@ -636,6 +641,7 @@ int dispatch_4xxx(uint16_t op)
     if ((op & 0xFF00) == 0x4000 && (op & 0x00C0) != 0x00C0) return op_negx(op);  /* NEGX 0x40xx, excl. MOVE from SR */
     if ((op & 0xFFC0) == 0x40C0) return op_move_from_sr(op);  /* MOVE from SR before CHK */
     if ((op & 0xF1C0) == 0x4180) return op_chk(op);  /* CHK before LEA */
+    if ((op & 0xFFF8) == 0x49C0 && cpu.features.has_full_ea) return op_ext(op); /* EXTB.L (68020+): must precede LEA */
     if ((op >> 8) >= 0x41 && (op >> 8) <= 0x4F && ((op >> 8) & 1)) return op_lea(op);  /* LEA */
     if (((op & 0xFFC0) == 0x4880 || (op & 0xFFC0) == 0x48C0) && movem_store_ea_valid((op >> 3) & 7, op & 7))
         return op_movem_store(op);   /* MOVEM.w 0x4880-0x48BF, MOVEM.l 0x48C0-0x48FF */
