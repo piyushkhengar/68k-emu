@@ -602,6 +602,24 @@ static int op_link(uint16_t op)
     return CYCLES_LINK;
 }
 
+/* LINK.L An, #disp32: 68020+ long-displacement version. 0x4808-0x480F.
+ * Identical to LINK.W except the displacement is a full 32-bit signed value
+ * rather than a sign-extended 16-bit value.  Useful when a stack frame larger
+ * than ±32 KB is required, which LINK.W cannot express. */
+static int op_link_l(uint16_t op)
+{
+    int an = op & 7;
+    int32_t disp = (int32_t)fetch32();
+    pending_cycles += 8;    /* fault-point: past the long displacement fetch */
+    uint32_t sp = cpu_sp() - 4;
+    cpu_sp_set(sp);
+    pending_cycles += 4;    /* fault-point: past the stack push */
+    mem_write32(sp, cpu.a[an]);
+    cpu.a[an] = sp;
+    cpu_sp_set(sp + disp);
+    return 12;  /* MC68020 LINK.L: 12 cycles */
+}
+
 /* UNLK An: SP=An, An=pop, SP=SP+4. 0x4E58-0x4E5F.
  * For UNLK A7: SP+4 step comes first, then An=pop overrides A7/SSP. */
 static int op_unlk(uint16_t op)
@@ -651,6 +669,7 @@ int dispatch_4xxx(uint16_t op)
         return op_movem_load(op);   /* MOVEM.w 0x4C80-0x4CBF, MOVEM.l 0x4CC0-0x4CFF */
     if ((op & 0xFF80) == 0x4880) return op_ext(op);
     if ((op & 0xFFF8) == 0x4840) return op_swap(op);   /* SWAP: 0x4840-0x4847 */
+    if ((op & 0xFFF8) == 0x4808 && cpu.features.has_full_ea) return op_link_l(op); /* LINK.L (68020+) */
     if ((op & 0xFFF8) == 0x4848 && cpu.features.has_vbr) return op_bkpt(op); /* BKPT #n (68010+) */
     if ((op & 0xFFC0) == 0x4840) return op_pea(op);    /* PEA: 0x4848-0x487F */
     if ((op & 0xFFC0) == 0x4800) return op_nbcd(op);

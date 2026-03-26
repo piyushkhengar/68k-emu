@@ -525,6 +525,43 @@ static const uint8_t rom_trapcc[] = {
     0x60, 0xFE,
 };
 
+/*
+ * Test 15: LINK.L — 32-bit signed displacement version of LINK (68020+)
+ *
+ *   MOVEA.L #0x5678, A0          ; A0 = 0x5678 (some frame pointer value)
+ *   LINK.L  A0, #-0x10000        ; push A0, set A0=SP, then SP += -0x10000
+ *   BRA.S   .
+ *
+ * Initial SP = 0x1000 (from reset vector).
+ *
+ * LINK.L steps:
+ *   1. Decrement SP by 4: SP = 0x0FFC
+ *   2. Push old A0 (0x5678) onto stack at [0x0FFC]
+ *   3. A0 = new SP = 0x0FFC  (A0 now points at the saved frame)
+ *   4. SP += -0x10000  →  SP = 0x0FFC - 0x10000 = 0xFFFF0FFC
+ *
+ * The key point: a 16-bit displacement -0x10000 would be truncated to 0
+ * (0xFFFF0000 in 32 bits has a zero low word), leaving SP = 0x0FFC.  Only
+ * with a 32-bit fetch does SP end up at 0xFFFF0FFC, proving the long form
+ * was used.
+ *
+ * Opcode 0x4808 = LINK.L A0 (bits 2-0 = 000 = A0).
+ * Displacement -0x10000 = 0xFFFF0000 as a 32-bit two's-complement value.
+ *
+ * Expected: A0 = 0x0FFC, SSP (A7 in supervisor mode) = 0xFFFF0FFC
+ */
+static const uint8_t rom_link_l[] = {
+    0x00, 0x00, 0x10, 0x00,   /* SP = 0x1000 */
+    0x00, 0x00, 0x00, 0x10,   /* PC = 0x0010 */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  /* padding */
+    /* 0x10: MOVEA.L #0x5678, A0  (opcode 0x207C, then 32-bit immediate) */
+    0x20, 0x7C, 0x00, 0x00, 0x56, 0x78,
+    /* 0x16: LINK.L A0, #-0x10000  (opcode 0x4808, then 32-bit disp 0xFFFF0000) */
+    0x48, 0x08, 0xFF, 0xFF, 0x00, 0x00,
+    /* 0x1C: BRA.S . */
+    0x60, 0xFE,
+};
+
 /* ------------------------------------------------------------------ */
 /* Test table                                                          */
 /* ------------------------------------------------------------------ */
@@ -552,6 +589,7 @@ static const test68020_t tests[] = {
     { "movec_msp",        rom_movec_msp,        sizeof(rom_movec_msp),        "MOVEC round-trip: MSP (0x803)",         6  },
     { "extb_l",           rom_extb_l,           sizeof(rom_extb_l),           "EXTB.L: byte sign-extend to long",      4  },
     { "trapcc",           rom_trapcc,           sizeof(rom_trapcc),           "TRAPcc: false condition skips operand",  5  },
+    { "link_l",           rom_link_l,           sizeof(rom_link_l),           "LINK.L: 32-bit displacement stack frame", 4  },
 };
 
 #define NUM_TESTS (sizeof(tests) / sizeof(tests[0]))
@@ -577,6 +615,7 @@ static int check_result(size_t idx)
     case 11: return cpu.d[1] == 5;                   /* MOVEC MSP round-trip */
     case 12: return cpu.d[0] == 0xFFFFFF80;          /* EXTB.L: 0x80 sign-extended to long */
     case 13: return cpu.d[0] == 2;                   /* TRAPcc false: PC advanced past operand */
+    case 14: return cpu.a[0] == 0x0FFC && cpu.ssp == 0xFFFF0FFC; /* LINK.L: A0 and SSP correct */
     default: return 0;
     }
 }
