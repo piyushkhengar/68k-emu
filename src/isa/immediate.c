@@ -363,12 +363,63 @@ static int op_scc(uint16_t op)
     return scc_cycles_full(ea_mode, ea_reg, cond_true);
 }
 
-/* 0x5xxx: DBcc (bits 7-3=11001), Scc (bits 7-3!=11001, size 11), ADDQ, SUBQ. */
+/* TRAPcc: 0x50Fx–0x5FFx (bits 7-3 = 11111, bits 2-0 = sub-code). 68020+ only.
+ *
+ * This instruction is the 68020 generalisation of TRAPV: it takes a trap
+ * (via the TRAPV vector, vector 7) when the chosen condition is true.  When
+ * the condition is false the instruction is a no-op — it just consumes PC
+ * past any optional operand and returns.
+ *
+ * Three sub-codes in bits 2-0 select the operand size:
+ *   2 (FA): one word follows — TRAPcc.W #<word>
+ *   3 (FB): one long follows — TRAPcc.L #<long>
+ *   4 (FC): no operand       — TRAPcc
+ *
+ * The optional operand is provided purely for the trap handler to read from
+ * the exception stack frame; the processor itself doesn't use it.  We just
+ * skip (fetch) it so that PC is left pointing at the next instruction.
+ *
+ * Cycle counts (not-taken): 4 base + 4 per extra word fetched.
+ * Trap-taken: exception_cycles(7) = 34, with pre-fault cycles for any fetch. */
+static int op_trapcc(uint16_t op)
+{
+    int sub          = op & 7;
+    int fetch_cycles = 0;
+
+    if (sub == 2) {
+        fetch16();
+        fetch_cycles = 4;   /* one extra word read */
+    } else if (sub == 3) {
+        fetch32();
+        fetch_cycles = 8;   /* one extra long read */
+    }
+    /* sub == 4: no operand, fetch_cycles stays 0 */
+
+    uint8_t cond = (op >> 8) & 0x0F;
+    if (branch_condition_met(cond)) {
+        /* Condition true: push exception frame and jump through vector 7.
+         * Pass fetch_cycles so the exception handler accounts for the
+         * cycles already spent reading the optional operand. */
+        cpu_take_exception(TRAPV_VECTOR, fetch_cycles);
+        return 0;
+    }
+    /* Condition false: nothing to do; PC already past the operand. */
+    return 4 + fetch_cycles;
+}
+
+/* 0x5xxx: DBcc (bits 7-3=11001), TRAPcc (bits 7-3=11111, 68020+),
+ * Scc (size 11, other), ADDQ, SUBQ. */
 int dispatch_5xxx(uint16_t op)
 {
     if ((op & 0xF0C0) == 0x50C0) {  /* Size 11 in bits 7-6 */
         if ((op & 0x00F8) == 0x00C8)  /* DBcc: bits 7-3 = 11001 */
             return op_dbcc(op);
+        /* TRAPcc: bits 7-3 = 11111. Sub-code in bits 2-0 must be 2, 3, or 4. */
+        if (cpu.features.has_trapcc && (op & 0x00F8) == 0x00F8) {
+            int sub = op & 7;
+            if (sub >= 2 && sub <= 4)
+                return op_trapcc(op);
+        }
         return op_scc(op);             /* Scc: EA in bits 5-0 */
     }
     if ((op & 0x0100) == 0)

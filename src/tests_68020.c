@@ -489,6 +489,42 @@ static const uint8_t rom_extb_l[] = {
     0x60, 0xFE,
 };
 
+/*
+ * Test 14: TRAPcc with a false condition — PC must skip the word operand
+ *
+ *   MOVEQ   #1, D0          ; D0 = 1, clears Z flag (result non-zero)
+ *   TRAPEQ.W #0x1234        ; condition EQ requires Z=1; Z=0 so NOT taken
+ *   MOVEQ   #2, D0          ; if we reach here, PC advanced correctly
+ *   BRA.S   .               ; halt
+ *
+ * TRAPEQ = condition EQ = condition code 7 (0111).
+ *
+ * Opcode word breakdown for TRAPEQ.W:
+ *   bits 15-12 = 0101   (5xxx group)
+ *   bits 11-8  = 0111   (EQ condition, code 7)
+ *   bits  7-3  = 11111  (TRAPcc marker — distinguishes from Scc/DBcc)
+ *   bits  2-0  = 010    (sub=2: one word operand follows)
+ *   => 0101_0111_1111_1010 = 0x57FA
+ *
+ * The word operand 0x1234 follows and must be skipped over (PC += 2).
+ * Because EQ is false here, no exception is taken, and D0 ends up as 2.
+ *
+ * Expected: D0 = 2
+ */
+static const uint8_t rom_trapcc[] = {
+    0x00, 0x00, 0x10, 0x00,   /* SP = 0x1000 */
+    0x00, 0x00, 0x00, 0x10,   /* PC = 0x0010 */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  /* padding */
+    /* 0x10: MOVEQ #1, D0  — sets D0=1, clears Z flag */
+    0x70, 0x01,
+    /* 0x12: TRAPEQ.W #0x1234  — opcode 0x57FA, word operand 0x1234 */
+    0x57, 0xFA, 0x12, 0x34,
+    /* 0x16: MOVEQ #2, D0  — reached only if PC advanced past the operand */
+    0x70, 0x02,
+    /* 0x18: BRA.S .  — halt */
+    0x60, 0xFE,
+};
+
 /* ------------------------------------------------------------------ */
 /* Test table                                                          */
 /* ------------------------------------------------------------------ */
@@ -515,6 +551,7 @@ static const test68020_t tests[] = {
     { "movec_cacr",       rom_movec_cacr,       sizeof(rom_movec_cacr),       "MOVEC round-trip: CACR (0x002)",        6  },
     { "movec_msp",        rom_movec_msp,        sizeof(rom_movec_msp),        "MOVEC round-trip: MSP (0x803)",         6  },
     { "extb_l",           rom_extb_l,           sizeof(rom_extb_l),           "EXTB.L: byte sign-extend to long",      4  },
+    { "trapcc",           rom_trapcc,           sizeof(rom_trapcc),           "TRAPcc: false condition skips operand",  5  },
 };
 
 #define NUM_TESTS (sizeof(tests) / sizeof(tests[0]))
@@ -539,6 +576,7 @@ static int check_result(size_t idx)
     case 10: return cpu.d[1] == 1;                   /* MOVEC CACR round-trip */
     case 11: return cpu.d[1] == 5;                   /* MOVEC MSP round-trip */
     case 12: return cpu.d[0] == 0xFFFFFF80;          /* EXTB.L: 0x80 sign-extended to long */
+    case 13: return cpu.d[0] == 2;                   /* TRAPcc false: PC advanced past operand */
     default: return 0;
     }
 }
