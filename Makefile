@@ -30,7 +30,7 @@ GENESIS_SRCS = src/genesis/bus.c src/genesis/vdp.c src/genesis/io.c \
 SRCS = $(CORE_SRCS) $(GENESIS_SRCS)
 OBJS = $(SRCS:.c=.o)
 
-.PHONY: all clean test mcl68-test genesis processor-tests processor-tests-68010
+.PHONY: all clean test mcl68-test genesis processor-tests processor-tests-68010 processor-tests-68020
 
 all: $(TARGET)
 
@@ -97,6 +97,37 @@ processor-tests-68010: $(TARGET)
 		echo ""; \
 		echo "Note: failures in TRAP/TRAPV/CHK/RTE/DIVU(div0) are expected --"; \
 		echo "  68010 uses an 8-byte exception frame; these tests were captured on 68000 hardware."; \
+		exit $$EXIT; \
+	else \
+		echo "ProcessorTests not found at $(PROC_TESTS)"; \
+		echo "Clone: git clone https://github.com/SingleStepTests/680x0 ProcessorTests"; \
+		exit 1; \
+	fi
+
+# ProcessorTests against 68020: runs the 68000 test corpus in 68020 mode.
+# This is a regression/compatibility test; it validates that 68000 instructions
+# still execute correctly when the CPU is in 68020 mode.
+#
+# Expected failure categories (~107k total, all intentional, not bugs):
+#   1. Exception-frame tests (~94k, shared with 68010): TRAP/TRAPV/CHK/RTE/
+#      DIVU(div0) push an 8-byte frame; tests were captured on 68000 hardware.
+#   2. Full-extension-word tests (~13k, 68020-specific): the 68000 test
+#      corpus includes mode-6 extension words where bit 8 happens to be 1.
+#      On 68000 hardware bit 8 is reserved and ignored (brief format assumed).
+#      The 68020 correctly treats bit 8=1 as a full extension word, producing
+#      a different EA — correct 68020 behaviour, not a bug.
+#
+# No 68020-specific test corpus exists in SingleStepTests/680x0 yet.
+processor-tests-68020: $(TARGET)
+	@if [ -d "$(PROC_TESTS)" ]; then \
+		./$(TARGET) --cpu 68020 --processor-tests "$(PROC_TESTS)" $(if $(PROC_FILTER),$(PROC_FILTER),); \
+		EXIT=$$?; \
+		echo ""; \
+		echo "Expected failures (~107k total):"; \
+		echo "  ~94k  exception-frame tests (8-byte frame vs 6-byte on 68000)"; \
+		echo "  ~13k  mode-6 EA tests where bit 8=1 in the corpus extension word"; \
+		echo "        triggers the 68020 full-EA path (correct 68020 behaviour)."; \
+		echo "Note: no 68020-specific corpus exists yet in SingleStepTests/680x0."; \
 		exit $$EXIT; \
 	else \
 		echo "ProcessorTests not found at $(PROC_TESTS)"; \
