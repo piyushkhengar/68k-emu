@@ -68,4 +68,20 @@ int jsr_cycles(int mode, int reg);
 int tst_cycles(int mode, int reg, int size);
 int clr_cycles(int mode, int reg, int size);
 
+/* 68020 Bcc not-taken with word or long displacement: both cost 12 cycles. */
+#define CYCLES_BCC_WORD_NOT  12
+
+/* 68020 MULL (MULU.L/MULS.L): 20 + 2*N + EA (long).
+ * Unsigned: N = popcount(source). Signed: N = bit-transition count. */
+int mull_cycles(int ea_mode, int ea_reg, uint32_t source, int is_signed);
+
+/* 68020 DIVL (DIVU.L/DIVS.L): fixed midpoint approximation 44 + EA (long).
+ * True range per MC68020 User's Manual: 20-84 cycles. */
+int divl_cycles(int ea_mode, int ea_reg);
+
+/* 68020 BFxxx bitfield instructions.
+ * bf_op = 0-7: BFTST/BFEXTU/BFCHG/BFEXTS/BFCLR/BFFFO/BFSET/BFINS.
+ * Dn base from MC68020 manual; memory adds 12 + ea_cycles(mode,reg,4). */
+int bf_cycles(int bf_op, int ea_mode, int ea_reg);
+
 #endif /* TIMING_H */

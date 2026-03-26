@@ -322,11 +322,11 @@ int op_bitfield(uint16_t op)
 
     switch (bf_op) {
     case 0: /* BFTST — test only; flags already set above */
-        return 8;
+        return bf_cycles(bf_op, ea_mode, ea_reg);
 
     case 1: /* BFEXTU — zero-extend field into Dn; flags from original field */
         cpu.d[dn] = field;
-        return 8;
+        return bf_cycles(bf_op, ea_mode, ea_reg);
 
     case 2: /* BFCHG — flip every bit in the field */
         result = field ^ bf_mask(width);
@@ -337,7 +337,7 @@ int op_bitfield(uint16_t op)
         cpu.d[dn] = (field & (1u << (width - 1)))
                     ? (field | ~bf_mask(width))
                     : field;
-        return 8;
+        return bf_cycles(bf_op, ea_mode, ea_reg);
 
     case 4: /* BFCLR — clear every bit to 0 */
         result = 0;
@@ -352,7 +352,7 @@ int op_bitfield(uint16_t op)
             }
             cpu.d[dn] = (uint32_t)(eff_off + pos);
         }
-        return 8;
+        return bf_cycles(bf_op, ea_mode, ea_reg);
 
     case 6: /* BFSET — set every bit to 1 */
         result = bf_mask(width);
@@ -375,5 +375,5 @@ int op_bitfield(uint16_t op)
     else
         bf_mem_write(mem_base, offset, width, result);
 
-    return 8;
+    return bf_cycles(bf_op, ea_mode, ea_reg);
 }

@@ -425,7 +425,7 @@ static int op_mull(uint16_t op)
             set_nz_from_val(lo, 4);
         }
     }
-    return 20;
+    return mull_cycles(ea_mode, ea_reg, src, is_signed);
 }
 
 /* DIVU.L / DIVS.L: 32÷32 or 64÷32 → 32q:32r divide. Opcodes 0x4C40-0x4C7F.
@@ -483,7 +483,7 @@ static int op_divl(uint16_t op)
             int64_t q   = dvd / (int64_t)(int32_t)divisor;
             if (q > (int64_t)0x7FFFFFFF || q < -(int64_t)0x80000000) {
                 cpu.sr |= SR_V;
-                return 20;
+                return divl_cycles(ea_mode, ea_reg);
             }
             cpu.d[dq] = (uint32_t)(int32_t)q;
             cpu.d[dr] = (uint32_t)(int32_t)(dvd % (int64_t)(int32_t)divisor);
@@ -493,14 +493,14 @@ static int op_divl(uint16_t op)
             uint64_t q   = dvd / (uint64_t)divisor;
             if (q > 0xFFFFFFFF) {
                 cpu.sr |= SR_V;
-                return 20;
+                return divl_cycles(ea_mode, ea_reg);
             }
             cpu.d[dq] = (uint32_t)q;
             cpu.d[dr] = (uint32_t)(dvd % (uint64_t)divisor);
             set_nz_from_val(cpu.d[dq], 4);
         }
     }
-    return 20;
+    return divl_cycles(ea_mode, ea_reg);
 }
 
 /* Dispatcher called from dispatch_4xxx for 0x4C00-0x4C7F.

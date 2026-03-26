@@ -351,6 +351,44 @@ int clr_cycles(int mode, int reg, int size)
     return ((size == 4) ? 12 : 8) + ea_cycles(mode, reg, size);
 }
 
+/* MULL (MULU.L / MULS.L): 68020. Base 20 + 2*N + EA (long).
+ * Unsigned: N = popcount(source).  Signed: N = number of adjacent bit-pair
+ * transitions in the 33-bit value <0, b31..b0> (same formula as MULS.W). */
+int mull_cycles(int ea_mode, int ea_reg, uint32_t source, int is_signed)
+{
+    int extra;
+    if (!is_signed) {
+        extra = 2 * __builtin_popcount(source);
+    } else {
+        /* Adjacent differences: XOR each bit with its right neighbour. */
+        uint32_t v = source ^ (source >> 1);
+        /* Also count the leading 0 → bit31 transition when bit31 = 1. */
+        extra = 2 * (__builtin_popcount(v) + (source >> 31));
+    }
+    return 20 + extra + ea_cycles(ea_mode, ea_reg, 4);
+}
+
+/* DIVL (DIVU.L / DIVS.L): 68020. Midpoint of the 20-84 cycle range
+ * stated in the MC68020 User's Manual.  A fully data-dependent model
+ * would require re-engineering Motorola's 32-bit divider microcode. */
+int divl_cycles(int ea_mode, int ea_reg)
+{
+    return 44 + ea_cycles(ea_mode, ea_reg, 4);
+}
+
+/* BFxxx: 68020. Dn-direct base cycles from MC68020 User's Manual (Table B-1).
+ * Memory forms add 12 fixed cycles plus the EA calculation time. */
+int bf_cycles(int bf_op, int ea_mode, int ea_reg)
+{
+    /* Per bf_op: BFTST=6, BFEXTU=8, BFCHG=10, BFEXTS=8,
+     *            BFCLR=10, BFFFO=18, BFSET=10, BFINS=10.  */
+    static const int dn_base[8] = { 6, 8, 10, 8, 10, 18, 10, 10 };
+    int base = dn_base[bf_op & 7];
+    if (ea_mode == 0)
+        return base;
+    return base + 12 + ea_cycles(ea_mode, ea_reg, 4);
+}
+
 /* Exception processing: stacking + vector fetch + first 2 words of handler. Motorola MC68000. */
 int exception_cycles(int vector_num)
 {

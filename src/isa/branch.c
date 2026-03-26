@@ -87,6 +87,6 @@ int op_bcc(uint16_t op)
                 cpu_take_addr_err(cpu.pc, op);
             }
         }
-        return taken ? CYCLES_BCC_TAKEN : (adj == 2 ? 12 : CYCLES_BCC_NOT);
+        return taken ? CYCLES_BCC_TAKEN : (adj == 0 ? CYCLES_BCC_NOT : CYCLES_BCC_WORD_NOT);
     }
 }
