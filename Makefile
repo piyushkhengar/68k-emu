@@ -20,7 +20,7 @@ CORE_SRCS = src/main.c src/system.c \
             src/isa/move.c src/isa/alu.c src/isa/branch.c src/isa/control.c \
             src/isa/immediate.c src/isa/logic.c src/isa/shift.c src/isa/bit.c \
             src/isa/movem.c src/isa/movep.c \
-            src/tests.c src/tests_68010.c src/tests_68020.c src/timing.c src/timing_tests.c src/processor_tests.c \
+            src/tests.c src/tests_68010.c src/tests_68020.c src/tests_68030.c src/timing.c src/timing_tests.c src/processor_tests.c \
             deps/cJSON/cJSON.c
 
 GENESIS_SRCS = src/genesis/bus.c src/genesis/vdp.c src/genesis/io.c \
@@ -30,7 +30,7 @@ GENESIS_SRCS = src/genesis/bus.c src/genesis/vdp.c src/genesis/io.c \
 SRCS = $(CORE_SRCS) $(GENESIS_SRCS)
 OBJS = $(SRCS:.c=.o)
 
-.PHONY: all clean test mcl68-test genesis processor-tests processor-tests-68010 processor-tests-68020
+.PHONY: all clean test mcl68-test genesis processor-tests processor-tests-68010 processor-tests-68020 processor-tests-68030
 
 all: $(TARGET)
 
@@ -136,6 +136,32 @@ processor-tests-68020: $(TARGET)
 		echo "  ~13k  mode-6 EA tests where bit 8=1 triggers the 68020 full-EA path"; \
 		echo "        (correct 68020 behaviour; 68000 hardware ignores the bit)."; \
 		echo "Note: no 68020-specific corpus exists yet in SingleStepTests/680x0."; \
+		exit $$EXIT; \
+	else \
+		echo "ProcessorTests not found at $(PROC_TESTS)"; \
+		echo "Clone: git clone https://github.com/SingleStepTests/680x0 ProcessorTests"; \
+		exit 1; \
+	fi
+
+# ProcessorTests against 68030: runs the 68000 test corpus in 68030 mode.
+# The 68030 integer ISA is identical to the 68020, so the expected failure
+# categories are the same as for 68020 (~107k total, all intentional):
+#   ~70k  indexed-EA tests where corpus brief extension word has non-zero
+#         scale bits (ignored by 68000 hardware, applied correctly by 68030)
+#   ~24k  exception-frame tests (8-byte frame vs 6-byte on 68000)
+#   ~13k  mode-6 EA tests where bit 8=1 triggers the 68030 full-EA path
+#
+# No 68030-specific test corpus exists in SingleStepTests/680x0 yet.
+processor-tests-68030: $(TARGET)
+	@if [ -d "$(PROC_TESTS)" ]; then \
+		./$(TARGET) --cpu 68030 --processor-tests "$(PROC_TESTS)" $(if $(PROC_FILTER),$(PROC_FILTER),); \
+		EXIT=$$?; \
+		echo ""; \
+		echo "Expected failures (~107k total, same categories as 68020):"; \
+		echo "  ~70k  indexed-EA tests (non-zero scale bits applied correctly by 68030)"; \
+		echo "  ~24k  exception-frame tests (8-byte frame vs 6-byte on 68000)"; \
+		echo "  ~13k  mode-6 EA tests where bit 8=1 triggers the full-EA path."; \
+		echo "Note: no 68030-specific corpus exists yet in SingleStepTests/680x0."; \
 		exit $$EXIT; \
 	else \
 		echo "ProcessorTests not found at $(PROC_TESTS)"; \

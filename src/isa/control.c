@@ -634,6 +634,117 @@ static int op_unlk(uint16_t op)
     return CYCLES_UNLK;
 }
 
+/* ---- 68030 MMU instructions (F-line, CpID=0, TYPE=0: 0xF000-0xF0FF) ----
+ *
+ * All 68030 MMU instructions share the same first-word format:
+ *   1111 000 000 ea_mode ea_reg  (CpID=0, TYPE=0=cpGEN)
+ *
+ * The extension word identifies the specific operation via bits 15-13:
+ *   001 (0x2xxx) — PFLUSH/PFLUSHA: invalidate TLB (no-op; no real TLB)
+ *   010 (0x4xxx) — PMOVE <preg>, <ea>: read MMU register → memory
+ *   011 (0x6xxx) — PMOVE <ea>, <preg>: write memory → MMU register
+ *   100 (0x8xxx) — PTEST: test address translation (sets MMUSR=0)
+ *   101 (0xAxxx) — PMOVE SRP, <ea>: read Supervisor Root Pointer (64-bit)
+ *   110 (0xCxxx) — PMOVE <ea>, SRP: write Supervisor Root Pointer (64-bit)
+ *   111 (0xExxx) — PMOVE CRP variants (direction in bit 9)
+ *   000 (0x0xxx) — PMOVE TT0/TT1 (bit 12 selects TT1, bit 9 = direction)
+ *
+ * No address translation is implemented; these are shadow-register stubs that
+ * allow 68030 boot firmware to configure the MMU without faulting.
+ *
+ * Encodings confirmed from MC68030 User's Manual disassembly examples:
+ *   PMOVE TC,  (An) → F0nn 4000   PMOVE (An), TC → F0nn 6000
+ *   PFLUSHA         → F000 2400
+ */
+static int op_mmu(uint16_t op)
+{
+    uint16_t ext    = fetch16();
+    int ea_mode     = (op >> 3) & 7;
+    int ea_reg      = op & 7;
+    uint32_t addr   = 0;
+
+    if (!require_supervisor())
+        return 0;
+
+    int op_type = (ext >> 13) & 7;  /* bits 15-13 of extension word */
+
+    switch (op_type) {
+    case 1: /* PFLUSH / PFLUSHA — flush TLB (no-op; no real TLB) */
+        /* Variants with an EA operand: resolve to advance PC past ext words */
+        if (ea_mode >= 2)
+            ea_address_no_fetch(ea_mode, ea_reg, &addr);
+        return 28;
+
+    case 2: /* PMOVE <preg>, <ea> — read MMU register → memory */
+        /* TC is the only 32-bit register at this ext code; others treated identically */
+        if (ea_resolve_addr(ea_mode, ea_reg, 4, &addr))
+            mem_write32(addr, cpu.tc);
+        return 28;
+
+    case 3: /* PMOVE <ea>, <preg> — write memory → MMU register */
+        if (ea_resolve_addr(ea_mode, ea_reg, 4, &addr))
+            cpu.tc = mem_read32(addr);
+        return 28;
+
+    case 4: /* PTEST — probe address translation; set MMUSR = 0 (no fault) */
+        cpu.mmusr = 0;
+        return 28;
+
+    case 5: /* PMOVE SRP, <ea> — read Supervisor Root Pointer (64-bit) */
+        if (ea_resolve_addr(ea_mode, ea_reg, 4, &addr)) {
+            mem_write32(addr,     (uint32_t)(cpu.srp >> 32));
+            mem_write32(addr + 4, (uint32_t)(cpu.srp & 0xFFFFFFFFu));
+        }
+        return 36;
+
+    case 6: /* PMOVE <ea>, SRP — write Supervisor Root Pointer (64-bit) */
+        if (ea_resolve_addr(ea_mode, ea_reg, 4, &addr)) {
+            uint64_t hi = mem_read32(addr);
+            uint64_t lo = mem_read32(addr + 4);
+            cpu.srp = (hi << 32) | lo;
+        }
+        return 36;
+
+    case 7: /* PMOVE CRP — direction determined by bit 9 of ext word */
+        if (ext & 0x0200) {
+            if (ea_resolve_addr(ea_mode, ea_reg, 4, &addr)) {
+                uint64_t hi = mem_read32(addr);
+                uint64_t lo = mem_read32(addr + 4);
+                cpu.crp = (hi << 32) | lo;
+            }
+        } else {
+            if (ea_resolve_addr(ea_mode, ea_reg, 4, &addr)) {
+                mem_write32(addr,     (uint32_t)(cpu.crp >> 32));
+                mem_write32(addr + 4, (uint32_t)(cpu.crp & 0xFFFFFFFFu));
+            }
+        }
+        return 36;
+
+    case 0: /* PMOVE TT0/TT1 — bit 12=TT1, bit 9=direction */
+        if (ext & 0x0200) {
+            /* write: EA → TT register */
+            if (ea_resolve_addr(ea_mode, ea_reg, 4, &addr)) {
+                if (ext & 0x1000) cpu.tt1 = mem_read32(addr);
+                else              cpu.tt0 = mem_read32(addr);
+            }
+        } else {
+            /* read: TT register → EA */
+            if (ea_resolve_addr(ea_mode, ea_reg, 4, &addr)) {
+                mem_write32(addr, (ext & 0x1000) ? cpu.tt1 : cpu.tt0);
+            }
+        }
+        return 28;
+
+    default:
+        return op_unimplemented(op);
+    }
+}
+
+int op_mmu_dispatch(uint16_t op)
+{
+    return op_mmu(op);
+}
+
 /* 0x4xxx: RESET, STOP, TRAPV, LINK, UNLK, JSR, JMP, TRAP, RTE, RTS, NOP, CHK, LEA, EXT, SWAP, TST, CLR, NOT. */
 int dispatch_4xxx(uint16_t op)
 {

@@ -10,6 +10,7 @@
 #include "genesis/genesis_tests.h"
 #include "tests_68010.h"
 #include "tests_68020.h"
+#include "tests_68030.h"
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -1774,6 +1775,10 @@ int run_all_tests(double speed_mhz)
 
     int fails_68020 = run_68020_tests();
     if (fails_68020)
+        failed = 1;
+
+    int fails_68030 = run_68030_tests();
+    if (fails_68030)
         failed = 1;
 
     if (failed)

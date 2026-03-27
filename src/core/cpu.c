@@ -71,7 +71,7 @@ static cpu_features_t features_for_model(cpu_model_t model)
     switch (model) {
     case CPU_MODEL_68060:
     case CPU_MODEL_68040: f.has_fpu          = 1; /* fall through */
-    case CPU_MODEL_68030:
+    case CPU_MODEL_68030: f.has_mmu          = 1; /* fall through */
     case CPU_MODEL_68020: f.has_msp          = 1;
                           f.has_trapcc       = 1;
                           f.has_32bit_muldiv = 1;
@@ -468,9 +468,12 @@ static int op_line1111(uint16_t op)
     return 0;  /* unreachable */
 }
 
-/* Dispatch for 0xFxxx: 0xF0-F3 = ADD, 0xF4-FF = Line 1111. */
+/* Dispatch for 0xFxxx: 0xF0-F3 = ADD (or 68030 MMU), 0xF4-FF = Line 1111. */
 static int dispatch_Fxxx(uint16_t op)
 {
+    /* 68030+: all MMU instructions occupy 0xF000-0xF0FF (CpID=0, TYPE=0). */
+    if (cpu.features.has_mmu && (op & 0xFF00) == 0xF000)
+        return op_mmu_dispatch(op);
     if (((op >> 8) & 0x0F) >= 4)
         return op_line1111(op);
     return dispatch_add(op);

@@ -31,6 +31,7 @@ typedef struct {
     unsigned has_32bit_muldiv : 1;  /* MULS.L/MULU.L/DIVSL/DIVUL (68020+) */
     unsigned has_trapcc       : 1;  /* TRAPcc, CHK2/CMP2, CAS/CAS2 (68020+) */
     unsigned has_msp          : 1;  /* Master stack pointer / M-bit in SR (68020+) */
+    unsigned has_mmu          : 1;  /* On-chip MMU: PMOVE/PFLUSH/PTEST (68030+) */
     unsigned has_fpu          : 1;  /* On-chip FPU (68040+) */
 } cpu_features_t;
 
@@ -63,6 +64,14 @@ typedef struct {
     uint32_t cacr;  /* 68020+: Cache Control Register */
     uint32_t caar;  /* 68020+: Cache Address Register */
     uint32_t msp;   /* 68020+: Master Stack Pointer */
+    /* 68030+ MMU shadow registers (no address translation implemented;
+     * these allow software to write/read MMU config without crashing). */
+    uint32_t tc;    /* 68030+: Translation Control */
+    uint64_t crp;   /* 68030+: CPU Root Pointer (64-bit) */
+    uint64_t srp;   /* 68030+: Supervisor Root Pointer (64-bit) */
+    uint32_t tt0;   /* 68030+: Transparent Translation 0 */
+    uint32_t tt1;   /* 68030+: Transparent Translation 1 */
+    uint16_t mmusr; /* 68030+: MMU Status Register */
 } CPU;
 
 extern CPU cpu;
