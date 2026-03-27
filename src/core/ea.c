@@ -50,7 +50,7 @@ static uint32_t decode_indexed_addr(uint32_t base)
     int idx_reg     = (ext >> 12) & 7;
     int idx_is_addr = (ext >> 15) & 1;
     int idx_long    = (ext >> 11) & 1;
-    int scale       = (ext >> 9) & 3;   /* always 0 on 68000/010 — shift is a no-op */
+    int scale       = (ext >> 9) & 3;   /* architecturally defined on 68020+; reserved (ignored) on 68000/010 */
 
     uint32_t idx_val = idx_is_addr ? cpu.a[idx_reg] : cpu.d[idx_reg];
     if (!idx_long)
@@ -80,7 +80,10 @@ static uint32_t decode_indexed_addr(uint32_t base)
 
     /* ---- Brief extension word (all models) ---- */
     int32_t disp = (int8_t)(ext & 0xFF);  /* 8-bit signed displacement */
-    idx_val <<= scale;                     /* scale is 0 on 68000/010, so no change there */
+    /* 68000/68010: scale bits (10-9) are reserved; real hardware ignores them.
+     * Only apply scale on 68020+ where it is architecturally defined. */
+    if (cpu.features.has_full_ea)
+        idx_val <<= scale;
     return base + (uint32_t)disp + idx_val;
 }
 

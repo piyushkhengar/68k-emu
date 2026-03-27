@@ -114,7 +114,10 @@ processor-tests-68010: $(TARGET)
 #
 # Observed baseline: ~893k pass, ~107k fail.
 # Expected failure categories (~107k total, all intentional, not bugs):
-#   ~70k  baseline failures shared with 68000 mode
+#   ~70k  indexed-EA tests where the corpus brief extension word has non-zero
+#         scale bits (10-9); the 68000 corpus expects those bits ignored (real
+#         68000 hardware reserves them), but the 68020 correctly applies the
+#         scale — producing a different, architecturally valid result.
 #   ~24k  exception-frame tests (8-byte frame vs 6-byte, shared with 68010)
 #   ~13k  mode-6 indexed-EA tests where the corpus has extension words with
 #         bit 8=1; the 68020 correctly interprets these as full extension words
@@ -127,10 +130,11 @@ processor-tests-68020: $(TARGET)
 		EXIT=$$?; \
 		echo ""; \
 		echo "Expected failures (~107k total):"; \
-		echo "  ~70k  baseline failures shared with 68000 mode"; \
+		echo "  ~70k  indexed-EA tests: corpus extension word has non-zero scale bits"; \
+		echo "        (reserved on 68000, applied correctly by 68020)"; \
 		echo "  ~24k  exception-frame tests (8-byte frame vs 6-byte on 68000)"; \
-		echo "  ~13k  mode-6 EA tests where bit 8=1 in the corpus extension word"; \
-		echo "        triggers the 68020 full-EA path (correct 68020 behaviour)."; \
+		echo "  ~13k  mode-6 EA tests where bit 8=1 triggers the 68020 full-EA path"; \
+		echo "        (correct 68020 behaviour; 68000 hardware ignores the bit)."; \
 		echo "Note: no 68020-specific corpus exists yet in SingleStepTests/680x0."; \
 		exit $$EXIT; \
 	else \
