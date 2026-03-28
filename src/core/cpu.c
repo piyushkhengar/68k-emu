@@ -1,5 +1,6 @@
 #include "cpu.h"
 #include "cpu_internal.h"
+#include "ea.h"
 #include "move.h"
 #include "alu.h"
 #include "branch.h"
@@ -155,7 +156,7 @@ uint32_t fetch32(void)
 /* Helper: set N,Z and clear V,C from value (size in bytes: 1,2,4) */
 void set_nz_from_val(uint32_t val, int size)
 {
-    uint32_t mask = (size == 1) ? 0xFFu : (size == 2) ? 0xFFFFu : 0xFFFFFFFFu;
+    uint32_t mask = size_mask(size);
     uint32_t masked = val & mask;
     cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C);
     if (masked == 0)
@@ -198,17 +199,11 @@ void set_nzvc_sub(uint32_t result, uint32_t dest_val, uint32_t source_val)
         cpu.sr |= SR_V;
 }
 
-/* Sign-extend a size-masked value to int32_t (size: 1=byte, 2=word, 4=long). */
-static inline int32_t signed_val(uint32_t v, int size)
-{
-    return (size == 1) ? (int32_t)(int8_t)v : (size == 2) ? (int32_t)(int16_t)v : (int32_t)v;
-}
-
 /* Mask+sign-extend boilerplate shared by all four sized flag helpers below. */
 #define SIZED_OPERANDS(result, dest_val, source_val, size) \
-    uint32_t mask = (size == 1) ? 0xFFu : (size == 2) ? 0xFFFFu : 0xFFFFFFFFu; \
+    uint32_t mask = size_mask(size); \
     uint32_t result_masked = (result) & mask, dest_masked = (dest_val) & mask, source_masked = (source_val) & mask; \
-    int32_t result_signed = signed_val(result_masked, size), dest_signed = signed_val(dest_masked, size), source_signed = signed_val(source_masked, size)
+    int32_t result_signed = sign_extend_sized(result_masked, size), dest_signed = sign_extend_sized(dest_masked, size), source_signed = sign_extend_sized(source_masked, size)
 
 /* Size-aware N,Z,V,C,X for ADD (masks operands by size before flag logic) */
 void set_nzvc_add_sized(uint32_t result, uint32_t dest_val, uint32_t source_val, int size)

@@ -92,6 +92,12 @@ static inline void sync_a7_to_sp(void)
         cpu.usp = cpu.a[7];
 }
 
+/* Sign-extend a size-masked value to int32_t (size: 1=byte, 2=word, 4=long). */
+static inline int32_t sign_extend_sized(uint32_t v, int size)
+{
+    return (size == 1) ? (int32_t)(int8_t)v : (size == 2) ? (int32_t)(int16_t)v : (int32_t)v;
+}
+
 /* Merge a sized result into a Dn register (preserves high bytes for byte/word). */
 static inline void store_dn(int reg, uint32_t value, int size)
 {

@@ -54,10 +54,6 @@ static int is_memory_shift(uint16_t op)
     return (op & 0xC0) == 0xC0;  /* bits 7-6 = 11 */
 }
 
-static uint32_t shift_mask(int size)
-{
-    return (size == 1) ? 0xFF : (size == 2) ? 0xFFFF : 0xFFFFFFFF;
-}
 
 
 /* ASL: left arithmetic. C,X = last bit out; V = sign change at ANY point during shift. */
@@ -102,7 +98,7 @@ static int op_asr_reg(uint16_t op, int count, int size, uint32_t mask)
 {
     int reg = shift_dest_reg(op);
     uint32_t val = cpu.d[reg] & mask;
-    int32_t sval = (size == 1) ? (int32_t)(int8_t)val : (size == 2) ? (int32_t)(int16_t)val : (int32_t)val;
+    int32_t sval = sign_extend_sized(val, size);
     int nbits = size * 8;
     int orig_sign = (sval < 0) ? 1 : 0;
     uint32_t result;
@@ -430,7 +426,7 @@ static int dispatch_shift(uint16_t op)
     } else
         count = shift_count_imm(op);
 
-    uint32_t mask = shift_mask(size);
+    uint32_t mask = size_mask(size);
     int dir = shift_direction(op);  /* bit 8: 1=left, 0=right */
     int oo = (op >> 3) & 3;         /* bits 4-3: 00=AS, 01=LS, 10=ROX, 11=RO */
 

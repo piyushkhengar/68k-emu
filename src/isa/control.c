@@ -9,6 +9,16 @@
 #define CYCLES_STOP  4
 #define CYCLES_RESET 132
 
+/* MOVEC control register identifiers (extension word bits 11-0). */
+#define CR_SFC  0x000  /* Source Function Code          (68010+) */
+#define CR_DFC  0x001  /* Destination Function Code     (68010+) */
+#define CR_CACR 0x002  /* Cache Control Register        (68020+) */
+#define CR_USP  0x800  /* User Stack Pointer            (68010+) */
+#define CR_VBR  0x801  /* Vector Base Register          (68010+) */
+#define CR_CAAR 0x802  /* Cache Address Register        (68020+) */
+#define CR_MSP  0x803  /* Master Stack Pointer          (68020+) */
+#define CR_ISP  0x804  /* Interrupt Stack Pointer       (68020+, maps to SSP) */
+
 /* RESET: 0x4E70. Privileged. Assert external RESET (no-op in emulator). */
 static int op_reset(uint16_t op)
 {
@@ -153,18 +163,18 @@ static int op_movec(uint16_t op)
         /* MOVEC Rn, Rc (0x4E7B): general register -> control register */
         uint32_t val = da ? cpu.a[reg] : cpu.d[reg];
         switch (cr) {
-        case 0x000: cpu.sfc  = val & 7; break;
-        case 0x001: cpu.dfc  = val & 7; break;
-        case 0x002: if (!cpu.features.has_full_ea) return op_unimplemented(op);
-                    cpu.cacr = val;     break;
-        case 0x800: cpu.usp  = val;     break;
-        case 0x801: cpu.vbr  = val;     break;
-        case 0x802: if (!cpu.features.has_full_ea) return op_unimplemented(op);
-                    cpu.caar = val;     break;
-        case 0x803: if (!cpu.features.has_msp)     return op_unimplemented(op);
-                    cpu.msp  = val;     break;
-        case 0x804: if (!cpu.features.has_msp)     return op_unimplemented(op);
-                    cpu.ssp  = val;     break;  /* ISP = supervisor stack pointer */
+        case CR_SFC:  cpu.sfc  = val & 7; break;
+        case CR_DFC:  cpu.dfc  = val & 7; break;
+        case CR_CACR: if (!cpu.features.has_full_ea) return op_unimplemented(op);
+                      cpu.cacr = val;     break;
+        case CR_USP:  cpu.usp  = val;     break;
+        case CR_VBR:  cpu.vbr  = val;     break;
+        case CR_CAAR: if (!cpu.features.has_full_ea) return op_unimplemented(op);
+                      cpu.caar = val;     break;
+        case CR_MSP:  if (!cpu.features.has_msp)     return op_unimplemented(op);
+                      cpu.msp  = val;     break;
+        case CR_ISP:  if (!cpu.features.has_msp)     return op_unimplemented(op);
+                      cpu.ssp  = val;     break;
         default: return op_unimplemented(op);
         }
         return 10;
@@ -172,18 +182,18 @@ static int op_movec(uint16_t op)
         /* MOVEC Rc, Rn (0x4E7A): control register -> general register */
         uint32_t val;
         switch (cr) {
-        case 0x000: val = cpu.sfc;  break;
-        case 0x001: val = cpu.dfc;  break;
-        case 0x002: if (!cpu.features.has_full_ea) return op_unimplemented(op);
-                    val = cpu.cacr; break;
-        case 0x800: val = cpu.usp;  break;
-        case 0x801: val = cpu.vbr;  break;
-        case 0x802: if (!cpu.features.has_full_ea) return op_unimplemented(op);
-                    val = cpu.caar; break;
-        case 0x803: if (!cpu.features.has_msp)     return op_unimplemented(op);
-                    val = cpu.msp;  break;
-        case 0x804: if (!cpu.features.has_msp)     return op_unimplemented(op);
-                    val = cpu.ssp;  break;  /* ISP = supervisor stack pointer */
+        case CR_SFC:  val = cpu.sfc;  break;
+        case CR_DFC:  val = cpu.dfc;  break;
+        case CR_CACR: if (!cpu.features.has_full_ea) return op_unimplemented(op);
+                      val = cpu.cacr; break;
+        case CR_USP:  val = cpu.usp;  break;
+        case CR_VBR:  val = cpu.vbr;  break;
+        case CR_CAAR: if (!cpu.features.has_full_ea) return op_unimplemented(op);
+                      val = cpu.caar; break;
+        case CR_MSP:  if (!cpu.features.has_msp)     return op_unimplemented(op);
+                      val = cpu.msp;  break;
+        case CR_ISP:  if (!cpu.features.has_msp)     return op_unimplemented(op);
+                      val = cpu.ssp;  break;
         default: return op_unimplemented(op);
         }
         if (da) { cpu.a[reg] = val; if (reg == 7) sync_a7_to_sp(); }
