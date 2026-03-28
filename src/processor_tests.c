@@ -99,14 +99,14 @@ static void apply_initial(cJSON *initial)
             uint32_t op = get_num(p0) & 0xFFFF;
             if (op == 0x007C || op == 0x027C || op == 0x0A7C ||  /* ORI/ANDI/EORI to SR */
                 (op & 0xFFC0) == 0x46C0 || (op & 0xFFC0) == 0x44C0 || (op & 0xFFC0) == 0x42C0)  /* MOVE to SR/CCR */
-                cpu.sr |= 0x2000;
+                cpu.sr |= SR_S;
         }
     }
     item = cJSON_GetObjectItem(initial, "pc");
     if (item && cJSON_IsNumber(item))
         cpu.pc = get_num(item);
 
-    cpu.a[7] = (cpu.sr & 0x2000) ? cpu.ssp : cpu.usp;
+    cpu.a[7] = (cpu.sr & SR_S) ? cpu.ssp : cpu.usp;
     cpu.halted = 0;
     cpu.cycles = 0;
 

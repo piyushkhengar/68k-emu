@@ -73,11 +73,11 @@ int require_supervisor(void);
 /* Stack pointer helpers: use active SP (ssp when supervisor, usp when user). Always keep a[7] in sync. */
 static inline uint32_t cpu_sp(void)
 {
-    return (cpu.sr & 0x2000) ? cpu.ssp : cpu.usp;
+    return (cpu.sr & SR_S) ? cpu.ssp : cpu.usp;
 }
 static inline void cpu_sp_set(uint32_t v)
 {
-    if (cpu.sr & 0x2000)
+    if (cpu.sr & SR_S)
         cpu.ssp = v;
     else
         cpu.usp = v;
@@ -86,10 +86,21 @@ static inline void cpu_sp_set(uint32_t v)
 /* Call after any direct write to cpu.a[7] to keep ssp/usp in sync. */
 static inline void sync_a7_to_sp(void)
 {
-    if (cpu.sr & 0x2000)
+    if (cpu.sr & SR_S)
         cpu.ssp = cpu.a[7];
     else
         cpu.usp = cpu.a[7];
+}
+
+/* Merge a sized result into a Dn register (preserves high bytes for byte/word). */
+static inline void store_dn(int reg, uint32_t value, int size)
+{
+    if (size == 4)
+        cpu.d[reg] = value;
+    else if (size == 2)
+        cpu.d[reg] = (cpu.d[reg] & 0xFFFF0000u) | (value & 0xFFFFu);
+    else
+        cpu.d[reg] = (cpu.d[reg] & 0xFFFFFF00u) | (value & 0xFFu);
 }
 
 /* Optional JSR trace callback (set via cpu_set_trace_jsr). Called before each JSR with target addr. */

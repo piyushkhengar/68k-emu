@@ -101,7 +101,7 @@ int ea_resolve_addr(int mode, int reg, int size, uint32_t *addr)
         *addr = cpu.a[reg];
         cpu.a[reg] += ea_step(reg, size);
         if (reg == 7) {
-            if (cpu.sr & 0x2000) cpu.ssp = cpu.a[7];
+            if (cpu.sr & SR_S) cpu.ssp = cpu.a[7];
             else cpu.usp = cpu.a[7];
         }
         return 1;
@@ -110,7 +110,7 @@ int ea_resolve_addr(int mode, int reg, int size, uint32_t *addr)
         cpu.a[reg] -= ea_step(reg, size);
         *addr = cpu.a[reg];
         if (reg == 7) {
-            if (cpu.sr & 0x2000) cpu.ssp = cpu.a[7];
+            if (cpu.sr & SR_S) cpu.ssp = cpu.a[7];
             else cpu.usp = cpu.a[7];
         }
         return 1;
@@ -213,9 +213,7 @@ void ea_write_rmw(const ea_rmw_t *rmw, uint32_t value)
     }
     switch (rmw->mode) {
     case 0: /* Dn: preserve upper bits for byte/word */
-        if (rmw->size == 1)      cpu.d[rmw->reg] = (cpu.d[rmw->reg] & 0xFFFFFF00) | (value & 0xFF);
-        else if (rmw->size == 2) cpu.d[rmw->reg] = (cpu.d[rmw->reg] & 0xFFFF0000) | (value & 0xFFFF);
-        else                     cpu.d[rmw->reg] = value;
+        store_dn(rmw->reg, value, rmw->size);
         break;
     case 1: /* An: word result is sign-extended to 32 bits */
         if (rmw->size == 2) cpu.a[rmw->reg] = (uint32_t)(int32_t)(int16_t)(value & 0xFFFF);
@@ -270,9 +268,7 @@ void ea_store_value(int mode, int reg, int size, uint32_t value)
 
     switch (mode) {
     case 0: /* Dn - upper bits unchanged for byte/word per 68K */
-        if (size == 1) cpu.d[reg] = (cpu.d[reg] & 0xFFFFFF00) | (value & 0xFF);
-        else if (size == 2) cpu.d[reg] = (cpu.d[reg] & 0xFFFF0000) | (value & 0xFFFF);
-        else cpu.d[reg] = value;
+        store_dn(reg, value, size);
         break;
     case 1: /* An */
         if (size == 2) cpu.a[reg] = (uint32_t)(int32_t)(int16_t)(value & 0xFFFF);  /* sign-extend word */

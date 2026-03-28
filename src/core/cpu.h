@@ -10,6 +10,12 @@
 #define SR_V  (1 << 1)   /* Overflow */
 #define SR_C  (1 << 0)   /* Carry */
 
+/* Status Register structural bits (upper byte; only accessible in supervisor mode) */
+#define SR_T      0x8000u  /* Trace mode */
+#define SR_S      0x2000u  /* Supervisor mode */
+#define SR_I_MASK 0x0700u  /* Interrupt priority mask (bits 10-8) */
+#define SR_VALID  0xA71Fu  /* Mask of all defined SR bits */
+
 /* Supported CPU models in the 68k family. */
 typedef enum {
     CPU_MODEL_68000 = 0,

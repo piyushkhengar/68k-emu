@@ -23,7 +23,7 @@ static int op_stop(uint16_t op)
 {
     (void)op;
     uint16_t imm = fetch16();
-    if (!(imm & 0x2000)) {  /* S-bit clear = user mode */
+    if (!(imm & SR_S)) {  /* S-bit clear = user mode */
         cpu_take_exception(PRIVILEGE_VECTOR, 4);
         return 0;
     }
@@ -72,7 +72,7 @@ static int op_move_usp_to_an(uint16_t op)
         return 0;
     int an = op & 7;
     cpu.a[an] = cpu.usp;
-    if (an == 7 && (cpu.sr & 0x2000))
+    if (an == 7 && (cpu.sr & SR_S))
         cpu.ssp = cpu.a[7];  /* A7 = SSP in supervisor mode */
     return 4;
 }
@@ -84,7 +84,7 @@ static int op_move_an_to_usp(uint16_t op)
         return 0;
     int an = op & 7;
     cpu.usp = cpu.a[an];
-    if (an == 7 && !(cpu.sr & 0x2000))
+    if (an == 7 && !(cpu.sr & SR_S))
         cpu.a[7] = cpu.usp;  /* User mode: A7 = USP */
     return 4;
 }
@@ -269,7 +269,7 @@ static int op_rte(uint16_t op)
 
     cpu.sr = ((sr >> 8) & 0xA7) << 8 | (sr & 0x1F);
     cpu.ssp = sp;
-    cpu.a[7] = (cpu.sr & 0x2000) ? cpu.ssp : cpu.usp;
+    cpu.a[7] = (cpu.sr & SR_S) ? cpu.ssp : cpu.usp;
     if (cpu.pc & 1)
         cpu_take_addr_err(cpu.pc, op);
     return CYCLES_RTE;

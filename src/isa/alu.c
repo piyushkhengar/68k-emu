@@ -22,15 +22,6 @@ static int alu_dn_reg(uint16_t op, uint8_t base)
     return (op >> 9) & 7;
 }
 
-static void alu_store_dn(int reg, uint32_t result, int size)
-{
-    if (size == 1)
-        cpu.d[reg] = (cpu.d[reg] & 0xFFFFFF00) | (result & 0xFF);
-    else if (size == 2)
-        cpu.d[reg] = (cpu.d[reg] & 0xFFFF0000) | (result & 0xFFFF);
-    else
-        cpu.d[reg] = result;
-}
 
 static int alu_is_an_word_32bit(int ea_mode, int size)
 {
@@ -82,7 +73,7 @@ static int op_add_sub_generic(uint16_t op, uint8_t base)
         src = ea_fetch_value(d.ea_mode, d.ea_reg, d.size);
         dest_val = cpu.d[d.dn_reg] & d.mask;
         result = is_add ? (dest_val + src) & d.mask : (dest_val - src) & d.mask;
-        alu_store_dn(d.dn_reg, result, d.size);
+        store_dn(d.dn_reg, result, d.size);
         src_for_flags = src;
     } else {
         /* ADD/SUB Dn, <ea>: resolve EA once to avoid double side-effects */
@@ -252,7 +243,7 @@ static int op_addx_subx(uint16_t op, int is_add)
         uint32_t src = cpu.d[d.src_reg] & d.mask;
         uint32_t dest_val = cpu.d[d.dest_reg] & d.mask;
         uint32_t result = is_add ? (dest_val + src + xbit) & d.mask : (dest_val - src - xbit) & d.mask;
-        alu_store_dn(d.dest_reg, result, d.size);
+        store_dn(d.dest_reg, result, d.size);
         if (is_add)
             set_nzvc_addx_sized(result, dest_val, src, d.size, xbit);
         else

@@ -41,11 +41,7 @@ int op_movep(uint16_t op)
         else
             mem_write8(addr + i * 2, (uint8_t)(val >> shift));
     }
-    if (is_load) {
-        if (size == 2)
-            cpu.d[dn] = (cpu.d[dn] & 0xFFFF0000) | (val & 0xFFFF);  /* word: preserve high word */
-        else
-            cpu.d[dn] = val;
-    }
+    if (is_load)
+        store_dn(dn, val, size);
     return movep_cycles(size);
 }

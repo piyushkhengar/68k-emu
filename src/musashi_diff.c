@@ -168,12 +168,12 @@ static void our_apply_initial(cJSON *init)
             if (op == 0x007C || op == 0x027C || op == 0x0A7C ||
                 (op & 0xFFC0) == 0x46C0 || (op & 0xFFC0) == 0x44C0 ||
                 (op & 0xFFC0) == 0x42C0)
-                cpu.sr |= 0x2000;
+                cpu.sr |= SR_S;
         }
     }
 
     it = cJSON_GetObjectItem(init, "pc"); if (it) cpu.pc = jnum(it);
-    cpu.a[7] = (cpu.sr & 0x2000) ? cpu.ssp : cpu.usp;
+    cpu.a[7] = (cpu.sr & SR_S) ? cpu.ssp : cpu.usp;
     cpu.halted = 0;
     cpu.cycles = 0;
 
@@ -223,7 +223,7 @@ static void musashi_apply_initial(cJSON *init)
             if (op == 0x007C || op == 0x027C || op == 0x0A7C ||
                 (op & 0xFFC0) == 0x46C0 || (op & 0xFFC0) == 0x44C0 ||
                 (op & 0xFFC0) == 0x42C0)
-                sr |= 0x2000;
+                sr |= SR_S;
         }
     }
     m68k_set_reg(M68K_REG_SR, sr);
@@ -257,7 +257,7 @@ static void musashi_apply_initial(cJSON *init)
     {
         uint32_t usp_v = (uint32_t)m68k_get_reg(NULL, M68K_REG_USP);
         uint32_t isp_v = (uint32_t)m68k_get_reg(NULL, M68K_REG_ISP);
-        m68k_set_reg(M68K_REG_A7, (sr & 0x2000) ? isp_v : usp_v);
+        m68k_set_reg(M68K_REG_A7, (sr & SR_S) ? isp_v : usp_v);
     }
 
     it = cJSON_GetObjectItem(init, "pc"); if (it) m68k_set_reg(M68K_REG_PC, jnum(it));
@@ -311,7 +311,7 @@ static void musashi_capture(snap_t *s)
     s->sr  = (uint16_t)(m68k_get_reg(NULL, M68K_REG_SR) & 0xFFFF);
     s->usp = (uint32_t)m68k_get_reg(NULL, M68K_REG_USP);
     /* Capture SSP: if in supervisor mode A7 is the SSP; otherwise use ISP */
-    if (s->sr & 0x2000)
+    if (s->sr & SR_S)
         s->ssp = (uint32_t)m68k_get_reg(NULL, M68K_REG_A7);
     else
         s->ssp = (uint32_t)m68k_get_reg(NULL, M68K_REG_ISP);

@@ -104,7 +104,7 @@ static int op_bcd_math(uint16_t op, int is_add)
         uint8_t v_flag;
         uint8_t result = is_add ? bcd_add_byte(dest, src, x_in, &carry_borrow, &v_flag)
                                : bcd_sub_byte(dest, src, x_in, &carry_borrow, &v_flag);
-        cpu.d[rx] = (cpu.d[rx] & 0xFFFFFF00) | result;
+        store_dn(rx, result, 1);
         cpu.sr &= ~(SR_N | SR_V | SR_C | SR_X);
         if (carry_borrow) cpu.sr |= SR_C | SR_X;
         if (result & 0x80) cpu.sr |= SR_N;
@@ -169,15 +169,6 @@ static int logic_reject_byte_an(uint16_t op, int ea_mode, int size)
     return 0;
 }
 
-static void logic_store_dn(int reg, uint32_t result, int size)
-{
-    if (size == 1)
-        cpu.d[reg] = (cpu.d[reg] & 0xFFFFFF00) | (result & 0xFF);
-    else if (size == 2)
-        cpu.d[reg] = (cpu.d[reg] & 0xFFFF0000) | (result & 0xFFFF);
-    else
-        cpu.d[reg] = result;
-}
 
 /* Decoded fields for AND/OR/EOR. */
 typedef struct {
@@ -216,7 +207,7 @@ static int op_logic_binop(uint16_t op, logic_binop_fn fn)
         src = ea_fetch_value(d.ea_mode, d.ea_reg, d.size) & d.mask;
         dest_val = cpu.d[d.dn_reg] & d.mask;
         result = fn(dest_val, src) & d.mask;
-        logic_store_dn(d.dn_reg, result, d.size);
+        store_dn(d.dn_reg, result, d.size);
     } else {
         /* Dn, <ea>: resolve EA once to avoid double side-effects */
         src = cpu.d[d.dn_reg] & d.mask;

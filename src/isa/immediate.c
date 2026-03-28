@@ -197,7 +197,7 @@ static int op_ori_sr(uint16_t op)
     if (!require_supervisor())
         return 0;
     uint16_t imm = fetch16();
-    cpu.sr = (cpu.sr | imm) & 0xA71F;
+    cpu.sr = (cpu.sr | imm) & SR_VALID;
     return CYCLES_ORI_ANDI_EORI_CCR_SR;
 }
 
@@ -207,7 +207,7 @@ static int op_andi_sr(uint16_t op)
     if (!require_supervisor())
         return 0;
     uint16_t imm = fetch16();
-    cpu.sr = (cpu.sr & imm) & 0xA71F;
+    cpu.sr = (cpu.sr & imm) & SR_VALID;
     return CYCLES_ORI_ANDI_EORI_CCR_SR;
 }
 
@@ -217,7 +217,7 @@ static int op_eori_sr(uint16_t op)
     if (!require_supervisor())
         return 0;
     uint16_t imm = fetch16();
-    cpu.sr = (cpu.sr ^ imm) & 0xA71F;
+    cpu.sr = (cpu.sr ^ imm) & SR_VALID;
     return CYCLES_ORI_ANDI_EORI_CCR_SR;
 }
 
@@ -332,7 +332,7 @@ static int op_dbcc(uint16_t op)
 
     uint16_t dn_val = (uint16_t)(cpu.d[dn] & 0xFFFF);
     int16_t new_val = (int16_t)(dn_val - 1);
-    cpu.d[dn] = (cpu.d[dn] & 0xFFFF0000) | ((uint32_t)(uint16_t)new_val & 0xFFFF);
+    store_dn(dn, (uint32_t)(uint16_t)new_val, 2);
 
     if (new_val != -1) {
         cpu.pc += disp - 2;

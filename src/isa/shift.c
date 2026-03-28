@@ -59,15 +59,6 @@ static uint32_t shift_mask(int size)
     return (size == 1) ? 0xFF : (size == 2) ? 0xFFFF : 0xFFFFFFFF;
 }
 
-static void shift_store_dn(int reg, uint32_t val, int size)
-{
-    if (size == 1)
-        cpu.d[reg] = (cpu.d[reg] & 0xFFFFFF00) | (val & 0xFF);
-    else if (size == 2)
-        cpu.d[reg] = (cpu.d[reg] & 0xFFFF0000) | (val & 0xFFFF);
-    else
-        cpu.d[reg] = val;
-}
 
 /* ASL: left arithmetic. C,X = last bit out; V = sign change at ANY point during shift. */
 static int op_asl_reg(uint16_t op, int count, int size, uint32_t mask)
@@ -96,7 +87,7 @@ static int op_asl_reg(uint16_t op, int count, int size, uint32_t mask)
         sign_changed = ((val & top_mask) != expected);
     }
 
-    shift_store_dn(reg, result, size);
+    store_dn(reg, result, size);
     set_nz_from_val(result, size);  /* N,Z from result; V,C cleared; X unchanged */
     if (count > 0) {
         cpu.sr &= ~(SR_V | SR_C | SR_X);
@@ -133,7 +124,7 @@ static int op_asr_reg(uint16_t op, int count, int size, uint32_t mask)
         result = (uint32_t)(sval >> count) & mask;
     }
 
-    shift_store_dn(reg, result, size);
+    store_dn(reg, result, size);
     set_nz_from_val(result, size);  /* N,Z from result; V,C cleared; X unchanged */
     if (count > 0) {
         cpu.sr &= ~(SR_V | SR_C | SR_X);
@@ -164,7 +155,7 @@ static int op_lsl_reg(uint16_t op, int count, int size, uint32_t mask)
         }
     }
 
-    shift_store_dn(reg, result, size);
+    store_dn(reg, result, size);
     set_nz_from_val(result, size);  /* N,Z from result; V,C cleared; X unchanged */
     if (count > 0) {
         cpu.sr &= ~(SR_V | SR_C | SR_X);
@@ -195,7 +186,7 @@ static int op_lsr_reg(uint16_t op, int count, int size, uint32_t mask)
         }
     }
 
-    shift_store_dn(reg, result, size);
+    store_dn(reg, result, size);
     set_nz_from_val(result, size);  /* N,Z from result; V,C cleared; X unchanged */
     if (count > 0) {
         cpu.sr &= ~(SR_V | SR_C | SR_X);
@@ -223,7 +214,7 @@ static int op_rol_reg(uint16_t op, int count, int size, uint32_t mask)
         /* eff_count==0: full rotations, result == val */
     }
 
-    shift_store_dn(reg, result, size);
+    store_dn(reg, result, size);
     set_nz_from_val(result, size);
     cpu.sr &= ~(SR_V | SR_C);
     if (last_out) cpu.sr |= SR_C;
@@ -249,7 +240,7 @@ static int op_ror_reg(uint16_t op, int count, int size, uint32_t mask)
         /* eff_count==0: full rotations, result == val */
     }
 
-    shift_store_dn(reg, result, size);
+    store_dn(reg, result, size);
     set_nz_from_val(result, size);
     cpu.sr &= ~(SR_V | SR_C);
     if (last_out) cpu.sr |= SR_C;
@@ -275,7 +266,7 @@ static int op_roxl_reg(uint16_t op, int count, int size, uint32_t mask)
         result = val;
     }
 
-    shift_store_dn(reg, result, size);
+    store_dn(reg, result, size);
     set_nz_from_val(result, size);
     if (count > 0) {
         cpu.sr &= ~(SR_V | SR_C | SR_X);
@@ -306,7 +297,7 @@ static int op_roxr_reg(uint16_t op, int count, int size, uint32_t mask)
         result = val & mask;
     }
 
-    shift_store_dn(reg, result, size);
+    store_dn(reg, result, size);
     set_nz_from_val(result, size);
     if (count > 0) {
         cpu.sr &= ~(SR_V | SR_C | SR_X);

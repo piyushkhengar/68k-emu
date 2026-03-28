@@ -127,7 +127,7 @@ void cpu_reset(void)
     for (int i = 0; i < 7; i++)
         cpu.a[i] = 0;
     cpu.a[7] = cpu.ssp;
-    cpu.sr = 0x2700;           /* Supervisor mode, interrupts disabled */
+    cpu.sr = SR_S | SR_I_MASK; /* Supervisor mode, interrupts disabled (level 7) */
     cpu.halted = 0;
     cpu.cycles = 0;
     /* 68010+: VBR resets to 0 on hardware reset. */
@@ -198,14 +198,22 @@ void set_nzvc_sub(uint32_t result, uint32_t dest_val, uint32_t source_val)
         cpu.sr |= SR_V;
 }
 
+/* Sign-extend a size-masked value to int32_t (size: 1=byte, 2=word, 4=long). */
+static inline int32_t signed_val(uint32_t v, int size)
+{
+    return (size == 1) ? (int32_t)(int8_t)v : (size == 2) ? (int32_t)(int16_t)v : (int32_t)v;
+}
+
+/* Mask+sign-extend boilerplate shared by all four sized flag helpers below. */
+#define SIZED_OPERANDS(result, dest_val, source_val, size) \
+    uint32_t mask = (size == 1) ? 0xFFu : (size == 2) ? 0xFFFFu : 0xFFFFFFFFu; \
+    uint32_t result_masked = (result) & mask, dest_masked = (dest_val) & mask, source_masked = (source_val) & mask; \
+    int32_t result_signed = signed_val(result_masked, size), dest_signed = signed_val(dest_masked, size), source_signed = signed_val(source_masked, size)
+
 /* Size-aware N,Z,V,C,X for ADD (masks operands by size before flag logic) */
 void set_nzvc_add_sized(uint32_t result, uint32_t dest_val, uint32_t source_val, int size)
 {
-    uint32_t size_mask = (size == 1) ? 0xFF : (size == 2) ? 0xFFFF : 0xFFFFFFFF;
-    uint32_t result_masked = result & size_mask, dest_masked = dest_val & size_mask, source_masked = source_val & size_mask;
-    int32_t result_signed = (size == 1) ? (int32_t)(int8_t)result_masked : (size == 2) ? (int32_t)(int16_t)result_masked : (int32_t)result_masked;
-    int32_t dest_signed = (size == 1) ? (int32_t)(int8_t)dest_masked : (size == 2) ? (int32_t)(int16_t)dest_masked : (int32_t)dest_masked;
-    int32_t source_signed = (size == 1) ? (int32_t)(int8_t)source_masked : (size == 2) ? (int32_t)(int16_t)source_masked : (int32_t)source_masked;
+    SIZED_OPERANDS(result, dest_val, source_val, size);
     cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C | SR_X);
     if (result_masked == 0)
         cpu.sr |= SR_Z;
@@ -213,38 +221,30 @@ void set_nzvc_add_sized(uint32_t result, uint32_t dest_val, uint32_t source_val,
         cpu.sr |= SR_N;
     if (result_masked < dest_masked)  /* Carry out (unsigned) */
         cpu.sr |= SR_C | SR_X;
-
     if ((dest_signed > 0 && source_signed > 0 && result_signed < 0) || (dest_signed < 0 && source_signed < 0 && result_signed > 0))
         cpu.sr |= SR_V;
 }
 
-/* Size-aware N,Z,V,C,X for ADDX/SUBX: Z cleared if result nonzero, unchanged otherwise */
+/* Size-aware N,Z,V,C,X for ADDX: Z cleared if result nonzero, unchanged otherwise. */
 void set_nzvc_addx_sized(uint32_t result, uint32_t dest_val, uint32_t source_val, int size, uint32_t xbit)
 {
-    uint32_t size_mask = (size == 1) ? 0xFF : (size == 2) ? 0xFFFF : 0xFFFFFFFF;
-    uint32_t result_masked = result & size_mask, dest_masked = dest_val & size_mask, source_masked = source_val & size_mask;
-    int32_t result_signed = (size == 1) ? (int32_t)(int8_t)result_masked : (size == 2) ? (int32_t)(int16_t)result_masked : (int32_t)result_masked;
-    int32_t dest_signed = (size == 1) ? (int32_t)(int8_t)dest_masked : (size == 2) ? (int32_t)(int16_t)dest_masked : (int32_t)dest_masked;
-    int32_t source_signed = (size == 1) ? (int32_t)(int8_t)source_masked : (size == 2) ? (int32_t)(int16_t)source_masked : (int32_t)source_masked;
+    SIZED_OPERANDS(result, dest_val, source_val, size);
     cpu.sr &= ~(SR_N | SR_V | SR_C | SR_X);
     if (result_masked != 0)
-        cpu.sr &= ~SR_Z;   /* Z cleared if nonzero */
+        cpu.sr &= ~SR_Z;   /* Z cleared if nonzero; unchanged if zero */
     if (result_signed < 0)
         cpu.sr |= SR_N;
     /* Carry: sum overflows the size (xbit must be included in the check) */
-    if ((uint64_t)dest_masked + (uint64_t)source_masked + xbit > (uint64_t)size_mask)
+    if ((uint64_t)dest_masked + (uint64_t)source_masked + xbit > (uint64_t)mask)
         cpu.sr |= SR_C | SR_X;
     if ((dest_signed > 0 && source_signed > 0 && result_signed < 0) || (dest_signed < 0 && source_signed < 0 && result_signed > 0))
         cpu.sr |= SR_V;
 }
 
+/* Size-aware N,Z,V,C,X for SUBX: Z cleared if result nonzero, unchanged otherwise. */
 void set_nzvc_subx_sized(uint32_t result, uint32_t dest_val, uint32_t source_val, int size, uint32_t xbit)
 {
-    uint32_t size_mask = (size == 1) ? 0xFF : (size == 2) ? 0xFFFF : 0xFFFFFFFF;
-    uint32_t result_masked = result & size_mask, dest_masked = dest_val & size_mask, source_masked = source_val & size_mask;
-    int32_t result_signed = (size == 1) ? (int32_t)(int8_t)result_masked : (size == 2) ? (int32_t)(int16_t)result_masked : (int32_t)result_masked;
-    int32_t dest_signed = (size == 1) ? (int32_t)(int8_t)dest_masked : (size == 2) ? (int32_t)(int16_t)dest_masked : (int32_t)dest_masked;
-    int32_t source_signed = (size == 1) ? (int32_t)(int8_t)source_masked : (size == 2) ? (int32_t)(int16_t)source_masked : (int32_t)source_masked;
+    SIZED_OPERANDS(result, dest_val, source_val, size);
     cpu.sr &= ~(SR_N | SR_V | SR_C | SR_X);
     if (result_masked != 0)
         cpu.sr &= ~SR_Z;
@@ -260,13 +260,8 @@ void set_nzvc_subx_sized(uint32_t result, uint32_t dest_val, uint32_t source_val
 /* Size-aware N,Z,V,C,X for SUB/CMP. affect_x: 0=CMP/CMPI/CMPA preserve X, 1=SUB/SUBI set X=C. */
 void set_nzvc_sub_sized(uint32_t result, uint32_t dest_val, uint32_t source_val, int size, int affect_x)
 {
-    uint32_t size_mask = (size == 1) ? 0xFF : (size == 2) ? 0xFFFF : 0xFFFFFFFF;
-    uint32_t result_masked = result & size_mask, dest_masked = dest_val & size_mask, source_masked = source_val & size_mask;
-    int32_t result_signed = (size == 1) ? (int32_t)(int8_t)result_masked : (size == 2) ? (int32_t)(int16_t)result_masked : (int32_t)result_masked;
-    int32_t dest_signed = (size == 1) ? (int32_t)(int8_t)dest_masked : (size == 2) ? (int32_t)(int16_t)dest_masked : (int32_t)dest_masked;
-    int32_t source_signed = (size == 1) ? (int32_t)(int8_t)source_masked : (size == 2) ? (int32_t)(int16_t)source_masked : (int32_t)source_masked;
-    uint16_t clear_mask = SR_N | SR_Z | SR_V | SR_C | (affect_x ? SR_X : 0);
-    cpu.sr &= ~clear_mask;
+    SIZED_OPERANDS(result, dest_val, source_val, size);
+    cpu.sr &= ~(SR_N | SR_Z | SR_V | SR_C | (affect_x ? SR_X : 0));
     if (result_masked == 0)
         cpu.sr |= SR_Z;
     if (result_signed < 0)
@@ -349,17 +344,17 @@ void cpu_take_addr_err(uint32_t fault_addr, uint16_t ir)
     (void)fault_addr; (void)ir; return;
 #endif
     uint16_t saved_sr = cpu.sr;
-    if (!(saved_sr & 0x2000))
+    if (!(saved_sr & SR_S))
         cpu.usp = cpu.a[7];
-    cpu.sr = (saved_sr | 0x2000) & ~0x8000;  /* Set S, clear T */
+    cpu.sr = (saved_sr | SR_S) & ~SR_T;  /* Set S, clear T */
     exception_cycles_result = pending_cycles + exception_cycles(ADDR_ERR_VECTOR);
     /* FC=6 supervisor program, FC=2 user program; I=1 instruction fetch, R=1 read */
-    uint8_t inst_fc = (saved_sr & 0x2000) ? 6 : 2;
+    uint8_t inst_fc = (saved_sr & SR_S) ? 6 : 2;
     uint8_t inst_access_bits = (uint8_t)(0x10 | 0x08 | inst_fc);
     /* Restore saved_sr masked to valid bits; push_addr_err_frame uses cpu.sr for SR slot */
-    cpu.sr = saved_sr & 0xA71F;
+    cpu.sr = saved_sr & SR_VALID;
     push_addr_err_frame(fault_addr, ir, fault_addr - 4, inst_access_bits);
-    cpu.sr = (saved_sr | 0x2000) & ~0x8000;
+    cpu.sr = (saved_sr | SR_S) & ~SR_T;
 
 #if defined(__GNUC__) && defined(_WIN32)
     __builtin_longjmp(exception_buf, 1);
@@ -377,19 +372,19 @@ void cpu_take_addr_err_data(uint32_t fault_addr, int is_read)
 {
     uint16_t saved_sr = cpu.sr;
     uint16_t ir = cpu.ir;
-    if (!(saved_sr & 0x2000))
+    if (!(saved_sr & SR_S))
         cpu.usp = cpu.a[7];
-    cpu.sr = (saved_sr | 0x2000) & ~0x8000;
+    cpu.sr = (saved_sr | SR_S) & ~SR_T;
     exception_cycles_result = pending_cycles + exception_cycles(ADDR_ERR_VECTOR);
     /* Compute access_bits: R/W(bit4), I/N=0, FC(supervisor=5, user=1) */
-    uint8_t fc = (saved_sr & 0x2000) ? 5 : 1;
+    uint8_t fc = (saved_sr & SR_S) ? 5 : 1;
     uint8_t access_bits = (uint8_t)((is_read ? 0x10 : 0x00) | fc);
     uint32_t saved_pc = cpu.pc - 2 + cpu_write_bus_adj;
     cpu_write_bus_adj = 0;
     /* Mask off reserved/undefined SR bits before saving in exception frame */
-    cpu.sr = saved_sr & 0xA71F;
+    cpu.sr = saved_sr & SR_VALID;
     push_addr_err_frame(fault_addr, ir, saved_pc, access_bits);
-    cpu.sr = (saved_sr | 0x2000) & ~0x8000;
+    cpu.sr = (saved_sr | SR_S) & ~SR_T;
 
 #if defined(__GNUC__) && defined(_WIN32)
     __builtin_longjmp(exception_buf, 1);
@@ -407,11 +402,11 @@ void cpu_take_exception(int vector_num, int cycles_before_fault)
     uint16_t saved_sr = cpu.sr;
 
     /* If user mode, save USP before switching */
-    if (!(saved_sr & 0x2000))
+    if (!(saved_sr & SR_S))
         cpu.usp = cpu.a[7];
 
     /* Switch to supervisor mode (S=1) and clear trace (T=0). */
-    cpu.sr = (cpu.sr | 0x2000) & ~0x8000;
+    cpu.sr = (cpu.sr | SR_S) & ~SR_T;
 
     exception_cycles_result = cycles_before_fault + exception_cycles(vector_num);
 
@@ -430,7 +425,7 @@ void cpu_take_exception(int vector_num, int cycles_before_fault)
 
 int require_supervisor(void)
 {
-    if (!(cpu.sr & 0x2000)) {
+    if (!(cpu.sr & SR_S)) {
         cpu_take_exception(PRIVILEGE_VECTOR, 4);
         return 0;
     }
@@ -515,11 +510,11 @@ int cpu_step(void)
             int vector = 24 + level;
             uint16_t saved_sr = cpu.sr;
 
-            if (!(saved_sr & 0x2000))
+            if (!(saved_sr & SR_S))
                 cpu.usp = cpu.a[7];
 
-            cpu.sr = (cpu.sr | 0x2000) & ~0x8000;
-            cpu.sr = (cpu.sr & ~0x0700) | (level << 8);
+            cpu.sr = (cpu.sr | SR_S) & ~SR_T;
+            cpu.sr = (cpu.sr & ~SR_I_MASK) | (level << 8);
             push_exc_frame(cpu.pc, saved_sr, vector);
             cpu.pc = read_vector(vector);
 
@@ -530,7 +525,7 @@ int cpu_step(void)
         }
     }
 
-    int was_trace = cpu.sr & 0x8000;
+    int was_trace = cpu.sr & SR_T;
 
     pending_cycles = 0;
 
@@ -549,9 +544,9 @@ int cpu_step(void)
 
     if (was_trace && !cpu.halted) {
         uint16_t saved_sr = cpu.sr;
-        if (!(saved_sr & 0x2000))
+        if (!(saved_sr & SR_S))
             cpu.usp = cpu.a[7];
-        cpu.sr = (saved_sr | 0x2000) & ~0x8000;
+        cpu.sr = (saved_sr | SR_S) & ~SR_T;
         push_exc_frame(cpu.pc, saved_sr, TRACE_VECTOR);
         cpu.pc = read_vector(TRACE_VECTOR);
         cycles += exception_cycles(TRACE_VECTOR);
