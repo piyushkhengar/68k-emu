@@ -102,10 +102,14 @@ uint16_t mem_read16(uint32_t addr)
 {
     uint32_t orig = addr;
     addr = ADDR_MASK24(addr);
+#ifndef MUSASHI_DIFF_MODE
     if (addr & 1) {
         cpu_take_addr_err_data(orig, 1);
         return 0;
     }
+#else
+    (void)orig;
+#endif
     if (active_bus)
         return active_bus->read16(addr);
     return flat_read16(addr);
@@ -115,10 +119,14 @@ uint32_t mem_read32(uint32_t addr)
 {
     uint32_t orig = addr;
     addr = ADDR_MASK24(addr);
+#ifndef MUSASHI_DIFF_MODE
     if (addr & 1) {
         cpu_take_addr_err_data(orig, 1);
         return 0;
     }
+#else
+    (void)orig;
+#endif
     if (active_bus)
         return active_bus->read32(addr);
     return flat_read32(addr);
@@ -138,10 +146,14 @@ void mem_write16(uint32_t addr, uint16_t val)
 {
     uint32_t orig = addr;
     addr = ADDR_MASK24(addr);
+#ifndef MUSASHI_DIFF_MODE
     if (addr & 1) {
         cpu_take_addr_err_data(orig, 0);
         return;
     }
+#else
+    (void)orig;
+#endif
     if (active_bus) {
         active_bus->write16(addr, val);
         return;
@@ -153,10 +165,14 @@ void mem_write32(uint32_t addr, uint32_t val)
 {
     uint32_t orig = addr;
     addr = ADDR_MASK24(addr);
+#ifndef MUSASHI_DIFF_MODE
     if (addr & 1) {
         cpu_take_addr_err_data(orig, 0);
         return;
     }
+#else
+    (void)orig;
+#endif
     if (active_bus) {
         active_bus->write32(addr, val);
         return;

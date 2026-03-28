@@ -30,7 +30,21 @@ GENESIS_SRCS = src/genesis/bus.c src/genesis/vdp.c src/genesis/io.c \
 SRCS = $(CORE_SRCS) $(GENESIS_SRCS)
 OBJS = $(SRCS:.c=.o)
 
-.PHONY: all clean test mcl68-test genesis processor-tests processor-tests-68010 processor-tests-68020 processor-tests-68030
+# ---- Musashi differential validator ------------------------------------
+# m68kfpu.c is #included directly by m68kcpu.c — do not compile separately.
+# m68kdasm.c is omitted (disassembly not needed for differential testing).
+MUSASHI_SRCS = deps/musashi/m68kcpu.c deps/musashi/m68kops.c \
+               deps/musashi/softfloat/softfloat.c
+MUSASHI_EMU_SRCS = src/core/cpu.c src/core/memory.c src/core/ea.c \
+                   src/isa/move.c src/isa/alu.c src/isa/branch.c src/isa/control.c \
+                   src/isa/immediate.c src/isa/logic.c src/isa/shift.c src/isa/bit.c \
+                   src/isa/movem.c src/isa/movep.c \
+                   src/timing.c \
+                   deps/cJSON/cJSON.c
+MUSASHI_DIFF_SRCS = $(MUSASHI_EMU_SRCS) $(MUSASHI_SRCS) src/musashi_diff.c
+MUSASHI_CFLAGS = $(CFLAGS) -Ideps/musashi -Ideps/musashi/softfloat -DMUSASHI_DIFF_MODE -Wno-unused-parameter -Wno-sign-compare
+
+.PHONY: all clean test mcl68-test genesis processor-tests processor-tests-68010 processor-tests-68020 processor-tests-68030 musashi-diff
 
 all: $(TARGET)
 
@@ -55,8 +69,17 @@ src/genesis/audio.o: src/genesis/audio.c
 %.o: %.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
+68k-musashi-diff: $(MUSASHI_DIFF_SRCS)
+	$(CC) $(MUSASHI_CFLAGS) -o $@ $^ $(LDFLAGS)
+
+# Generate Musashi opcode table if not present
+deps/musashi/m68kops.c: deps/musashi/m68kmake.c deps/musashi/m68k_in.c
+	$(CC) -o deps/musashi/m68kmake deps/musashi/m68kmake.c
+	cd deps/musashi && ./m68kmake
+
 clean:
 	rm -f $(OBJS) src/genesis/genesis_sdl.o src/genesis/renderer.o src/genesis/audio.o src/system.o $(TARGET)
+	rm -f 68k-musashi-diff deps/musashi/m68kmake
 
 # SPEED: run tests at given MHz (e.g. make test SPEED=7.09). Omit for hyperspeed.
 SPEED ?=
@@ -163,6 +186,36 @@ processor-tests-68030: $(TARGET)
 		echo "  ~13k  mode-6 EA tests where bit 8=1 triggers the full-EA path."; \
 		echo "Note: no 68030-specific corpus exists yet in SingleStepTests/680x0."; \
 		exit $$EXIT; \
+	else \
+		echo "ProcessorTests not found at $(PROC_TESTS)"; \
+		echo "Clone: git clone https://github.com/SingleStepTests/680x0 ProcessorTests"; \
+		exit 1; \
+	fi
+
+# Musashi differential validation.
+# Runs every ProcessorTests case through both our emulator and Musashi.
+# REAL_DIFF lines flag disagreements with Musashi (investigate if also a corpus failure).
+# CORPUS_DIFF lines mean we agree with Musashi but differ from the JSON corpus
+# (typically test-suite SSP-convention quirks, not emulator bugs).
+#
+# Known REAL_DIFFs in the full 68000 corpus (all confirmed NOT bugs in our emulator —
+# processor-tests passes 100% for all these instructions; Musashi diverges from real hw):
+#   ~4973  DIVS  — V flag undefined for division overflow
+#   ~4350  DIVU  — V flag undefined for division overflow
+#   ~3736  ASR   — Musashi X/C flag edge cases (count=0 or count>16)
+#   ~3715  SBCD  — V flag documented undefined for BCD ops
+#   ~3410  NBCD  — V flag documented undefined for BCD ops
+#   ~814   ABCD  — V flag documented undefined for BCD ops
+#   Total: ~20998 REAL_DIFFs, all Musashi undefined-behavior divergences
+#
+# Usage:
+#   make musashi-diff                        # full suite
+#   make musashi-diff PROC_FILTER=ADD        # only ADD* instruction files
+#   make musashi-diff PROC_FILTER=ADD MDF_FLAGS=-v  # also show CORPUS_DIFF
+MDF_FLAGS ?=
+musashi-diff: 68k-musashi-diff
+	@if [ -d "$(PROC_TESTS)" ]; then \
+		./68k-musashi-diff "$(PROC_TESTS)" $(if $(PROC_FILTER),$(PROC_FILTER),) $(MDF_FLAGS) || exit 1; \
 	else \
 		echo "ProcessorTests not found at $(PROC_TESTS)"; \
 		echo "Clone: git clone https://github.com/SingleStepTests/680x0 ProcessorTests"; \

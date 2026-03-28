@@ -258,25 +258,37 @@ static int op_addx_subx(uint16_t op, int is_add)
         else
             set_nzvc_subx_sized(result, dest_val, src, d.size, xbit);
     } else {
-        /* ADDX/SUBX -(Ay), -(Ax): process source then dest sequentially (real 68000 order). */
+        /* ADDX/SUBX -(Ay), -(Ax): process source then dest sequentially (real 68000 order).
+         * For .l, real 68000 decrements in two word-bus steps: A -= 2, then A -= 2 if even.
+         * If the address is still odd after the first step, the address error fires and A
+         * is left at A_initial - 2.  In MUSASHI_DIFF_MODE address errors are suppressed, so
+         * we always do the full ea_step decrement to match Musashi's simplified model. */
         pending_cycles += 2;
+#ifdef MUSASHI_DIFF_MODE
+        cpu.a[d.src_reg] -= ea_step(d.src_reg, d.size);
+#else
         if (d.size == 4) {
             cpu.a[d.src_reg] -= 2;
             if (!(cpu.a[d.src_reg] & 1)) cpu.a[d.src_reg] -= 2;
         } else {
             cpu.a[d.src_reg] -= ea_step(d.src_reg, d.size);
         }
+#endif
         uint32_t addr_y = cpu.a[d.src_reg];
         if (d.src_reg == 7) sync_a7_to_sp();
         uint32_t src = alu_mem_read_sized(addr_y, d.size);
         pending_cycles += (d.size <= 2) ? 4 : 8;
 
+#ifdef MUSASHI_DIFF_MODE
+        cpu.a[d.dest_reg] -= ea_step(d.dest_reg, d.size);
+#else
         if (d.size == 4) {
             cpu.a[d.dest_reg] -= 2;
             if (!(cpu.a[d.dest_reg] & 1)) cpu.a[d.dest_reg] -= 2;
         } else {
             cpu.a[d.dest_reg] -= ea_step(d.dest_reg, d.size);
         }
+#endif
         uint32_t addr_x = cpu.a[d.dest_reg];
         if (d.dest_reg == 7) sync_a7_to_sp();
         uint32_t dest_val = alu_mem_read_sized(addr_x, d.size);

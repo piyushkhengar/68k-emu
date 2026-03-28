@@ -343,6 +343,11 @@ static void push_addr_err_frame(uint32_t fault_addr, uint16_t ir,
  */
 void cpu_take_addr_err(uint32_t fault_addr, uint16_t ir)
 {
+#ifdef MUSASHI_DIFF_MODE
+    /* In diff mode address errors are suppressed so both emulators behave
+     * identically on odd-address accesses (Musashi has AERR emulation off). */
+    (void)fault_addr; (void)ir; return;
+#endif
     uint16_t saved_sr = cpu.sr;
     if (!(saved_sr & 0x2000))
         cpu.usp = cpu.a[7];

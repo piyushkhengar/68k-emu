@@ -241,14 +241,17 @@ void ea_store_value(int mode, int reg, int size, uint32_t value)
         return;
     }
     if (mode == 4 && size == 4) {
-        /* -(An).L destination: two 2-byte steps. If first step lands odd,
-         * leave An at An-2 (write fires with An at An-2).
-         * Real 68000 does np (prefetch) before -(An) writes; adjust saved_pc by +2.
-         * Pre-fault: 2 predecrement internal + 2 prefetch overlap = 4 cycles. */
+        /* -(An).L destination: real 68000 decrements in two word-bus steps.
+         * A -= 2, then A -= 2 if even (address error fires at odd).
+         * In MUSASHI_DIFF_MODE address errors are suppressed so always do -4. */
         pending_cycles += 4;
         cpu_write_bus_adj = 2;
+#ifdef MUSASHI_DIFF_MODE
+        cpu.a[reg] -= ea_step(reg, size);
+#else
         cpu.a[reg] -= 2;
         if (!(cpu.a[reg] & 1)) cpu.a[reg] -= 2;
+#endif
         addr = cpu.a[reg];
         if (reg == 7) sync_a7_to_sp();
         mem_write_sized(addr, size, value);

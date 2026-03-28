@@ -48,12 +48,18 @@ int op_movem_store(uint16_t op)
         addr = cpu.a[ea_reg];
         for (int i = 0; i < 16; i++) {
             if (mask & (1u << i)) {
+                /* Real 68000 .l predecrement: two word-bus steps (A-=2 twice if aligned).
+                 * In MUSASHI_DIFF_MODE always do the full step to match Musashi. */
+#ifdef MUSASHI_DIFF_MODE
+                addr -= size;
+#else
                 if (size == 4) {
                     addr -= 2;
                     if (!(addr & 1)) addr -= 2;
                 } else {
                     addr -= size;
                 }
+#endif
                 uint32_t val;
                 if (i < 8)
                     val = cpu.a[7 - i];
