@@ -5,6 +5,9 @@
 #include "memory.h"
 #include "timing.h"
 
+#define CYCLES_CMPM_BW  12   /* CMPM byte/word */
+#define CYCLES_CMPM_L   20   /* CMPM long */
+
 /*
  * ADD/SUB/CMP using EA module. Supports all sizes (B, W, L) and EA modes
  * implemented in ea.c: Dn, An, (An), (An)+, -(An), d(An), abs.w, abs.l, d(PC), #imm.
@@ -363,7 +366,7 @@ static int op_cmpm(uint16_t op)
     dst &= mask;
     uint32_t result = (dst - src) & mask;
     set_nzvc_sub_sized(result, dst, src, size, 0);  /* CMPM: X not affected */
-    return 12 + (size == 4 ? 8 : 0);  /* 12 for .b/.w, 20 for .l */
+    return (size == 4) ? CYCLES_CMPM_L : CYCLES_CMPM_BW;
 }
 
 /* 0xBxxx: CMP, CMPA, CMPM, or EOR.

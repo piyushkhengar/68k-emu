@@ -6,8 +6,26 @@
 #include "movem.h"
 #include "timing.h"
 
-#define CYCLES_STOP  4
-#define CYCLES_RESET 132
+/* Fixed cycle counts for control/privileged instructions. */
+#define CYCLES_STOP           4
+#define CYCLES_RESET        132
+#define CYCLES_TRAPV_NOT      4   /* TRAPV: no trap taken */
+#define CYCLES_MOVE_USP       4   /* MOVE USP,An / MOVE An,USP */
+#define CYCLES_RTR           20   /* RTR */
+#define CYCLES_RTE           20   /* RTE */
+#define CYCLES_RTD           16   /* RTD (68010+) */
+#define CYCLES_MOVEC_TO_CR   10   /* MOVEC Rn, Rc  (write to control register) */
+#define CYCLES_MOVEC_FROM_CR 12   /* MOVEC Rc, Rn  (read from control register) */
+#define CYCLES_EXT_SWAP       4   /* EXT / SWAP */
+#define CYCLES_LINK          16   /* LINK.W */
+#define CYCLES_LINK_L        12   /* LINK.L (68020+) */
+#define CYCLES_UNLK          12   /* UNLK */
+#define CYCLES_TAS_DN         4   /* TAS Dn */
+#define CYCLES_NOT_DN_BW      4   /* NOT Dn byte/word */
+#define CYCLES_NOT_DN_L       6   /* NOT Dn long */
+#define CYCLES_MOVE_FROM_SR_DN 6  /* MOVE SR, Dn */
+#define CYCLES_MMU_WORD      28   /* MMU ops with 32-bit or no operand (PFLUSH, PMOVE 32-bit, PTEST) */
+#define CYCLES_MMU_LONG      36   /* MMU ops with 64-bit operand (PMOVE SRP/CRP) */
 
 /* MOVEC control register identifiers (extension word bits 11-0). */
 #define CR_SFC  0x000  /* Source Function Code          (68010+) */
@@ -50,7 +68,7 @@ static int op_trapv(uint16_t op)
         cpu_take_exception(TRAPV_VECTOR, 0);
         return 0;
     }
-    return 4;
+    return CYCLES_TRAPV_NOT;
 }
 
 /* CHK Dn, <ea>: 0x4180-0x41BF. Bounds check; trap vector 6 if Dn < 0 or Dn > (EA). */
@@ -84,7 +102,7 @@ static int op_move_usp_to_an(uint16_t op)
     cpu.a[an] = cpu.usp;
     if (an == 7 && (cpu.sr & SR_S))
         cpu.ssp = cpu.a[7];  /* A7 = SSP in supervisor mode */
-    return 4;
+    return CYCLES_MOVE_USP;
 }
 
 /* MOVE An, USP: 0x4E60-0x4E67 (ProcessorTests: MOVEtoUSP). Supervisor only. */
@@ -96,7 +114,7 @@ static int op_move_an_to_usp(uint16_t op)
     cpu.usp = cpu.a[an];
     if (an == 7 && !(cpu.sr & SR_S))
         cpu.a[7] = cpu.usp;  /* User mode: A7 = USP */
-    return 4;
+    return CYCLES_MOVE_USP;
 }
 
 /* NOP: no operation. 0x4E71. */
@@ -119,7 +137,7 @@ static int op_rtr(uint16_t op)
     cpu_sp_set(sp + 6);
     if (cpu.pc & 1)
         cpu_take_addr_err(cpu.pc, op);
-    return 20;
+    return CYCLES_RTR;
 }
 
 /* RTS: pop return address from stack, jump to it. 0x4E75. */
@@ -177,7 +195,7 @@ static int op_movec(uint16_t op)
                       cpu.ssp  = val;     break;
         default: return op_unimplemented(op);
         }
-        return 10;
+        return CYCLES_MOVEC_TO_CR;
     } else {
         /* MOVEC Rc, Rn (0x4E7A): control register -> general register */
         uint32_t val;
@@ -198,7 +216,7 @@ static int op_movec(uint16_t op)
         }
         if (da) { cpu.a[reg] = val; if (reg == 7) sync_a7_to_sp(); }
         else      cpu.d[reg] = val;
-        return 12;
+        return CYCLES_MOVEC_FROM_CR;
     }
 }
 
@@ -216,7 +234,7 @@ static int op_rtd(uint16_t op)
     cpu.a[7] = cpu.ssp;
     if (cpu.pc & 1)
         cpu_take_addr_err(cpu.pc, op);
-    return 16;
+    return CYCLES_RTD;
 }
 
 /* BKPT #n (0x4848-0x484F): breakpoint. 68010+.
@@ -229,8 +247,6 @@ static int op_bkpt(uint16_t op)
     cpu_take_exception(ILLEGAL_VECTOR, 4);
     return 0;  /* unreachable */
 }
-
-#define CYCLES_RTE  20
 
 /* TRAP #n: software interrupt. 0x4E40-0x4E4F. Vector 32+n. Total = 34 cycles. */
 static int op_trap(uint16_t op)
@@ -310,7 +326,7 @@ static int op_not(uint16_t op)
     ea_write_rmw(&rmw, result);
     set_nz_from_val(result, d.size);
     if (d.ea_mode == 0)
-        return (d.size == 4) ? 6 : 4;
+        return (d.size == 4) ? CYCLES_NOT_DN_L : CYCLES_NOT_DN_BW;
     return ((d.size == 4) ? 12 : 8) + ea_cycles(d.ea_mode, d.ea_reg, d.size);
 }
 
@@ -421,7 +437,7 @@ static int op_tas(uint16_t op)
     uint8_t result = val | 0x80;
     ea_write_rmw(&rmw, result);
     if (ea_mode == 0)
-        return 4;
+        return CYCLES_TAS_DN;
     return 10 + ea_cycles(ea_mode, ea_reg, 1);
 }
 
@@ -504,7 +520,7 @@ static int op_move_from_sr(uint16_t op)
     ea_read_rmw(ea_mode, ea_reg, 2, &rmw);
     ea_write_rmw(&rmw, (uint32_t)cpu.sr & 0xFFFF);
     if (ea_mode == 0)
-        return 6;
+        return CYCLES_MOVE_FROM_SR_DN;
     return 8 + ea_cycles(ea_mode, ea_reg, 2);
 }
 
@@ -550,10 +566,6 @@ static int op_clr(uint16_t op)
     cpu.sr |= SR_Z;
     return clr_cycles(ea_mode, ea_reg, size);
 }
-
-#define CYCLES_EXT_SWAP  4
-#define CYCLES_LINK      16
-#define CYCLES_UNLK      12
 
 /* EXT.W / EXT.L / EXTB.L: sign-extend a data register.
  *   EXT.W  (0x4880-0x4887, opmode=2): byte  -> word  (high word of Dn preserved)
@@ -627,7 +639,7 @@ static int op_link_l(uint16_t op)
     mem_write32(sp, cpu.a[an]);
     cpu.a[an] = sp;
     cpu_sp_set(sp + disp);
-    return 12;  /* MC68020 LINK.L: 12 cycles */
+    return CYCLES_LINK_L;
 }
 
 /* UNLK An: SP=An, An=pop, SP=SP+4. 0x4E58-0x4E5F.
@@ -683,29 +695,29 @@ static int op_mmu(uint16_t op)
         /* Variants with an EA operand: resolve to advance PC past ext words */
         if (ea_mode >= 2)
             ea_address_no_fetch(ea_mode, ea_reg, &addr);
-        return 28;
+        return CYCLES_MMU_WORD;
 
     case 2: /* PMOVE <preg>, <ea> — read MMU register → memory */
         /* TC is the only 32-bit register at this ext code; others treated identically */
         if (ea_resolve_addr(ea_mode, ea_reg, 4, &addr))
             mem_write32(addr, cpu.tc);
-        return 28;
+        return CYCLES_MMU_WORD;
 
     case 3: /* PMOVE <ea>, <preg> — write memory → MMU register */
         if (ea_resolve_addr(ea_mode, ea_reg, 4, &addr))
             cpu.tc = mem_read32(addr);
-        return 28;
+        return CYCLES_MMU_WORD;
 
     case 4: /* PTEST — probe address translation; set MMUSR = 0 (no fault) */
         cpu.mmusr = 0;
-        return 28;
+        return CYCLES_MMU_WORD;
 
     case 5: /* PMOVE SRP, <ea> — read Supervisor Root Pointer (64-bit) */
         if (ea_resolve_addr(ea_mode, ea_reg, 4, &addr)) {
             mem_write32(addr,     (uint32_t)(cpu.srp >> 32));
             mem_write32(addr + 4, (uint32_t)(cpu.srp & 0xFFFFFFFFu));
         }
-        return 36;
+        return CYCLES_MMU_LONG;
 
     case 6: /* PMOVE <ea>, SRP — write Supervisor Root Pointer (64-bit) */
         if (ea_resolve_addr(ea_mode, ea_reg, 4, &addr)) {
@@ -713,7 +725,7 @@ static int op_mmu(uint16_t op)
             uint64_t lo = mem_read32(addr + 4);
             cpu.srp = (hi << 32) | lo;
         }
-        return 36;
+        return CYCLES_MMU_LONG;
 
     case 7: /* PMOVE CRP — direction determined by bit 9 of ext word */
         if (ext & 0x0200) {
@@ -728,7 +740,7 @@ static int op_mmu(uint16_t op)
                 mem_write32(addr + 4, (uint32_t)(cpu.crp & 0xFFFFFFFFu));
             }
         }
-        return 36;
+        return CYCLES_MMU_LONG;
 
     case 0: /* PMOVE TT0/TT1 — bit 12=TT1, bit 9=direction */
         if (ext & 0x0200) {
@@ -743,7 +755,7 @@ static int op_mmu(uint16_t op)
                 mem_write32(addr, (ext & 0x1000) ? cpu.tt1 : cpu.tt0);
             }
         }
-        return 28;
+        return CYCLES_MMU_WORD;
 
     default:
         return op_unimplemented(op);

@@ -12,6 +12,17 @@
 #include "memory.h"
 #include "timing.h"
 
+/* Fixed base cycle counts for immediate arithmetic instructions. */
+#define CYCLES_ADDI_SUBI_DN_BW   8   /* ADDI/SUBI Dn byte/word */
+#define CYCLES_ADDI_SUBI_DN_L   16   /* ADDI/SUBI Dn long */
+#define CYCLES_ADDI_SUBI_MEM_BW 12   /* ADDI/SUBI memory byte/word base */
+#define CYCLES_ADDI_SUBI_MEM_L  20   /* ADDI/SUBI memory long base */
+#define CYCLES_CMPI_DN_BW        8   /* CMPI Dn byte/word */
+#define CYCLES_CMPI_DN_L        14   /* CMPI Dn long */
+#define CYCLES_CMPI_MEM_BW       8   /* CMPI memory byte/word base */
+#define CYCLES_CMPI_MEM_L       12   /* CMPI memory long base */
+#define CYCLES_ORI_ANDI_EORI_CCR_SR  20
+
 static uint32_t fetch_imm(int size)
 {
     if (size == 1) {
@@ -60,8 +71,8 @@ static int op_addi(uint16_t op)
     ea_write_rmw(&rmw, result);
     set_nzvc_add_sized(result, dest, imm, d.size);
     if (d.ea_mode == 0)
-        return (d.size == 4) ? 16 : 8;
-    return ((d.size == 4) ? 20 : 12) + ea_cycles(d.ea_mode, d.ea_reg, d.size);
+        return (d.size == 4) ? CYCLES_ADDI_SUBI_DN_L : CYCLES_ADDI_SUBI_DN_BW;
+    return ((d.size == 4) ? CYCLES_ADDI_SUBI_MEM_L : CYCLES_ADDI_SUBI_MEM_BW) + ea_cycles(d.ea_mode, d.ea_reg, d.size);
 }
 
 /* SUBI #imm, <ea>: dest = dest - imm. 0x04xx */
@@ -79,8 +90,8 @@ static int op_subi(uint16_t op)
     ea_write_rmw(&rmw, result);
     set_nzvc_sub_sized(result, dest, imm, d.size, 1);  /* SUBI: X=C */
     if (d.ea_mode == 0)
-        return (d.size == 4) ? 16 : 8;
-    return ((d.size == 4) ? 20 : 12) + ea_cycles(d.ea_mode, d.ea_reg, d.size);
+        return (d.size == 4) ? CYCLES_ADDI_SUBI_DN_L : CYCLES_ADDI_SUBI_DN_BW;
+    return ((d.size == 4) ? CYCLES_ADDI_SUBI_MEM_L : CYCLES_ADDI_SUBI_MEM_BW) + ea_cycles(d.ea_mode, d.ea_reg, d.size);
 }
 
 /* CMPI #imm, <ea>: compare, no store. 0x0Cxx. X not affected. */
@@ -96,8 +107,8 @@ static int op_cmpi(uint16_t op)
 
     set_nzvc_sub_sized(result, dest, imm, d.size, 0);  /* CMPI: X not affected */
     if (d.ea_mode == 0)
-        return (d.size == 4) ? 14 : 8;
-    return ((d.size == 4) ? 12 : 8) + ea_cycles(d.ea_mode, d.ea_reg, d.size);
+        return (d.size == 4) ? CYCLES_CMPI_DN_L : CYCLES_CMPI_DN_BW;
+    return ((d.size == 4) ? CYCLES_CMPI_MEM_L : CYCLES_CMPI_MEM_BW) + ea_cycles(d.ea_mode, d.ea_reg, d.size);
 }
 
 /* ORI #imm, <ea>: dest = dest | imm. 0x00xx. An not allowed. */
@@ -116,8 +127,8 @@ static int op_ori(uint16_t op)
     set_nz_from_val(result, d.size);
     cpu.sr &= ~(SR_V | SR_C);
     if (d.ea_mode == 0)
-        return (d.size == 4) ? 16 : 8;
-    return ((d.size == 4) ? 20 : 12) + ea_cycles(d.ea_mode, d.ea_reg, d.size);
+        return (d.size == 4) ? CYCLES_ADDI_SUBI_DN_L : CYCLES_ADDI_SUBI_DN_BW;
+    return ((d.size == 4) ? CYCLES_ADDI_SUBI_MEM_L : CYCLES_ADDI_SUBI_MEM_BW) + ea_cycles(d.ea_mode, d.ea_reg, d.size);
 }
 
 /* ANDI #imm, <ea>: dest = dest & imm. 0x02xx. An not allowed. */
@@ -136,8 +147,8 @@ static int op_andi(uint16_t op)
     set_nz_from_val(result, d.size);
     cpu.sr &= ~(SR_V | SR_C);
     if (d.ea_mode == 0)
-        return (d.size == 4) ? 16 : 8;
-    return ((d.size == 4) ? 20 : 12) + ea_cycles(d.ea_mode, d.ea_reg, d.size);
+        return (d.size == 4) ? CYCLES_ADDI_SUBI_DN_L : CYCLES_ADDI_SUBI_DN_BW;
+    return ((d.size == 4) ? CYCLES_ADDI_SUBI_MEM_L : CYCLES_ADDI_SUBI_MEM_BW) + ea_cycles(d.ea_mode, d.ea_reg, d.size);
 }
 
 /* EORI #imm, <ea>: dest = dest ^ imm. 0x0Axx. An not allowed. */
@@ -156,11 +167,9 @@ static int op_eori(uint16_t op)
     set_nz_from_val(result, d.size);
     cpu.sr &= ~(SR_V | SR_C);
     if (d.ea_mode == 0)
-        return (d.size == 4) ? 16 : 8;
-    return ((d.size == 4) ? 20 : 12) + ea_cycles(d.ea_mode, d.ea_reg, d.size);
+        return (d.size == 4) ? CYCLES_ADDI_SUBI_DN_L : CYCLES_ADDI_SUBI_DN_BW;
+    return ((d.size == 4) ? CYCLES_ADDI_SUBI_MEM_L : CYCLES_ADDI_SUBI_MEM_BW) + ea_cycles(d.ea_mode, d.ea_reg, d.size);
 }
-
-#define CYCLES_ORI_ANDI_EORI_CCR_SR  20
 
 /* ORI/ANDI/EORI to CCR: byte immediate, CCR = low byte of SR. 0x003C, 0x023C, 0x0A3C. */
 static int op_ori_ccr(uint16_t op)
