@@ -31,11 +31,21 @@
 #define CR_SFC  0x000  /* Source Function Code          (68010+) */
 #define CR_DFC  0x001  /* Destination Function Code     (68010+) */
 #define CR_CACR 0x002  /* Cache Control Register        (68020+) */
+#define CR_TC   0x003  /* Translation Control           (68040+, via MOVEC) */
+#define CR_ITT0 0x004  /* Instruction Transparent Translation 0 (68040+) */
+#define CR_ITT1 0x005  /* Instruction Transparent Translation 1 (68040+) */
+#define CR_DTT0 0x006  /* Data Transparent Translation 0        (68040+) */
+#define CR_DTT1 0x007  /* Data Transparent Translation 1        (68040+) */
+#define CR_BUSCR 0x008 /* Bus Control Register                  (68040+) */
 #define CR_USP  0x800  /* User Stack Pointer            (68010+) */
 #define CR_VBR  0x801  /* Vector Base Register          (68010+) */
 #define CR_CAAR 0x802  /* Cache Address Register        (68020+) */
 #define CR_MSP  0x803  /* Master Stack Pointer          (68020+) */
 #define CR_ISP  0x804  /* Interrupt Stack Pointer       (68020+, maps to SSP) */
+#define CR_MMUSR 0x805 /* MMU Status Register           (68040+, via MOVEC) */
+#define CR_URP  0x806  /* User Root Pointer             (68040+) */
+#define CR_SRP  0x807  /* Supervisor Root Pointer       (68040+, 32-bit via MOVEC) */
+#define CR_PCR  0x808  /* Processor Control Register    (68040+) */
 
 /* RESET: 0x4E70. Privileged. Assert external RESET (no-op in emulator). */
 static int op_reset(uint16_t op)
@@ -191,8 +201,28 @@ static int op_movec(uint16_t op)
                       cpu.caar = val;     break;
         case CR_MSP:  if (!cpu.features.has_msp)     return op_unimplemented(op);
                       cpu.msp  = val;     break;
-        case CR_ISP:  if (!cpu.features.has_msp)     return op_unimplemented(op);
-                      cpu.ssp  = val;     break;
+        case CR_ISP:   if (!cpu.features.has_msp)  return op_unimplemented(op);
+                       cpu.ssp   = val;    break;
+        case CR_TC:    if (!cpu.features.has_fpu)  return op_unimplemented(op);
+                       cpu.tc    = val;    break;
+        case CR_ITT0:  if (!cpu.features.has_fpu)  return op_unimplemented(op);
+                       cpu.itt0  = val;    break;
+        case CR_ITT1:  if (!cpu.features.has_fpu)  return op_unimplemented(op);
+                       cpu.itt1  = val;    break;
+        case CR_DTT0:  if (!cpu.features.has_fpu)  return op_unimplemented(op);
+                       cpu.dtt0  = val;    break;
+        case CR_DTT1:  if (!cpu.features.has_fpu)  return op_unimplemented(op);
+                       cpu.dtt1  = val;    break;
+        case CR_BUSCR: if (!cpu.features.has_fpu)  return op_unimplemented(op);
+                       cpu.buscr = val;    break;
+        case CR_MMUSR: if (!cpu.features.has_fpu)  return op_unimplemented(op);
+                       cpu.mmusr = (uint16_t)(val & 0xFFFF); break;
+        case CR_URP:   if (!cpu.features.has_fpu)  return op_unimplemented(op);
+                       cpu.urp   = val;    break;
+        case CR_SRP:   if (!cpu.features.has_fpu)  return op_unimplemented(op);
+                       cpu.srp   = val;    break;  /* 68040: 32-bit; stored in low 32 of uint64 */
+        case CR_PCR:   if (!cpu.features.has_fpu)  return op_unimplemented(op);
+                       cpu.pcr   = val;    break;
         default: return op_unimplemented(op);
         }
         return CYCLES_MOVEC_TO_CR;
@@ -210,8 +240,28 @@ static int op_movec(uint16_t op)
                       val = cpu.caar; break;
         case CR_MSP:  if (!cpu.features.has_msp)     return op_unimplemented(op);
                       val = cpu.msp;  break;
-        case CR_ISP:  if (!cpu.features.has_msp)     return op_unimplemented(op);
-                      val = cpu.ssp;  break;
+        case CR_ISP:   if (!cpu.features.has_msp)  return op_unimplemented(op);
+                       val = cpu.ssp;    break;
+        case CR_TC:    if (!cpu.features.has_fpu)  return op_unimplemented(op);
+                       val = cpu.tc;     break;
+        case CR_ITT0:  if (!cpu.features.has_fpu)  return op_unimplemented(op);
+                       val = cpu.itt0;   break;
+        case CR_ITT1:  if (!cpu.features.has_fpu)  return op_unimplemented(op);
+                       val = cpu.itt1;   break;
+        case CR_DTT0:  if (!cpu.features.has_fpu)  return op_unimplemented(op);
+                       val = cpu.dtt0;   break;
+        case CR_DTT1:  if (!cpu.features.has_fpu)  return op_unimplemented(op);
+                       val = cpu.dtt1;   break;
+        case CR_BUSCR: if (!cpu.features.has_fpu)  return op_unimplemented(op);
+                       val = cpu.buscr;  break;
+        case CR_MMUSR: if (!cpu.features.has_fpu)  return op_unimplemented(op);
+                       val = cpu.mmusr;  break;
+        case CR_URP:   if (!cpu.features.has_fpu)  return op_unimplemented(op);
+                       val = cpu.urp;    break;
+        case CR_SRP:   if (!cpu.features.has_fpu)  return op_unimplemented(op);
+                       val = (uint32_t)cpu.srp; break;  /* 68040: lower 32 bits */
+        case CR_PCR:   if (!cpu.features.has_fpu)  return op_unimplemented(op);
+                       val = cpu.pcr;    break;
         default: return op_unimplemented(op);
         }
         if (da) { cpu.a[reg] = val; if (reg == 7) sync_a7_to_sp(); }
@@ -765,6 +815,218 @@ static int op_mmu(uint16_t op)
 int op_mmu_dispatch(uint16_t op)
 {
     return op_mmu(op);
+}
+
+/* ---- 68040 cache control: CINV/CPUSH (0xF400-0xF4FF) ---- */
+
+int op_cache_dispatch(uint16_t op)
+{
+    if (!require_supervisor())
+        return 0;
+    /* No cache is implemented; all CINVL/P/A and CPUSHL/P/A variants are no-ops.
+     * The opcode encodes cache type (IC/DC/BC) and scope, but we ignore both. */
+    (void)op;
+    return 4;
+}
+
+/* ---- 68040 MOVE16: 16-byte aligned block transfer (0xF600-0xF6FF) ---- */
+
+int op_move16(uint16_t op)
+{
+    if (!require_supervisor())
+        return 0;
+    int ax  = op & 7;
+    int sub = (op >> 3) & 7;  /* bits 5-3 distinguish the five MOVE16 forms */
+
+    if (sub == 4) {
+        /* MOVE16 (Ax)+, (Ay)+ — both registers post-incremented */
+        uint16_t ext = fetch16();
+        int ay = (ext >> 12) & 7;
+        uint32_t src = cpu.a[ax] & ~0xFu;
+        uint32_t dst = cpu.a[ay] & ~0xFu;
+        for (int i = 0; i < 16; i++)
+            mem_write8(dst + i, mem_read8(src + i));
+        cpu.a[ax] += 16;
+        cpu.a[ay] += 16;
+        return 18;
+    }
+    /* Absolute-address forms: one EA is a 32-bit absolute, the other is a register.
+     * sub 0: (Ax)+, abs    sub 1: abs, (Ax)+    sub 2: (Ax), abs    sub 3: abs, (Ax) */
+    uint32_t abs_addr = fetch32();
+    uint32_t reg_addr = cpu.a[ax] & ~0xFu;
+    uint32_t src = (sub <= 1) ? reg_addr        : (abs_addr & ~0xFu);
+    uint32_t dst = (sub <= 1) ? (abs_addr & ~0xFu) : reg_addr;
+    for (int i = 0; i < 16; i++)
+        mem_write8(dst + i, mem_read8(src + i));
+    if (sub == 0 || sub == 1) cpu.a[ax] += 16;  /* post-increment variants */
+    return 18;
+}
+
+/* ---- 68040 FPU stubs (0xF200-0xF3FF) ---- */
+
+/* Map FPU source format specifier (bits 14-12 of ext word) to integer byte size. */
+static int fpu_src_size(int fmt)
+{
+    switch (fmt) {
+    case 6: return 1;   /* byte */
+    case 4: return 2;   /* word */
+    case 0: return 4;   /* long */
+    case 1: return 4;   /* single (treat as 32-bit load for stub) */
+    case 5: return 4;   /* double (load low 32 bits only for stub) */
+    case 2: return 4;   /* extended (load low 32 bits only for stub) */
+    default: return 4;
+    }
+}
+
+/* Update FPSR condition code bits (N, Z, I, NaN in bits 27-24) for a register. */
+static void fpu_update_fpsr(int fpn)
+{
+    uint32_t hi  = cpu.fp[fpn].mant_hi;
+    uint32_t lo  = cpu.fp[fpn].mant_lo;
+    uint32_t exp = cpu.fp[fpn].exp & 0x7FFF;
+    cpu.fpsr &= ~0x0F000000u;
+    if (exp == 0 && hi == 0 && lo == 0)
+        cpu.fpsr |= (1u << 26);  /* Z (zero) */
+    else if (cpu.fp[fpn].exp & 0x8000)
+        cpu.fpsr |= (1u << 27);  /* N (negative) */
+}
+
+/* General FPU instruction handler (cpGEN, sub-type 0). */
+static int op_fpu_gen(uint16_t op)
+{
+    uint16_t ext = fetch16();
+
+    /* FMOVEM: bits 15-14 = 11 */
+    if ((ext & 0xC000) == 0xC000) {
+        /* FMOVEM stub: consume operand and return.  Proper FMOVEM would
+         * move multiple FP registers to/from memory; for boot-level stubs
+         * we just advance past any EA extension words and do nothing. */
+        int ea_mode = (op >> 3) & 7;
+        int ea_reg  = op & 7;
+        uint32_t addr;
+        ea_resolve_addr(ea_mode, ea_reg, 4, &addr);
+        return 10;
+    }
+
+    /* Extension word layout (confirmed from MC68040 FPU manual):
+     *   bit 14  : EA involved (1=EA op, 0=FP register only op)
+     *   bit 13  : direction when bit14=1 (0=EA→FPn load, 1=FPn→EA store)
+     *   bits12-10: format specifier (EA op) or source FP register (FP-only op)
+     *   bits 9-7 : FP register (destination for load/FP-FP, source for store)
+     *   bits 6-0 : opmode */
+    int ea_op   = (ext >> 14) & 1;  /* 1 = EA is involved in the operation */
+    int to_ea   = (ext >> 13) & 1;  /* 1 = FPn→EA (store), 0 = EA→FPn (load) */
+    int src_fmt = (ext >> 10) & 7;  /* format (ea_op=1) or src FP reg (ea_op=0) */
+    int fp_reg  = (ext >> 7)  & 7;  /* FP register number (bits 9-7) */
+    int opmode  = ext & 0x7F;
+
+    switch (opmode) {
+    case 0x00: /* FMOVE */
+        if (ea_op && to_ea) {
+            /* FPn → EA (store): FP register content → memory */
+            int ea_mode = (op >> 3) & 7;
+            int ea_reg  = op & 7;
+            int sz = fpu_src_size(src_fmt);
+            ea_store_value(ea_mode, ea_reg, sz, cpu.fp[fp_reg].mant_lo);
+        } else if (ea_op) {
+            /* EA → FPn (load): memory → FP register */
+            int ea_mode = (op >> 3) & 7;
+            int ea_reg  = op & 7;
+            int sz = fpu_src_size(src_fmt);
+            uint32_t val = ea_fetch_value(ea_mode, ea_reg, sz);
+            /* Sign-extend byte/word to 32 bits */
+            if (sz == 1) val = (int32_t)(int8_t)val;
+            else if (sz == 2) val = (int32_t)(int16_t)val;
+            cpu.fp[fp_reg].mant_lo = val;
+            cpu.fp[fp_reg].mant_hi = 0;
+            cpu.fp[fp_reg].exp     = (val == 0) ? 0
+                                   : ((val & 0x80000000u) ? 0x8001u : 0x0001u);
+            fpu_update_fpsr(fp_reg);
+        } else {
+            /* FPm → FPn (src_fmt holds source FP register when ea_op=0) */
+            cpu.fp[fp_reg] = cpu.fp[src_fmt];
+            fpu_update_fpsr(fp_reg);
+        }
+        cpu.fpiar = cpu.pc - 4;
+        return 10;
+
+    case 0x18: /* FABS: absolute value — clear sign bit */
+        if (!ea_op) {
+            cpu.fp[fp_reg] = cpu.fp[src_fmt];
+            cpu.fp[fp_reg].exp &= 0x7FFF;
+            fpu_update_fpsr(fp_reg);
+        }
+        cpu.fpiar = cpu.pc - 4;
+        return 6;
+
+    case 0x1A: /* FNEG: negate — toggle sign bit */
+        if (!ea_op) {
+            cpu.fp[fp_reg] = cpu.fp[src_fmt];
+            cpu.fp[fp_reg].exp ^= 0x8000;
+            fpu_update_fpsr(fp_reg);
+        }
+        cpu.fpiar = cpu.pc - 4;
+        return 6;
+
+    default:
+        /* All other FPU opcodes: NOP stub.  Set FPIAR so software can identify
+         * the instruction, but do not take an exception (boot ROM may probe). */
+        cpu.fpiar = cpu.pc - 4;
+        return 6;
+    }
+}
+
+/* FSAVE: save FPU context frame to memory (privileged). */
+static int op_fsave(uint16_t op)
+{
+    if (!require_supervisor())
+        return 0;
+    int ea_mode = (op >> 3) & 7;
+    int ea_reg  = op & 7;
+    uint32_t addr;
+    if (ea_resolve_addr(ea_mode, ea_reg, 4, &addr)) {
+        /* Write a 4-byte null/idle state frame (format word 0x0000). */
+        mem_write16(addr,     0x0000);
+        mem_write16(addr + 2, 0x0000);
+    }
+    return 8;
+}
+
+/* FRESTORE: restore FPU context frame from memory (privileged). */
+static int op_frestore(uint16_t op)
+{
+    if (!require_supervisor())
+        return 0;
+    int ea_mode = (op >> 3) & 7;
+    int ea_reg  = op & 7;
+    uint32_t addr;
+    /* Read (and discard) the frame format word. */
+    if (ea_resolve_addr(ea_mode, ea_reg, 4, &addr))
+        (void)mem_read16(addr);
+    return 8;
+}
+
+/* FPU branch / cpScc / cpDBcc stubs: consume displacement and do not branch. */
+static int op_fpu_bcc(uint16_t op, int sub)
+{
+    (void)op;
+    if (sub == 4) fetch16();   /* cpBcc.W: 16-bit displacement */
+    if (sub == 5) fetch32();   /* cpBcc.L: 32-bit displacement */
+    /* cpScc (sub 2) and cpDBcc (sub 1): no extra words beyond the extension word
+     * already consumed by the caller; fall through is the correct stub behaviour. */
+    return 4;
+}
+
+int op_fpu_dispatch(uint16_t op)
+{
+    /* Bits 8-6 of the first opcode word identify the FPU sub-type. */
+    uint8_t sub = (op >> 6) & 7;
+    switch (sub) {
+    case 0: return op_fpu_gen(op);    /* cpGEN: general FP instruction */
+    case 6: return op_fsave(op);      /* FSAVE */
+    case 7: return op_frestore(op);   /* FRESTORE */
+    default: return op_fpu_bcc(op, sub);  /* cpBcc, cpDBcc, cpScc, cpTRAPcc */
+    }
 }
 
 /* 0x4xxx: RESET, STOP, TRAPV, LINK, UNLK, JSR, JMP, TRAP, RTE, RTS, NOP, CHK, LEA, EXT, SWAP, TST, CLR, NOT. */

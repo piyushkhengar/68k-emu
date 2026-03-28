@@ -37,7 +37,8 @@ typedef struct {
     unsigned has_32bit_muldiv : 1;  /* MULS.L/MULU.L/DIVSL/DIVUL (68020+) */
     unsigned has_trapcc       : 1;  /* TRAPcc, CHK2/CMP2, CAS/CAS2 (68020+) */
     unsigned has_msp          : 1;  /* Master stack pointer / M-bit in SR (68020+) */
-    unsigned has_mmu          : 1;  /* On-chip MMU: PMOVE/PFLUSH/PTEST (68030+) */
+    unsigned has_mmu          : 1;  /* On-chip MMU (68030+; registers via PMOVE on 030, MOVEC on 040) */
+    unsigned has_pmove        : 1;  /* 68030 only: PMOVE/PFLUSH/PTEST instructions */
     unsigned has_fpu          : 1;  /* On-chip FPU (68040+) */
 } cpu_features_t;
 
@@ -73,11 +74,24 @@ typedef struct {
     /* 68030+ MMU shadow registers (no address translation implemented;
      * these allow software to write/read MMU config without crashing). */
     uint32_t tc;    /* 68030+: Translation Control */
-    uint64_t crp;   /* 68030+: CPU Root Pointer (64-bit) */
-    uint64_t srp;   /* 68030+: Supervisor Root Pointer (64-bit) */
+    uint64_t crp;   /* 68030 only: CPU Root Pointer (64-bit, PMOVE) */
+    uint64_t srp;   /* 68030+: Supervisor Root Pointer (64-bit on 030, 32-bit on 040 via MOVEC) */
     uint32_t tt0;   /* 68030+: Transparent Translation 0 */
     uint32_t tt1;   /* 68030+: Transparent Translation 1 */
     uint16_t mmusr; /* 68030+: MMU Status Register */
+    /* 68040 MMU registers (accessed via MOVEC, not PMOVE) */
+    uint32_t urp;   /* 68040+: User Root Pointer */
+    uint32_t itt0;  /* 68040+: Instruction Transparent Translation 0 */
+    uint32_t itt1;  /* 68040+: Instruction Transparent Translation 1 */
+    uint32_t dtt0;  /* 68040+: Data Transparent Translation 0 */
+    uint32_t dtt1;  /* 68040+: Data Transparent Translation 1 */
+    uint32_t buscr; /* 68040+: Bus Control Register */
+    uint32_t pcr;   /* 68040+: Processor Control Register */
+    /* 68040 FPU state (stub: mantissa stores raw integer, no real FP arithmetic) */
+    struct { uint32_t exp; uint32_t mant_hi; uint32_t mant_lo; } fp[8]; /* FP0-FP7 */
+    uint32_t fpcr;  /* FPU Control Register */
+    uint32_t fpsr;  /* FPU Status Register */
+    uint32_t fpiar; /* FPU Instruction Address Register */
 } CPU;
 
 extern CPU cpu;

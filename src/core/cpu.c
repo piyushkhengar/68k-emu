@@ -68,11 +68,25 @@ void cpu_set_int_ack(void (*fn)(int level))
 static cpu_features_t features_for_model(cpu_model_t model)
 {
     cpu_features_t f = {0};
-    /* Each case falls through to accumulate all features up to that model. */
+    /* Each case falls through to accumulate all features up to that model.
+     * Exception: 68040/060 break out of 68030 to avoid inheriting has_pmove
+     * (the 68040 uses MOVEC for MMU registers, not PMOVE/PFLUSH/PTEST). */
     switch (model) {
     case CPU_MODEL_68060:
-    case CPU_MODEL_68040: f.has_fpu          = 1; /* fall through */
-    case CPU_MODEL_68030: f.has_mmu          = 1; /* fall through */
+    case CPU_MODEL_68040: f.has_fpu          = 1;
+                          f.has_mmu          = 1;
+                          /* has_pmove stays 0: 68040 uses MOVEC, not PMOVE */
+                          f.has_msp          = 1;
+                          f.has_trapcc       = 1;
+                          f.has_32bit_muldiv = 1;
+                          f.has_bitfield     = 1;
+                          f.has_32bit_addr   = 1;
+                          f.has_full_ea      = 1;
+                          f.has_movec        = 1;
+                          f.has_vbr          = 1;
+                          break;
+    case CPU_MODEL_68030: f.has_mmu          = 1;
+                          f.has_pmove        = 1; /* fall through */
     case CPU_MODEL_68020: f.has_msp          = 1;
                           f.has_trapcc       = 1;
                           f.has_32bit_muldiv = 1;
@@ -463,14 +477,32 @@ static int op_line1111(uint16_t op)
     return 0;  /* unreachable */
 }
 
-/* Dispatch for 0xFxxx: 0xF0-F3 = ADD (or 68030 MMU), 0xF4-FF = Line 1111. */
+/* Dispatch for 0xFxxx opcodes. */
 static int dispatch_Fxxx(uint16_t op)
 {
-    /* 68030+: all MMU instructions occupy 0xF000-0xF0FF (CpID=0, TYPE=0). */
-    if (cpu.features.has_mmu && (op & 0xFF00) == 0xF000)
+    uint8_t upper = (op >> 8) & 0x0F;
+
+    /* 68040+: FPU coprocessor instructions (0xF200-0xF3FF). */
+    if (cpu.features.has_fpu && (upper == 2 || upper == 3))
+        return op_fpu_dispatch(op);
+
+    /* 68040+: CINV/CPUSH cache control (0xF400-0xF4FF). */
+    if (cpu.features.has_fpu && upper == 4)
+        return op_cache_dispatch(op);
+
+    /* 68040+: MOVE16 (0xF600-0xF6FF). */
+    if (cpu.features.has_fpu && upper == 6)
+        return op_move16(op);
+
+    /* 68030: PMOVE-based MMU instructions (0xF000-0xF0FF, CpID=0). */
+    if (cpu.features.has_pmove && upper == 0)
         return op_mmu_dispatch(op);
-    if (((op >> 8) & 0x0F) >= 4)
+
+    /* Unimplemented line F. */
+    if (upper >= 4)
         return op_line1111(op);
+
+    /* 0xF000-0xF3FF on 68000/68010 where no FPU/MMU: falls to ADD encoding. */
     return dispatch_add(op);
 }
 
