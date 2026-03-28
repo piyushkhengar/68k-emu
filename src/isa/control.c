@@ -8,6 +8,7 @@
 
 /* Fixed cycle counts for control/privileged instructions. */
 #define CYCLES_STOP           4
+#define CYCLES_LPSTOP         8   /* approximate; real 68060 enters variable low-power state */
 #define CYCLES_RESET        132
 #define CYCLES_TRAPV_NOT      4   /* TRAPV: no trap taken */
 #define CYCLES_MOVE_USP       4   /* MOVE USP,An / MOVE An,USP */
@@ -68,6 +69,20 @@ static int op_stop(uint16_t op)
     cpu.sr = imm;
     cpu.halted = 1;
     return CYCLES_STOP;
+}
+
+/* LPSTOP #imm (0xF800 + 16-bit imm): Low-power stop. Privileged. 68060 only.
+ * Loads SR from immediate and halts until an interrupt arrives.
+ * Behaviorally identical to STOP in this emulator (no actual power state). */
+int op_lpstop(uint16_t op)
+{
+    (void)op;
+    if (!require_supervisor())
+        return 0;
+    uint16_t imm = fetch16();
+    cpu.sr = imm & SR_VALID;
+    cpu.halted = 1;
+    return CYCLES_LPSTOP;
 }
 
 /* TRAPV: 0x4E76. Trap on overflow (vector 7). Total trap = 34 cycles, no trap = 4. */

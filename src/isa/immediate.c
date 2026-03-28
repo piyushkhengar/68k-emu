@@ -290,10 +290,18 @@ static int op_addq_subq(uint16_t op, int is_sub)
  * ORI/ANDI/EORI to CCR (0x3C) and SR (0x7C). */
 int dispatch_0xxx(uint16_t op)
 {
-    /* MOVEP: 0x0108, 0x0148, 0x0188, 0x01C8 (and Dn/An variants). Check before high-nibble dispatch. */
-    {
+    /* MOVEP: 0x0108, 0x0148, 0x0188, 0x01C8 (and Dn/An variants). Check before high-nibble dispatch.
+     * 68060: MOVEP was removed — raise Line-1111 (unimplemented instruction, vector 11). */
+    if (cpu.features.has_movep) {
         int c = op_movep(op);
         if (c) return c;
+    } else {
+        uint16_t base = op & 0xF1F8;
+        if (base == 0x0108 || base == 0x0148 || base == 0x0188 || base == 0x01C8) {
+            cpu.pc -= 2;
+            cpu_take_exception(LINE1111_VECTOR, 4);
+            return 0;  /* unreachable */
+        }
     }
     /* BTST/BCHG/BCLR/BSET Dn: check before ea_field 0x3C (ORI/ANDI/EORI to CCR) which shares EA #imm. */
     if ((op & 0xF1C0) >= 0x0100 && (op & 0xF1C0) <= 0x01C0)

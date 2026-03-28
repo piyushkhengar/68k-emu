@@ -72,7 +72,19 @@ static cpu_features_t features_for_model(cpu_model_t model)
      * Exception: 68040/060 break out of 68030 to avoid inheriting has_pmove
      * (the 68040 uses MOVEC for MMU registers, not PMOVE/PFLUSH/PTEST). */
     switch (model) {
-    case CPU_MODEL_68060:
+    case CPU_MODEL_68060: f.has_lpstop       = 1;
+                          /* has_movep intentionally NOT set: MOVEP removed on 68060 */
+                          f.has_fpu          = 1;
+                          f.has_mmu          = 1;
+                          f.has_msp          = 1;
+                          f.has_trapcc       = 1;
+                          f.has_32bit_muldiv = 1;
+                          f.has_bitfield     = 1;
+                          f.has_32bit_addr   = 1;
+                          f.has_full_ea      = 1;
+                          f.has_movec        = 1;
+                          f.has_vbr          = 1;
+                          break;
     case CPU_MODEL_68040: f.has_fpu          = 1;
                           f.has_mmu          = 1;
                           /* has_pmove stays 0: 68040 uses MOVEC, not PMOVE */
@@ -84,6 +96,7 @@ static cpu_features_t features_for_model(cpu_model_t model)
                           f.has_full_ea      = 1;
                           f.has_movec        = 1;
                           f.has_vbr          = 1;
+                          f.has_movep        = 1;
                           break;
     case CPU_MODEL_68030: f.has_mmu          = 1;
                           f.has_pmove        = 1; /* fall through */
@@ -95,7 +108,7 @@ static cpu_features_t features_for_model(cpu_model_t model)
                           f.has_full_ea      = 1; /* fall through */
     case CPU_MODEL_68010: f.has_movec        = 1;
                           f.has_vbr          = 1; /* fall through */
-    case CPU_MODEL_68000: break;
+    case CPU_MODEL_68000: f.has_movep        = 1; break;
     }
     return f;
 }
@@ -497,6 +510,10 @@ static int dispatch_Fxxx(uint16_t op)
     /* 68030: PMOVE-based MMU instructions (0xF000-0xF0FF, CpID=0). */
     if (cpu.features.has_pmove && upper == 0)
         return op_mmu_dispatch(op);
+
+    /* 68060+: LPSTOP #imm (0xF800 + 16-bit immediate). */
+    if (cpu.features.has_lpstop && upper == 8 && op == 0xF800)
+        return op_lpstop(op);
 
     /* Unimplemented line F. */
     if (upper >= 4)

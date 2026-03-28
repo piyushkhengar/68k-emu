@@ -40,6 +40,8 @@ typedef struct {
     unsigned has_mmu          : 1;  /* On-chip MMU (68030+; registers via PMOVE on 030, MOVEC on 040) */
     unsigned has_pmove        : 1;  /* 68030 only: PMOVE/PFLUSH/PTEST instructions */
     unsigned has_fpu          : 1;  /* On-chip FPU (68040+) */
+    unsigned has_lpstop       : 1;  /* 68060+: LPSTOP #imm instruction */
+    unsigned has_movep        : 1;  /* 68000-68040: MOVEP (removed on 68060) */
 } cpu_features_t;
 
 typedef struct {

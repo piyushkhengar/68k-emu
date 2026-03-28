@@ -19,4 +19,7 @@ int op_cache_dispatch(uint16_t op);
 /* 68040 MOVE16: 16-byte cache-efficient block transfer (0xF600-0xF6FF). */
 int op_move16(uint16_t op);
 
+/* 68060+: LPSTOP #imm — low-power privileged stop (0xF800 + extension word). */
+int op_lpstop(uint16_t op);
+
 #endif /* CONTROL_H */
