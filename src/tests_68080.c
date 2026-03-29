@@ -852,60 +852,6 @@ static const uint8_t rom_miniterm[] = {
     0x60, 0xFE,
 };
 
-/*
- * Test 31: LOADI — indirect register load (register form).
- *   D0 = 42 (register file index 42 = E2 since 40+2=42)
- *   D1 = 0xDEADBEEF (value to copy)
- *   LOAD D1,(D0) = LOADI: loads D1 value into register at index 42 = E2
- *   Expected: E2 = 0x00000000DEADBEEF
- *
- *   LOADI encoding: opmode=0x01 with ext bit 12 set.
- *   VEA=D1 (mode=0, reg=1), first=0xFE01? No: LOADI <VEA>,(d).
- *   VEA = src1 = D1, d = D0 (the register with the index).
- *   d=D0: the ext d-bit at bit 11 = 0, D_bit = 0 → decoded dst = 0|2 = 2 (bit 12 set).
- *   ext = (0<<14)|(0<<13)|(1<<12)|(0<<11) | (0<<6) | 0x01 = 0x1001
- *   VEA = D1: first word mode=0, reg=1 → 0xFE01 (A=B=D=0)
- *   Wait, D_bit is in first word bit 6. We need D_bit=0.
- *   first = 0xFE01 (A=0,B=0,D=0, mode=0, reg=1)
- */
-static const uint8_t rom_loadi[] = {
-    0x00, 0x00, 0x10, 0x00,
-    0x00, 0x00, 0x00, 0x10,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    /* 0x10: MOVE.L #42, D0 (register file index: 42=E2) */
-    0x20, 0x3C, 0x00, 0x00, 0x00, 0x2A,
-    /* 0x16: MOVE.L #0xDEADBEEF, D1 */
-    0x22, 0x3C, 0xDE, 0xAD, 0xBE, 0xEF,
-    /* 0x1C: LOADI D1,D0 → load D1's value into register[D0_value=42] = E2 */
-    0xFE, 0x01, 0x10, 0x01,
-    /* 0x20: BRA.S . */
-    0x60, 0xFE,
-};
-
-/*
- * Test 32: STOREI — indirect register read (register form).
- *   D0 = 1 (register file index 1 = D1)
- *   D1 = 0xCAFEBABE
- *   STOREI D1,(D0): reads index from D0 (=1→D1), copies D1's value into D0.
- *   Expected: D0 = 0xCAFEBABE
- *
- *   STOREI encoding: opmode=0x04 with ext bit 7 set.
- *   VEA=D1 (mode=0, reg=1), first=0xFE01 (A=B=D=0)
- *   ext: dst=D0→(D_bit=0, ext[14:11]=0), bit 7=1, opmode=0x04 → 0x0084
- */
-static const uint8_t rom_storei[] = {
-    0x00, 0x00, 0x10, 0x00,
-    0x00, 0x00, 0x00, 0x10,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    /* 0x10: MOVE.L #1, D0 (register file index: 1=D1) */
-    0x20, 0x3C, 0x00, 0x00, 0x00, 0x01,
-    /* 0x16: MOVE.L #$CAFEBABE, D1 */
-    0x22, 0x3C, 0xCA, 0xFE, 0xBA, 0xBE,
-    /* 0x1C: STOREI D1,(D0) → read reg[D0_value=1]=D1 value, write to D0 */
-    0xFE, 0x01, 0x00, 0x84,
-    /* 0x20: BRA.S . */
-    0x60, 0xFE,
-};
 
 /* ------------------------------------------------------------------ */
 /* Test table                                                          */
@@ -951,8 +897,6 @@ static const test68080_t tests[] = {
     { "storem3_copy",   rom_storem3,      sizeof(rom_storem3),      "STOREM3 D0,#1,D2: reg-form copy",    4 },
     { "pmula_blend",    rom_pmula,        sizeof(rom_pmula),        "PMULA alpha-blend D0,D1→D2",         4 },
     { "miniterm_e2",    rom_miniterm,     sizeof(rom_miniterm),     "MINITERM D0-D3→E0: $E2 bsel-like",   6 },
-    { "loadi_indirect", rom_loadi,        sizeof(rom_loadi),        "LOADI D1→reg[42]=E2: indirect load",  4 },
-    { "storei_indirect",rom_storei,       sizeof(rom_storei),       "STOREI D1,(D0): reg[1]=D1→D0",       4 },
 };
 
 #define NUM_TESTS (sizeof(tests) / sizeof(tests[0]))
@@ -998,8 +942,6 @@ static int check_result(size_t idx)
     case 28: return cpu.d[2] == 0x12345678u;                       /* storem3_copy   */
     case 29: return cpu.d[2] == 0xFF824F00u;                       /* pmula_blend    */
     case 30: return cpu.e[0] == 0x00000000F000FF0FULL;             /* miniterm_e2    */
-    case 31: return cpu.e[2] == 0x00000000DEADBEEFULL;             /* loadi_indirect */
-    case 32: return cpu.d[0] == 0xCAFEBABEu;                       /* storei_indirect */
     default: return 0;
     }
 }

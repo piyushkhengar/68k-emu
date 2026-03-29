@@ -1821,15 +1821,6 @@ static uint64_t miniterm_op(uint64_t va, uint64_t vb, uint64_t vc, uint8_t mt)
     return result;
 }
 
-/* Map a LOADI/STOREI register file index (0-63, modulo 64) to an ammx_reg
- * index.  Returns -1 for address/B registers (not held in the AMMX file). */
-static int ammx_regfile_index(int idx)
-{
-    idx &= 63;
-    if (idx < 8)  return idx;           /* D0-D7  → 0-7   */
-    if (idx >= 40 && idx < 64) return idx - 32; /* E0-E23 → 8-31  */
-    return -1;                          /* A/B regs: unsupported */
-}
 
 /* General AMMX instruction handler.
  * op  = first opword (0xFExx or 0xFFxx)
@@ -1885,28 +1876,11 @@ static int op_ammx_gen(uint16_t op, uint16_t ext)
     if (vea_mode >= 2) {
         /* Memory EA form. */
         switch (opmode) {
-        case 0x01: /* LOAD / LOADI (EA) → dst */
-            if (ext & 0x1000) {
-                /* LOADI: dst field bit 1 is the indirect flag.
-                 * The index register is encoded in bit 11 + D_bit. */
-                int idx_reg = (D_bit << 4) | ((ext >> 11) & 1);
-                int ri = ammx_regfile_index((int)(uint32_t)ammx_reg_read(idx_reg));
-                if (ri >= 0)
-                    ammx_reg_write(ri, ammx_ea_read64(vea_mode, vea_reg));
-            } else {
-                ammx_reg_write(dst, ammx_ea_read64(vea_mode, vea_reg));
-            }
+        case 0x01: /* LOAD (EA) → dst */
+            ammx_reg_write(dst, ammx_ea_read64(vea_mode, vea_reg));
             break;
-        case 0x04: /* STORE / STOREI dst → (EA) */
-            if (ext & 0x0080) {
-                /* STOREI: src2 field bit 1 is the indirect flag.
-                 * dst holds the register whose value indexes the register file. */
-                int ri = ammx_regfile_index((int)(uint32_t)ammx_reg_read(dst));
-                if (ri >= 0)
-                    ammx_ea_write64(vea_mode, vea_reg, ammx_reg_read(ri));
-            } else {
-                ammx_ea_write64(vea_mode, vea_reg, ammx_reg_read(dst));
-            }
+        case 0x04: /* STORE dst → (EA) */
+            ammx_ea_write64(vea_mode, vea_reg, ammx_reg_read(dst));
             break;
         case 0x26: {
             /* STOREM3: cookie-cut store to memory.
@@ -1936,25 +1910,14 @@ static int op_ammx_gen(uint16_t op, uint16_t ext)
     uint64_t a = ammx_reg_read(src1);
     uint64_t b = ammx_reg_read(src2);
 
-    /* Register LOAD / LOADI: copy src1 value to dst (or indirect). */
+    /* Register LOAD: copy src1 value to dst. */
     if (opmode == 0x01) {
-        if (ext & 0x1000) {
-            int idx_reg = (D_bit << 4) | ((ext >> 11) & 1);
-            int ri = ammx_regfile_index((int)(uint32_t)ammx_reg_read(idx_reg));
-            if (ri >= 0) ammx_reg_write(ri, a);
-        } else {
-            ammx_reg_write(dst, a);
-        }
+        ammx_reg_write(dst, a);
         return CYCLES_AMMX;
     }
-    /* Register STORE / STOREI: copy src1 to dst (or indirect read). */
+    /* Register STORE: copy src1 to dst. */
     if (opmode == 0x04) {
-        if (ext & 0x0080) {
-            int ri = ammx_regfile_index((int)(uint32_t)ammx_reg_read(dst));
-            if (ri >= 0) ammx_reg_write(dst, ammx_reg_read(ri));
-        } else {
-            ammx_reg_write(dst, a);
-        }
+        ammx_reg_write(dst, a);
         return CYCLES_AMMX;
     }
 
