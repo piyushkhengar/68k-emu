@@ -57,6 +57,7 @@ static cpu_model_t parse_cpu_model(const char *name)
     if (strcmp(name, "68030") == 0) return CPU_MODEL_68030;
     if (strcmp(name, "68040") == 0) return CPU_MODEL_68040;
     if (strcmp(name, "68060") == 0) return CPU_MODEL_68060;
+    if (strcmp(name, "68080") == 0) return CPU_MODEL_68080;
     fprintf(stderr, "Unknown CPU model '%s'; defaulting to 68000\n", name);
     return CPU_MODEL_68000;
 }

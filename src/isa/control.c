@@ -1032,6 +1032,818 @@ static int op_fpu_bcc(uint16_t op, int sub)
     return 4;
 }
 
+/* =========================================================================
+ * 68080 AMMX coprocessor (cpID=7, opcodes 0xFE00-0xFFFF)
+ * =========================================================================
+ *
+ * Encoding (derived from vasm Apollo Core m68k backend, opcodes.h):
+ *
+ *   First opword:  1111 111 A B D | VEA
+ *     bits 15-9  = 1111111 (F-line + cpID=7)
+ *     bit  8 (A) = source-1 register bit 4 (extends D0-D7 to E8-E23)
+ *     bit  7 (B) = source-2 register bit 4
+ *     bit  6 (D) = destination  register bit 4
+ *     bits 5-0   = VEA: source-1 EA
+ *                    D0-D7  → 0x00-0x07 (mode=0, Dn)
+ *                    E0-E7  → 0x08-0x0F (mode=1, An, reused as En for AMMX)
+ *                    E8-E15 → 0x00-0x07 + A_bit=1
+ *                    E16-E23→ 0x08-0x0F + A_bit=1
+ *
+ *   Extension word:
+ *     bits 15-11 = destination register bits 3-0 (bit 4 from D-bit in first word)
+ *     bits 10-6  = source-2   register bits 3-0 (bit 4 from B-bit in first word)
+ *     bits  5-0  = opmode (6-bit instruction select)
+ *
+ *   Register mapping: 0-7 = D0-D7, 8-31 = E0-E23
+ *   Read  D0-D7: zero-extended 32-bit; Write D0-D7: low 32 bits truncated.
+ *
+ * AMMX opmode table (from vasm Apollo Core opcodes.h):
+ *   0x01 LOAD        0x02 TRANSHI     0x03 TRANSLO    0x04 STORE
+ *   0x05 STOREM      0x06 PACKUSWB    0x07 PACK3216
+ *   0x08 PAND        0x09 POR         0x0A PEOR        0x0B PANDN
+ *   0x0C PAVGB
+ *   0x10 PADDB       0x11 PADDW       0x12 PSUBB       0x13 PSUBW
+ *   0x14 PADDUSB     0x15 PADDUSW     0x16 PSUBUSB     0x17 PSUBUSW
+ *   0x18 PMUL88      0x19 PMULA       0x1A PMULH        0x1B PMULL
+ *   0x1C BFLYB       0x1D BFLYW       0x1E UNPACK1632
+ *   0x20 PCMPEQB     0x21 PCMPEQW    0x24 STOREC      0x25 STOREILM
+ *   0x22 PCMPHIB     0x23 PCMPHIW    0x24 STOREC      0x25 STOREILM
+ *   0x26 STOREM3     0x28 C2P         0x29 BSEL        0x2C PCMPGEB
+ *   0x2E PCMPGTB     0x2F PCMPGTW
+ *   0x30 PMINSB      0x31 PMINSW     0x32 PMINUB      0x33 PMINUW
+ *   0x34 PMAXSB      0x35 PMAXSW     0x36 PMAXUB      0x37 PMAXUW
+ *   0x38 LSLQ        0x39 LSRQ
+ *   LOADI: same opmode as LOAD (0x01) but bit 12 of ext is set
+ *   VPERM: special 3-word form, first word 0xFE3F; ext bits 4:0 = src1 reg;
+ *          word 3 bits 4:0 = permutation-control reg
+ */
+
+#define CYCLES_AMMX  4   /* approximate; real 68080 timing varies per instruction */
+
+/* Read a 64-bit AMMX register value.
+ * reg 0-7  = D0-D7 (32-bit, zero-extended to 64)
+ * reg 8-31 = E0-E23 (64-bit) */
+static uint64_t ammx_reg_read(int reg)
+{
+    if (reg < 8) return (uint64_t)cpu.d[reg];
+    return cpu.e[reg - 8];
+}
+
+/* Write a 64-bit AMMX register value.
+ * D0-D7 receive the low 32 bits (truncated). */
+static void ammx_reg_write(int reg, uint64_t val)
+{
+    if (reg < 8) cpu.d[reg] = (uint32_t)val;
+    else cpu.e[reg - 8] = val;
+}
+
+/* Decode the source-1 register from a register-form AMMX first opword.
+ * Returns a register number 0-31.  Only valid when VEA bits 5-4 indicate
+ * a register operand (mode = 0 or 1); not called for memory EA forms. */
+static int ammx_src1_reg(uint16_t op)
+{
+    int A_bit = (op >> 8) & 1;   /* extends register to E8-E23 range */
+    int vea   = op & 0x0F;       /* bits 3-0: low 4 bits of register number */
+    return (A_bit << 4) | vea;
+}
+
+/* Read 64 bits from a memory EA for AMMX LOAD.
+ * Modes 3/(An)+ and 4/-(An) adjust An by 8 (64-bit stride).
+ * All other memory modes use ea_resolve_addr (no An side-effect). */
+static uint64_t ammx_ea_read64(int mode, int reg)
+{
+    uint32_t addr;
+    if (mode == 2) {
+        addr = cpu.a[reg];
+    } else if (mode == 3) {
+        addr = cpu.a[reg];
+        cpu.a[reg] += 8;
+    } else if (mode == 4) {
+        cpu.a[reg] -= 8;
+        addr = cpu.a[reg];
+    } else {
+        if (!ea_resolve_addr(mode, reg, 4, &addr))
+            return 0;
+    }
+    return ((uint64_t)mem_read32(addr) << 32) | mem_read32(addr + 4);
+}
+
+/* Write 64 bits to a memory EA for AMMX STORE.
+ * Same addressing conventions as ammx_ea_read64. */
+static void ammx_ea_write64(int mode, int reg, uint64_t val)
+{
+    uint32_t addr;
+    if (mode == 2) {
+        addr = cpu.a[reg];
+    } else if (mode == 3) {
+        addr = cpu.a[reg];
+        cpu.a[reg] += 8;
+    } else if (mode == 4) {
+        cpu.a[reg] -= 8;
+        addr = cpu.a[reg];
+    } else {
+        if (!ea_resolve_addr(mode, reg, 4, &addr))
+            return;
+    }
+    mem_write32(addr,     (uint32_t)(val >> 32));
+    mem_write32(addr + 4, (uint32_t)val);
+}
+
+/* Packed byte add (8 × uint8 lanes). */
+static uint64_t paddb(uint64_t a, uint64_t b)
+{
+    uint64_t result = 0;
+    for (int i = 0; i < 8; i++) {
+        uint8_t la = (uint8_t)(a >> (i * 8));
+        uint8_t lb = (uint8_t)(b >> (i * 8));
+        result |= (uint64_t)(uint8_t)(la + lb) << (i * 8);
+    }
+    return result;
+}
+
+/* Packed word add (4 × uint16 lanes). */
+static uint64_t paddw(uint64_t a, uint64_t b)
+{
+    uint64_t result = 0;
+    for (int i = 0; i < 4; i++) {
+        uint16_t la = (uint16_t)(a >> (i * 16));
+        uint16_t lb = (uint16_t)(b >> (i * 16));
+        result |= (uint64_t)(uint16_t)(la + lb) << (i * 16);
+    }
+    return result;
+}
+
+/* Packed byte subtract. */
+static uint64_t psubb(uint64_t a, uint64_t b)
+{
+    uint64_t result = 0;
+    for (int i = 0; i < 8; i++) {
+        uint8_t la = (uint8_t)(a >> (i * 8));
+        uint8_t lb = (uint8_t)(b >> (i * 8));
+        result |= (uint64_t)(uint8_t)(la - lb) << (i * 8);
+    }
+    return result;
+}
+
+/* Packed word subtract. */
+static uint64_t psubw(uint64_t a, uint64_t b)
+{
+    uint64_t result = 0;
+    for (int i = 0; i < 4; i++) {
+        uint16_t la = (uint16_t)(a >> (i * 16));
+        uint16_t lb = (uint16_t)(b >> (i * 16));
+        result |= (uint64_t)(uint16_t)(la - lb) << (i * 16);
+    }
+    return result;
+}
+
+/* Packed unsigned byte add with saturation. */
+static uint64_t paddusb(uint64_t a, uint64_t b)
+{
+    uint64_t result = 0;
+    for (int i = 0; i < 8; i++) {
+        uint32_t sum = (uint8_t)(a >> (i * 8)) + (uint8_t)(b >> (i * 8));
+        result |= (uint64_t)(uint8_t)(sum > 0xFF ? 0xFF : sum) << (i * 8);
+    }
+    return result;
+}
+
+/* Packed unsigned word add with saturation. */
+static uint64_t paddusw(uint64_t a, uint64_t b)
+{
+    uint64_t result = 0;
+    for (int i = 0; i < 4; i++) {
+        uint32_t sum = (uint16_t)(a >> (i * 16)) + (uint16_t)(b >> (i * 16));
+        result |= (uint64_t)(uint16_t)(sum > 0xFFFF ? 0xFFFF : sum) << (i * 16);
+    }
+    return result;
+}
+
+/* Packed unsigned byte subtract with saturation. */
+static uint64_t psubusb(uint64_t a, uint64_t b)
+{
+    uint64_t result = 0;
+    for (int i = 0; i < 8; i++) {
+        int32_t diff = (uint8_t)(a >> (i * 8)) - (uint8_t)(b >> (i * 8));
+        result |= (uint64_t)(uint8_t)(diff < 0 ? 0 : diff) << (i * 8);
+    }
+    return result;
+}
+
+/* Packed unsigned word subtract with saturation. */
+static uint64_t psubusw(uint64_t a, uint64_t b)
+{
+    uint64_t result = 0;
+    for (int i = 0; i < 4; i++) {
+        int32_t diff = (uint16_t)(a >> (i * 16)) - (uint16_t)(b >> (i * 16));
+        result |= (uint64_t)(uint16_t)(diff < 0 ? 0 : diff) << (i * 16);
+    }
+    return result;
+}
+
+/* Packed unsigned byte average: (a + b + 1) >> 1. */
+static uint64_t pavgb(uint64_t a, uint64_t b)
+{
+    uint64_t result = 0;
+    for (int i = 0; i < 8; i++) {
+        uint32_t avg = ((uint8_t)(a >> (i * 8)) + (uint8_t)(b >> (i * 8)) + 1) >> 1;
+        result |= (uint64_t)(uint8_t)avg << (i * 8);
+    }
+    return result;
+}
+
+/* Packed byte compare-equal: lane = 0xFF if equal, else 0x00. */
+static uint64_t pcmpeqb(uint64_t a, uint64_t b)
+{
+    uint64_t result = 0;
+    for (int i = 0; i < 8; i++) {
+        uint8_t mask = ((uint8_t)(a >> (i * 8)) == (uint8_t)(b >> (i * 8))) ? 0xFF : 0;
+        result |= (uint64_t)mask << (i * 8);
+    }
+    return result;
+}
+
+/* Packed word compare-equal: lane = 0xFFFF if equal, else 0x0000. */
+static uint64_t pcmpeqw(uint64_t a, uint64_t b)
+{
+    uint64_t result = 0;
+    for (int i = 0; i < 4; i++) {
+        uint16_t mask = ((uint16_t)(a >> (i * 16)) == (uint16_t)(b >> (i * 16))) ? 0xFFFF : 0;
+        result |= (uint64_t)mask << (i * 16);
+    }
+    return result;
+}
+
+/* Packed signed byte compare-ge: lane = 0xFF if a[i] >= b[i] (signed), else 0x00. */
+static uint64_t pcmpgeb(uint64_t a, uint64_t b)
+{
+    uint64_t result = 0;
+    for (int i = 0; i < 8; i++) {
+        int8_t la = (int8_t)(uint8_t)(a >> (i * 8));
+        int8_t lb = (int8_t)(uint8_t)(b >> (i * 8));
+        result |= (uint64_t)(uint8_t)(la >= lb ? 0xFF : 0) << (i * 8);
+    }
+    return result;
+}
+
+/* Packed signed byte min. */
+static uint64_t pminsb(uint64_t a, uint64_t b)
+{
+    uint64_t result = 0;
+    for (int i = 0; i < 8; i++) {
+        int8_t la = (int8_t)(uint8_t)(a >> (i * 8));
+        int8_t lb = (int8_t)(uint8_t)(b >> (i * 8));
+        result |= (uint64_t)(uint8_t)(la < lb ? la : lb) << (i * 8);
+    }
+    return result;
+}
+
+/* Packed signed word min. */
+static uint64_t pminsw(uint64_t a, uint64_t b)
+{
+    uint64_t result = 0;
+    for (int i = 0; i < 4; i++) {
+        int16_t la = (int16_t)(uint16_t)(a >> (i * 16));
+        int16_t lb = (int16_t)(uint16_t)(b >> (i * 16));
+        result |= (uint64_t)(uint16_t)(la < lb ? la : lb) << (i * 16);
+    }
+    return result;
+}
+
+/* Packed unsigned byte min. */
+static uint64_t pminub(uint64_t a, uint64_t b)
+{
+    uint64_t result = 0;
+    for (int i = 0; i < 8; i++) {
+        uint8_t la = (uint8_t)(a >> (i * 8));
+        uint8_t lb = (uint8_t)(b >> (i * 8));
+        result |= (uint64_t)(la < lb ? la : lb) << (i * 8);
+    }
+    return result;
+}
+
+/* Packed unsigned word min. */
+static uint64_t pminuw(uint64_t a, uint64_t b)
+{
+    uint64_t result = 0;
+    for (int i = 0; i < 4; i++) {
+        uint16_t la = (uint16_t)(a >> (i * 16));
+        uint16_t lb = (uint16_t)(b >> (i * 16));
+        result |= (uint64_t)(la < lb ? la : lb) << (i * 16);
+    }
+    return result;
+}
+
+/* Packed signed byte max. */
+static uint64_t pmaxsb(uint64_t a, uint64_t b)
+{
+    uint64_t result = 0;
+    for (int i = 0; i < 8; i++) {
+        int8_t la = (int8_t)(uint8_t)(a >> (i * 8));
+        int8_t lb = (int8_t)(uint8_t)(b >> (i * 8));
+        result |= (uint64_t)(uint8_t)(la > lb ? la : lb) << (i * 8);
+    }
+    return result;
+}
+
+/* Packed signed word max. */
+static uint64_t pmaxsw(uint64_t a, uint64_t b)
+{
+    uint64_t result = 0;
+    for (int i = 0; i < 4; i++) {
+        int16_t la = (int16_t)(uint16_t)(a >> (i * 16));
+        int16_t lb = (int16_t)(uint16_t)(b >> (i * 16));
+        result |= (uint64_t)(uint16_t)(la > lb ? la : lb) << (i * 16);
+    }
+    return result;
+}
+
+/* Packed unsigned byte max. */
+static uint64_t pmaxub(uint64_t a, uint64_t b)
+{
+    uint64_t result = 0;
+    for (int i = 0; i < 8; i++) {
+        uint8_t la = (uint8_t)(a >> (i * 8));
+        uint8_t lb = (uint8_t)(b >> (i * 8));
+        result |= (uint64_t)(la > lb ? la : lb) << (i * 8);
+    }
+    return result;
+}
+
+/* PMUL88: 8 × (uint8 × uint8 → uint16) packed into 4 × uint16 (low × high interleaved).
+ * Each lane: result16 = (uint8(a) * uint8(b)) >> 8 — fractional 8×8 multiply. */
+static uint64_t pmul88(uint64_t a, uint64_t b)
+{
+    uint64_t result = 0;
+    for (int i = 0; i < 4; i++) {
+        uint16_t la = (uint8_t)(a >> (i * 16));
+        uint16_t lb = (uint8_t)(b >> (i * 16));
+        result |= (uint64_t)(uint16_t)((la * lb) >> 8) << (i * 16);
+    }
+    return result;
+}
+
+/* PMULH: 4 × 16-bit lanes, keep upper 16 bits of signed 16×16 product. */
+static uint64_t pmulh(uint64_t a, uint64_t b)
+{
+    uint64_t result = 0;
+    for (int i = 0; i < 4; i++) {
+        int32_t la = (int16_t)(a >> (i * 16));
+        int32_t lb = (int16_t)(b >> (i * 16));
+        result |= (uint64_t)(uint16_t)((la * lb) >> 16) << (i * 16);
+    }
+    return result;
+}
+
+/* PMULL: 4 × 16-bit lanes, keep lower 16 bits of signed 16×16 product. */
+static uint64_t pmull(uint64_t a, uint64_t b)
+{
+    uint64_t result = 0;
+    for (int i = 0; i < 4; i++) {
+        int32_t la = (int16_t)(a >> (i * 16));
+        int32_t lb = (int16_t)(b >> (i * 16));
+        result |= (uint64_t)(uint16_t)(la * lb) << (i * 16);
+    }
+    return result;
+}
+
+/* PMULA: multiply-accumulate, 8 × byte lanes: d[i] = d[i] + ((a[i]*b[i]) >> 8). */
+static uint64_t pmula(uint64_t a, uint64_t b, uint64_t d)
+{
+    uint64_t result = 0;
+    for (int i = 0; i < 8; i++) {
+        uint16_t la  = (uint8_t)(a >> (i * 8));
+        uint16_t lb  = (uint8_t)(b >> (i * 8));
+        uint8_t  acc = (uint8_t)(d >> (i * 8));
+        result |= (uint64_t)(uint8_t)(acc + ((la * lb) >> 8)) << (i * 8);
+    }
+    return result;
+}
+
+/* PMAXUW: 4 × uint16 lanes, unsigned word maximum. */
+static uint64_t pmaxuw(uint64_t a, uint64_t b)
+{
+    uint64_t result = 0;
+    for (int i = 0; i < 4; i++) {
+        uint16_t la = (uint16_t)(a >> (i * 16));
+        uint16_t lb = (uint16_t)(b >> (i * 16));
+        result |= (uint64_t)(la > lb ? la : lb) << (i * 16);
+    }
+    return result;
+}
+
+/* PACKUSWB: pack 4 signed int16 lanes from a and 4 from b into 8 uint8 lanes.
+ * Each lane is clamped to [0, 255] (unsigned saturation). */
+static uint64_t packuswb(uint64_t a, uint64_t b)
+{
+    uint64_t result = 0;
+    for (int i = 0; i < 4; i++) {
+        int32_t la = (int16_t)(a >> (i * 16));
+        uint8_t  ba = la < 0 ? 0 : la > 255 ? 255 : (uint8_t)la;
+        result |= (uint64_t)ba << (i * 8);
+    }
+    for (int i = 0; i < 4; i++) {
+        int32_t lb = (int16_t)(b >> (i * 16));
+        uint8_t  bb = lb < 0 ? 0 : lb > 255 ? 255 : (uint8_t)lb;
+        result |= (uint64_t)bb << ((i + 4) * 8);
+    }
+    return result;
+}
+
+/* PACK3216: pack 2 signed int32 dwords from a and 2 from b into 4 int16 lanes.
+ * Each lane is clamped to [-32768, 32767] (signed saturation). */
+static uint64_t pack3216(uint64_t a, uint64_t b)
+{
+    uint64_t result = 0;
+    for (int i = 0; i < 2; i++) {
+        int32_t la = (int32_t)(a >> (i * 32));
+        int16_t ca = la < -32768 ? -32768 : la > 32767 ? 32767 : (int16_t)la;
+        result |= (uint64_t)(uint16_t)ca << (i * 16);
+    }
+    for (int i = 0; i < 2; i++) {
+        int32_t lb = (int32_t)(b >> (i * 32));
+        int16_t cb = lb < -32768 ? -32768 : lb > 32767 ? 32767 : (int16_t)lb;
+        result |= (uint64_t)(uint16_t)cb << ((i + 2) * 16);
+    }
+    return result;
+}
+
+/* UNPACK1632: zero-extend the low 2 × 16-bit words of a to 2 × 32-bit dwords.
+ * Result: { 0x0000:a[1], 0x0000:a[0] } packed into 64 bits. */
+static uint64_t unpack1632(uint64_t a)
+{
+    uint32_t lo = (uint16_t)(a);
+    uint32_t hi = (uint16_t)(a >> 16);
+    return ((uint64_t)hi << 32) | lo;
+}
+
+/* TRANSHI: concatenate high 32-bit halves — dst[63:32]=a[63:32], dst[31:0]=b[63:32]. */
+static uint64_t transhi(uint64_t a, uint64_t b)
+{
+    return ((a >> 32) << 32) | (b >> 32);
+}
+
+/* TRANSLO: concatenate low 32-bit halves — dst[63:32]=a[31:0], dst[31:0]=b[31:0]. */
+static uint64_t translo(uint64_t a, uint64_t b)
+{
+    return (a << 32) | (uint32_t)b;
+}
+
+/* C2P: 8×8 bit-matrix transpose (chunky-to-planar).
+ * Output byte i, bit (7-j) = input byte j, bit (7-i). */
+static uint64_t c2p(uint64_t a)
+{
+    uint64_t result = 0;
+    for (int i = 0; i < 8; i++) {
+        uint8_t out = 0;
+        for (int j = 0; j < 8; j++) {
+            uint8_t sb = (uint8_t)(a >> (j * 8));
+            if (sb & (uint8_t)(1u << (7 - i)))
+                out |= (uint8_t)(1u << (7 - j));
+        }
+        result |= (uint64_t)out << (i * 8);
+    }
+    return result;
+}
+
+
+/* PCMPHIB: packed unsigned byte compare-high (unsigned GT). Lane = 0xFF or 0x00. */
+static uint64_t pcmphib(uint64_t a, uint64_t b)
+{
+    uint64_t result = 0;
+    for (int i = 0; i < 8; i++) {
+        uint8_t la = (uint8_t)(a >> (i * 8));
+        uint8_t lb = (uint8_t)(b >> (i * 8));
+        result |= (uint64_t)(la > lb ? 0xFF : 0x00) << (i * 8);
+    }
+    return result;
+}
+
+/* PCMPHIW: packed unsigned word compare-high (unsigned GT). Lane = 0xFFFF or 0x0000. */
+static uint64_t pcmphiw(uint64_t a, uint64_t b)
+{
+    uint64_t result = 0;
+    for (int i = 0; i < 4; i++) {
+        uint16_t la = (uint16_t)(a >> (i * 16));
+        uint16_t lb = (uint16_t)(b >> (i * 16));
+        result |= (uint64_t)(la > lb ? 0xFFFFU : 0x0000U) << (i * 16);
+    }
+    return result;
+}
+
+/* PCMPGTB: packed signed byte greater-than. Lane = 0xFF or 0x00. */
+static uint64_t pcmpgtb(uint64_t a, uint64_t b)
+{
+    uint64_t result = 0;
+    for (int i = 0; i < 8; i++) {
+        int8_t la = (int8_t)(a >> (i * 8));
+        int8_t lb = (int8_t)(b >> (i * 8));
+        result |= (uint64_t)(la > lb ? 0xFF : 0x00) << (i * 8);
+    }
+    return result;
+}
+
+/* PCMPGTW: packed signed word greater-than. Lane = 0xFFFF or 0x0000. */
+static uint64_t pcmpgtw(uint64_t a, uint64_t b)
+{
+    uint64_t result = 0;
+    for (int i = 0; i < 4; i++) {
+        int16_t la = (int16_t)(a >> (i * 16));
+        int16_t lb = (int16_t)(b >> (i * 16));
+        result |= (uint64_t)(la > lb ? 0xFFFFU : 0x0000U) << (i * 16);
+    }
+    return result;
+}
+
+/* Core arithmetic compute: shared by register-form and memory-form paths.
+ * Returns 1 and writes result to dst if opmode is recognised; returns 0 (no-op) otherwise. */
+static int ammx_compute(int opmode, uint64_t a, uint64_t b, int dst)
+{
+    uint64_t result;
+    switch (opmode) {
+    /* Transfer halves */
+    case 0x02: result = transhi(a, b);                      break;  /* TRANSHI */
+    case 0x03: result = translo(a, b);                      break;  /* TRANSLO */
+
+    /* Masked byte blend (reads existing dst; mask = low byte of b) */
+    case 0x05: {                                                     /* STOREM  */
+        uint8_t  mask   = (uint8_t)b;
+        uint64_t d_orig = ammx_reg_read(dst);
+        result = d_orig;
+        for (int i = 0; i < 8; i++)
+            if (mask & (uint8_t)(1u << (7 - i)))
+                result = (result & ~(0xFFULL << (i * 8)))
+                       | (a        &  (0xFFULL << (i * 8)));
+        break;
+    }
+
+    /* Bitwise logical */
+    case 0x08: result = a & b;                              break;  /* PAND    */
+    case 0x09: result = a | b;                              break;  /* POR     */
+    case 0x0A: result = a ^ b;                              break;  /* PEOR    */
+    case 0x0B: result = (~a) & b;                           break;  /* PANDN   */
+
+    /* Packed byte arithmetic (PSUB: D = B-A) */
+    case 0x10: result = paddb(a, b);                        break;  /* PADDB   */
+    case 0x12: result = psubb(b, a);                        break;  /* PSUBB   */
+    case 0x14: result = paddusb(a, b);                      break;  /* PADDUSB */
+    case 0x16: result = psubusb(b, a);                      break;  /* PSUBUSB */
+
+    /* Packed word arithmetic (PSUB: D = B-A) */
+    case 0x11: result = paddw(a, b);                        break;  /* PADDW   */
+    case 0x13: result = psubw(b, a);                        break;  /* PSUBW   */
+    case 0x15: result = paddusw(a, b);                      break;  /* PADDUSW */
+    case 0x17: result = psubusw(b, a);                      break;  /* PSUBUSW */
+
+    /* Average */
+    case 0x0C: result = pavgb(a, b);                        break;  /* PAVGB   */
+
+    /* Pack / unpack */
+    case 0x06: result = packuswb(a, b);                     break;  /* PACKUSWB */
+    case 0x07: result = pack3216(a, b);                     break;  /* PACK3216 */
+    case 0x1E: result = unpack1632(a);                      break;  /* UNPACK1632 */
+
+    /* Multiply */
+    case 0x18: result = pmul88(a, b);                       break;  /* PMUL88 */
+    case 0x19: result = pmula(a, b, ammx_reg_read(dst));    break;  /* PMULA  */
+    case 0x1A: result = pmulh(a, b);                        break;  /* PMULH  */
+    case 0x1B: result = pmull(a, b);                        break;  /* PMULL  */
+
+    /* Compare */
+    case 0x20: result = pcmpeqb(a, b);                      break;  /* PCMPEQB */
+    case 0x21: result = pcmpeqw(a, b);                      break;  /* PCMPEQW */
+    case 0x22: result = pcmphib(a, b);                      break;  /* PCMPHIB */
+    case 0x23: result = pcmphiw(a, b);                      break;  /* PCMPHIW */
+
+    /* Masked store variants (read-modify-write into dst) */
+    case 0x24: {                                                     /* STOREC  */
+        int count = (int)((uint8_t)b);
+        if (count > 8) count = 8;
+        uint64_t d_orig = ammx_reg_read(dst);
+        result = d_orig;
+        for (int i = 0; i < count; i++)
+            result = (result & ~(0xFFULL << (i * 8)))
+                   | (a        &  (0xFFULL << (i * 8)));
+        break;
+    }
+    case 0x25: {                                                     /* STOREILM */
+        uint64_t d_orig = ammx_reg_read(dst);
+        result = d_orig;
+        for (int i = 0; i < 8; i++)
+            if (!((uint8_t)(b >> (i * 8)) & 0x80))
+                result = (result & ~(0xFFULL << (i * 8)))
+                       | (a        &  (0xFFULL << (i * 8)));
+        break;
+    }
+    case 0x26: result = ammx_reg_read(dst);                 break;  /* STOREM3: stub */
+
+    case 0x28: result = c2p(a);                             break;  /* C2P    */
+    case 0x29: result = (a & b) | (ammx_reg_read(dst) & ~b); break; /* BSEL   */
+    case 0x2C: result = pcmpgeb(a, b);                      break;  /* PCMPGEB */
+    case 0x2E: result = pcmpgtb(a, b);                      break;  /* PCMPGTB */
+    case 0x2F: result = pcmpgtw(a, b);                      break;  /* PCMPGTW */
+
+    /* Min / max */
+    case 0x30: result = pminsb(a, b);                       break;  /* PMINSB  */
+    case 0x31: result = pminsw(a, b);                       break;  /* PMINSW  */
+    case 0x32: result = pminub(a, b);                       break;  /* PMINUB  */
+    case 0x33: result = pminuw(a, b);                       break;  /* PMINUW  */
+    case 0x34: result = pmaxsb(a, b);                       break;  /* PMAXSB  */
+    case 0x35: result = pmaxsw(a, b);                       break;  /* PMAXSW  */
+    case 0x36: result = pmaxub(a, b);                       break;  /* PMAXUB  */
+    case 0x37: result = pmaxuw(a, b);                       break;  /* PMAXUW  */
+
+    /* 64-bit logical shifts: a = shift count, b = value to shift */
+    case 0x38: result = b << (a & 63);                      break;  /* LSLQ   */
+    case 0x39: result = b >> (a & 63);                      break;  /* LSRQ   */
+
+    default: return 0;  /* unknown opmode — no-op, do not write */
+    }
+    ammx_reg_write(dst, result);
+    return 1;
+}
+
+/* BFLYB/BFLYW: butterfly write to a consecutive register pair.
+ * dst  receives the sum half; dst+1 receives the difference half.
+ * Confirmed from vasm: VDR2/VXR2 = Dn:Dn+1 or En:En+1 double-register operand. */
+static int op_ammx_bfly(int opmode, uint64_t a, uint64_t b, int dst)
+{
+    if (opmode == 0x1C) {           /* BFLYB: 4 × uint8 butterfly */
+        uint64_t sum = 0, diff = 0;
+        for (int i = 0; i < 4; i++) {
+            uint8_t la = (uint8_t)(a >> (i * 8));
+            uint8_t lb = (uint8_t)(b >> (i * 8));
+            sum  |= (uint64_t)(uint8_t)(la + lb) << (i * 8);
+            diff |= (uint64_t)(uint8_t)(la - lb) << (i * 8);
+        }
+        ammx_reg_write(dst,     sum);
+        ammx_reg_write(dst + 1, diff);
+        return 1;
+    }
+    if (opmode == 0x1D) {           /* BFLYW: 2 × int16 butterfly */
+        uint64_t sum = 0, diff = 0;
+        for (int i = 0; i < 2; i++) {
+            int16_t la = (int16_t)(a >> (i * 16));
+            int16_t lb = (int16_t)(b >> (i * 16));
+            sum  |= (uint64_t)(uint16_t)(la + lb) << (i * 16);
+            diff |= (uint64_t)(uint16_t)(la - lb) << (i * 16);
+        }
+        ammx_reg_write(dst,     sum);
+        ammx_reg_write(dst + 1, diff);
+        return 1;
+    }
+    return 0;
+}
+
+/* General AMMX instruction handler.
+ * op  = first opword (0xFExx or 0xFFxx)
+ * ext = extension word (already fetched by caller) */
+static int op_ammx_gen(uint16_t op, uint16_t ext)
+{
+    /* Extension word layout:
+     *   bits 15-11: destination register bits 3-0 (5th bit from D-bit in first word)
+     *   bits 10-6 : source-2   register bits 3-0 (5th bit from B-bit in first word)
+     *   bits  5-0 : opmode (6-bit instruction select)
+     */
+    int B_bit  = (op >> 7) & 1;
+    int D_bit  = (op >> 6) & 1;
+
+    int opmode = ext & 0x3F;
+    int src2   = (B_bit << 4) | ((ext >> 6) & 0x0F);
+    int dst    = (D_bit << 4) | ((ext >> 11) & 0x0F);
+
+    /* VPERM: special 3-word byte permutation (VEA == 0x3F sentinel).
+     * Word 2 (ext): dst[14:11] | src2[10:6] | src1[4:0]  (opmode field reused as src1)
+     * Word 3      : permutation-control register number in bits [4:0]
+     *
+     * Output byte i = source byte at ctrl[i]&0xF:
+     *   index 0-7  → src1 byte   index
+     *   index 8-15 → src2 byte  (index-8)
+     * NOTE: src1/src2 byte ordering unconfirmed — adjust if tests show reversal. */
+    if ((op & 0x3F) == 0x3F) {
+        uint16_t w3   = fetch16();
+        int src1_r    = ext & 0x1F;          /* ext bits 4:0 = src1 register */
+        int ctrl_r    = w3  & 0x1F;          /* word3 bits 4:0 = ctrl register */
+        uint64_t va   = ammx_reg_read(src1_r);
+        uint64_t vb   = ammx_reg_read(src2);
+        uint64_t ctrl = ammx_reg_read(ctrl_r);
+        uint64_t vr   = 0;
+        for (int i = 0; i < 8; i++) {
+            uint8_t idx  = (uint8_t)(ctrl >> (i * 8)) & 0x0F;
+            uint8_t byte = (idx < 8) ? (uint8_t)(va >> (idx * 8))
+                                     : (uint8_t)(vb >> ((idx - 8) * 8));
+            vr |= (uint64_t)byte << (i * 8);
+        }
+        ammx_reg_write(dst, vr);
+        return CYCLES_AMMX;
+    }
+
+    /* Determine whether this is a memory EA form or a register form.
+     * VEA bits 5-3 (= op bits 5-3) encode the addressing mode:
+     *   0 = Dn register direct
+     *   1 = En register direct  (AMMX extended reg, treated as register)
+     *   2+ = memory EA (indirect, post-inc, pre-dec, displacement, …) */
+    int vea_mode = (op >> 3) & 7;
+    int vea_reg  = op & 7;
+
+    if (vea_mode >= 2) {
+        /* Memory EA form.
+         * LOAD: read 64 bits from the EA into dst.
+         * STORE: write dst register to the EA.
+         * Arithmetic ops: read src1 from the EA, src2 from register, compute, write dst. */
+        switch (opmode) {
+        case 0x01: /* LOAD (EA) → dst */
+            ammx_reg_write(dst, ammx_ea_read64(vea_mode, vea_reg));
+            break;
+        case 0x04: /* STORE dst → (EA) */
+            ammx_ea_write64(vea_mode, vea_reg, ammx_reg_read(dst));
+            break;
+        default: {
+            /* Arithmetic with memory source: src1 = memory, src2 = register. */
+            uint64_t a = ammx_ea_read64(vea_mode, vea_reg);
+            uint64_t b = ammx_reg_read(src2);
+            if (!op_ammx_bfly(opmode, a, b, dst))
+                ammx_compute(opmode, a, b, dst);
+            break;
+        }
+        }
+        return CYCLES_AMMX;
+    }
+
+    /* Register-form: both sources are registers. */
+    int src1 = ammx_src1_reg(op);
+    uint64_t a = ammx_reg_read(src1);
+    uint64_t b = ammx_reg_read(src2);
+
+    /* Register LOAD / LOADI: copy src1 to dst (zero-extends D→E automatically).
+     * LOADI (bit 12 of ext): load 5-bit immediate (ext bits 10:6) to dst instead. */
+    if (opmode == 0x01) {
+        if (ext & 0x1000)
+            ammx_reg_write(dst, (uint64_t)((ext >> 6) & 0x1F));
+        else
+            ammx_reg_write(dst, a);
+        return CYCLES_AMMX;
+    }
+    /* Register STORE: copy src1 to dst (register-to-register move). */
+    if (opmode == 0x04) {
+        ammx_reg_write(dst, a);
+        return CYCLES_AMMX;
+    }
+
+    if (op_ammx_bfly(opmode, a, b, dst))
+        return CYCLES_AMMX;
+    ammx_compute(opmode, a, b, dst);
+    return CYCLES_AMMX;
+}
+
+/* AMMX cpSAVE stub: write a null AMMX state frame to the stack (same pattern as op_fsave). */
+static int op_ammx_save(uint16_t op)
+{
+    (void)op;
+    /* Push a minimal null frame: two zero words. */
+    uint32_t sp = cpu_sp();
+    sp -= 2; mem_write16(sp, 0x0000);
+    sp -= 2; mem_write16(sp, 0x0000);
+    cpu_sp_set(sp);
+    return CYCLES_AMMX;
+}
+
+/* AMMX cpRESTORE stub: pop the null frame. */
+static int op_ammx_restore(uint16_t op)
+{
+    (void)op;
+    uint16_t fmt = mem_read16(cpu_sp());
+    cpu_sp_set(cpu_sp() + 2);
+    /* If non-null frame, discard remaining frame bytes (at minimum 2 more). */
+    if (fmt != 0) cpu_sp_set(cpu_sp() + 2);
+    return CYCLES_AMMX;
+}
+
+/* AMMX branch-condition stubs (cpBcc, cpDBcc, cpScc, cpTRAPcc — rarely used). */
+static int op_ammx_bcc(uint16_t op, uint8_t sub)
+{
+    (void)op;
+    (void)sub;
+    /* Fetch and discard extension word (condition + displacement). */
+    fetch16();
+    return CYCLES_AMMX;
+}
+
+/* Top-level AMMX dispatch. Mirrors op_fpu_dispatch() structure. */
+int op_ammx_dispatch(uint16_t op)
+{
+    uint8_t sub = (op >> 6) & 7;
+    switch (sub) {
+    case 0: {
+        uint16_t ext = fetch16();
+        return op_ammx_gen(op, ext);
+    }
+    case 6: return op_ammx_save(op);
+    case 7: return op_ammx_restore(op);
+    default: return op_ammx_bcc(op, sub);
+    }
+}
+
 int op_fpu_dispatch(uint16_t op)
 {
     /* Bits 8-6 of the first opcode word identify the FPU sub-type. */

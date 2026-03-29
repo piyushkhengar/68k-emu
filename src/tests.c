@@ -13,6 +13,7 @@
 #include "tests_68030.h"
 #include "tests_68040.h"
 #include "tests_68060.h"
+#include "tests_68080.h"
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -1789,6 +1790,10 @@ int run_all_tests(double speed_mhz)
 
     int fails_68060 = run_68060_tests();
     if (fails_68060)
+        failed = 1;
+
+    int fails_68080 = run_68080_tests();
+    if (fails_68080)
         failed = 1;
 
     if (failed)

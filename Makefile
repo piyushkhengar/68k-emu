@@ -20,7 +20,7 @@ CORE_SRCS = src/main.c src/system.c \
             src/isa/move.c src/isa/alu.c src/isa/branch.c src/isa/control.c \
             src/isa/immediate.c src/isa/logic.c src/isa/shift.c src/isa/bit.c \
             src/isa/movem.c src/isa/movep.c \
-            src/tests.c src/tests_68010.c src/tests_68020.c src/tests_68030.c src/tests_68040.c src/tests_68060.c src/timing.c src/timing_tests.c src/processor_tests.c \
+            src/tests.c src/tests_68010.c src/tests_68020.c src/tests_68030.c src/tests_68040.c src/tests_68060.c src/tests_68080.c src/timing.c src/timing_tests.c src/processor_tests.c \
             deps/cJSON/cJSON.c
 
 GENESIS_SRCS = src/genesis/bus.c src/genesis/vdp.c src/genesis/io.c \
@@ -44,7 +44,7 @@ MUSASHI_EMU_SRCS = src/core/cpu.c src/core/memory.c src/core/ea.c \
 MUSASHI_DIFF_SRCS = $(MUSASHI_EMU_SRCS) $(MUSASHI_SRCS) src/musashi_diff.c
 MUSASHI_CFLAGS = $(CFLAGS) -Ideps/musashi -Ideps/musashi/softfloat -DMUSASHI_DIFF_MODE -Wno-unused-parameter -Wno-sign-compare
 
-.PHONY: all clean test mcl68-test genesis processor-tests processor-tests-68010 processor-tests-68020 processor-tests-68030 processor-tests-68040 processor-tests-68060 musashi-diff
+.PHONY: all clean test mcl68-test genesis processor-tests processor-tests-68010 processor-tests-68020 processor-tests-68030 processor-tests-68040 processor-tests-68060 processor-tests-68080 musashi-diff
 
 all: $(TARGET)
 
@@ -215,6 +215,19 @@ processor-tests-68060: $(TARGET)
 		EXIT=$$?; \
 		echo ""; \
 		echo "Note: no 68060-specific corpus exists yet in SingleStepTests/680x0."; \
+		exit $$EXIT; \
+	else \
+		echo "ProcessorTests not found at $(PROC_TESTS)"; \
+		echo "Clone: git clone https://github.com/SingleStepTests/680x0 ProcessorTests"; \
+		exit 1; \
+	fi
+
+processor-tests-68080: $(TARGET)
+	@if [ -d "$(PROC_TESTS)" ]; then \
+		./$(TARGET) --cpu 68080 --processor-tests "$(PROC_TESTS)" $(if $(PROC_FILTER),$(PROC_FILTER),); \
+		EXIT=$$?; \
+		echo ""; \
+		echo "Note: no 68080-specific corpus exists yet in SingleStepTests/680x0."; \
 		exit $$EXIT; \
 	else \
 		echo "ProcessorTests not found at $(PROC_TESTS)"; \

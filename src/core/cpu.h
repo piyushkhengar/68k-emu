@@ -24,6 +24,7 @@ typedef enum {
     CPU_MODEL_68030,
     CPU_MODEL_68040,
     CPU_MODEL_68060,
+    CPU_MODEL_68080,   /* Apollo AC68080: 68060-compatible + AMMX SIMD coprocessor */
 } cpu_model_t;
 
 /* Feature flags derived from the model at cpu_init() time.
@@ -42,6 +43,7 @@ typedef struct {
     unsigned has_fpu          : 1;  /* On-chip FPU (68040+) */
     unsigned has_lpstop       : 1;  /* 68060+: LPSTOP #imm instruction */
     unsigned has_movep        : 1;  /* 68000-68040: MOVEP (removed on 68060) */
+    unsigned has_ammx         : 1;  /* 68080: AMMX SIMD coprocessor (cpID=7, 0xFE00-0xFFFF) */
 } cpu_features_t;
 
 typedef struct {
@@ -94,6 +96,11 @@ typedef struct {
     uint32_t fpcr;  /* FPU Control Register */
     uint32_t fpsr;  /* FPU Status Register */
     uint32_t fpiar; /* FPU Instruction Address Register */
+
+    /* 68080 AMMX extended SIMD registers (E0-E23, 64-bit each).
+     * Accessed via cpID=7 instructions (0xFE00-0xFFFF).
+     * Register numbers: 0-7 = D0-D7 (shared), 8-31 = E0-E23 (these arrays). */
+    uint64_t e[24];  /* E0-E23: 64-bit SIMD registers */
 } CPU;
 
 extern CPU cpu;

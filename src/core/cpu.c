@@ -72,6 +72,20 @@ static cpu_features_t features_for_model(cpu_model_t model)
      * Exception: 68040/060 break out of 68030 to avoid inheriting has_pmove
      * (the 68040 uses MOVEC for MMU registers, not PMOVE/PFLUSH/PTEST). */
     switch (model) {
+    case CPU_MODEL_68080: f.has_ammx         = 1;
+                          f.has_lpstop       = 1;
+                          /* has_movep intentionally NOT set: removed on 68060+ */
+                          f.has_fpu          = 1;
+                          f.has_mmu          = 1;
+                          f.has_msp          = 1;
+                          f.has_trapcc       = 1;
+                          f.has_32bit_muldiv = 1;
+                          f.has_bitfield     = 1;
+                          f.has_32bit_addr   = 1;
+                          f.has_full_ea      = 1;
+                          f.has_movec        = 1;
+                          f.has_vbr          = 1;
+                          break;
     case CPU_MODEL_68060: f.has_lpstop       = 1;
                           /* has_movep intentionally NOT set: MOVEP removed on 68060 */
                           f.has_fpu          = 1;
@@ -160,6 +174,10 @@ void cpu_reset(void)
     cpu.cycles = 0;
     /* 68010+: VBR resets to 0 on hardware reset. */
     cpu.vbr = 0;
+    /* 68080: clear all AMMX E-registers on reset. */
+    if (cpu.features.has_ammx)
+        for (int i = 0; i < 24; i++)
+            cpu.e[i] = 0;
 }
 
 /*
@@ -514,6 +532,10 @@ static int dispatch_Fxxx(uint16_t op)
     /* 68060+: LPSTOP #imm (0xF800 + 16-bit immediate). */
     if (cpu.features.has_lpstop && upper == 8 && op == 0xF800)
         return op_lpstop(op);
+
+    /* 68080: AMMX coprocessor (cpID=7, 0xFE00-0xFFFF). */
+    if (cpu.features.has_ammx && (upper == 0xE || upper == 0xF))
+        return op_ammx_dispatch(op);
 
     /* Unimplemented line F. */
     if (upper >= 4)
