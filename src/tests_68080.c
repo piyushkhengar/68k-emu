@@ -335,55 +335,82 @@ static const uint8_t rom_paddb_mem[] = {
 };
 
 /*
- * Test 11: TRANSLO — concat low 32-bit halves into 64-bit E register.
- *   D0=0x12345678, D1=0x9ABCDEF0
- *   TRANSLO D0,D1,E0 → E0 = (D0<<32)|D1 = 0x123456789ABCDEF0
- *   opmode=0x03, first=0xFE00, ext=(8<<11)|(1<<6)|0x03 = 0x4043
- */
-static const uint8_t rom_translo[] = {
-    0x00, 0x00, 0x10, 0x00,
-    0x00, 0x00, 0x00, 0x10,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    /* 0x10: MOVE.L #0x12345678, D0 */
-    0x20, 0x3C, 0x12, 0x34, 0x56, 0x78,
-    /* 0x16: MOVE.L #0x9ABCDEF0, D1 */
-    0x22, 0x3C, 0x9A, 0xBC, 0xDE, 0xF0,
-    /* 0x1C: TRANSLO D0,D1,E0 */
-    0xFE, 0x00, 0x40, 0x43,
-    /* 0x20: BRA.S . */
-    0x60, 0xFE,
-};
-
-/*
- * Test 12: TRANSHI — concat high 32-bit halves of two E registers.
- *   Builds E0=0x123456789ABCDEF0 and E1=0xAABBCCDD11223344 via TRANSLO,
- *   then TRANSHI E0,E1,E2 → E2 = (E0[63:32]<<32)|E1[63:32]
- *                              = (0x12345678<<32)|0xAABBCCDD
- *                              = 0x12345678AABBCCDD
+ * Test 11: TRANSHI — 4×4 word matrix transpose, upper word pair.
+ *   Load E0-E3 from memory:
+ *     E0=0x0001000200030004, E1=0x0005000600070008
+ *     E2=0x0009000A000B000C, E3=0x000D000E000F0010
+ *   TRANSHI E0-E3, E4:E5:
+ *     E4 = [w0_E0, w0_E1, w0_E2, w0_E3] = [0x0004,0x0008,0x000C,0x0010]
+ *        = 0x0010000C00080004
+ *     E5 = [w1_E0, w1_E1, w1_E2, w1_E3] = [0x0003,0x0007,0x000B,0x000F]
+ *        = 0x000F000B00070003
  *
- *   TRANSLO D2,D3,E1: src1=D2=2 → VEA=0x02 → first=0xFE02; ext=(9<<11)|(3<<6)|0x03=0x48C3
- *   TRANSHI E0,E1,E2: src1=E0=8 → VEA=0x08 → first=0xFE08; ext=(10<<11)|(9<<6)|0x02=0x5242
+ *   MOVEA.L #0x2C,A0 = 0x207C,0x0000002C
+ *   LOAD (A0)+,E0: VEA=(A0)+=mode3,reg0→0x18; first=0xFE18; ext=(8<<11)|0x01=0x4001
+ *   LOAD (A0)+,E1: ext=(9<<11)|0x01=0x4801
+ *   LOAD (A0)+,E2: ext=(10<<11)|0x01=0x5001
+ *   LOAD (A0)+,E3: ext=(11<<11)|0x01=0x5801
+ *   TRANSHI E0-E3,E4:E5: src1=E0(reg8)→VEA=mode1,reg0=0x08; first=0xFE08
+ *     dst=E4(reg12); ext=(12<<11)|0x02=0x6002
  */
 static const uint8_t rom_transhi[] = {
     0x00, 0x00, 0x10, 0x00,
     0x00, 0x00, 0x00, 0x10,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    /* 0x10: MOVE.L #0x12345678, D0 */
-    0x20, 0x3C, 0x12, 0x34, 0x56, 0x78,
-    /* 0x16: MOVE.L #0x9ABCDEF0, D1 */
-    0x22, 0x3C, 0x9A, 0xBC, 0xDE, 0xF0,
-    /* 0x1C: TRANSLO D0,D1,E0 */
-    0xFE, 0x00, 0x40, 0x43,
-    /* 0x20: MOVE.L #0xAABBCCDD, D2 */
-    0x24, 0x3C, 0xAA, 0xBB, 0xCC, 0xDD,
-    /* 0x26: MOVE.L #0x11223344, D3 */
-    0x26, 0x3C, 0x11, 0x22, 0x33, 0x44,
-    /* 0x2C: TRANSLO D2,D3,E1 */
-    0xFE, 0x02, 0x48, 0xC3,
-    /* 0x30: TRANSHI E0,E1,E2 */
-    0xFE, 0x08, 0x52, 0x42,
-    /* 0x34: BRA.S . */
+    /* 0x10: MOVEA.L #0x2C, A0 */
+    0x20, 0x7C, 0x00, 0x00, 0x00, 0x2C,
+    /* 0x16: LOAD (A0)+, E0 */
+    0xFE, 0x18, 0x40, 0x01,
+    /* 0x1A: LOAD (A0)+, E1 */
+    0xFE, 0x18, 0x48, 0x01,
+    /* 0x1E: LOAD (A0)+, E2 */
+    0xFE, 0x18, 0x50, 0x01,
+    /* 0x22: LOAD (A0)+, E3 */
+    0xFE, 0x18, 0x58, 0x01,
+    /* 0x26: TRANSHI E0-E3, E4:E5 */
+    0xFE, 0x08, 0x60, 0x02,
+    /* 0x2A: BRA.S . */
     0x60, 0xFE,
+    /* 0x2C: data for E0-E3 (big-endian 8 bytes each) */
+    0x00,0x01,0x00,0x02,0x00,0x03,0x00,0x04,  /* E0=0x0001000200030004 */
+    0x00,0x05,0x00,0x06,0x00,0x07,0x00,0x08,  /* E1=0x0005000600070008 */
+    0x00,0x09,0x00,0x0A,0x00,0x0B,0x00,0x0C,  /* E2=0x0009000A000B000C */
+    0x00,0x0D,0x00,0x0E,0x00,0x0F,0x00,0x10,  /* E3=0x000D000E000F0010 */
+};
+
+/*
+ * Test 12: TRANSLO — 4×4 word matrix transpose, lower word pair.
+ *   Same data load as TRANSHI test; TRANSLO E0-E3, E4:E5:
+ *     E4 = [w2_E0, w2_E1, w2_E2, w2_E3] = [0x0002,0x0006,0x000A,0x000E]
+ *        = 0x000E000A00060002
+ *     E5 = [w3_E0, w3_E1, w3_E2, w3_E3] = [0x0001,0x0005,0x0009,0x000D]
+ *        = 0x000D000900050001
+ *
+ *   TRANSLO E0-E3,E4:E5: first=0xFE08; ext=(12<<11)|0x03=0x6003
+ */
+static const uint8_t rom_translo[] = {
+    0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x10,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    /* 0x10: MOVEA.L #0x2C, A0 */
+    0x20, 0x7C, 0x00, 0x00, 0x00, 0x2C,
+    /* 0x16: LOAD (A0)+, E0 */
+    0xFE, 0x18, 0x40, 0x01,
+    /* 0x1A: LOAD (A0)+, E1 */
+    0xFE, 0x18, 0x48, 0x01,
+    /* 0x1E: LOAD (A0)+, E2 */
+    0xFE, 0x18, 0x50, 0x01,
+    /* 0x22: LOAD (A0)+, E3 */
+    0xFE, 0x18, 0x58, 0x01,
+    /* 0x26: TRANSLO E0-E3, E4:E5 */
+    0xFE, 0x08, 0x60, 0x03,
+    /* 0x2A: BRA.S . */
+    0x60, 0xFE,
+    /* 0x2C: data */
+    0x00,0x01,0x00,0x02,0x00,0x03,0x00,0x04,
+    0x00,0x05,0x00,0x06,0x00,0x07,0x00,0x08,
+    0x00,0x09,0x00,0x0A,0x00,0x0B,0x00,0x0C,
+    0x00,0x0D,0x00,0x0E,0x00,0x0F,0x00,0x10,
 };
 
 /*
@@ -427,8 +454,8 @@ static const uint8_t rom_bsel[] = {
 };
 
 /*
- * Test 15: PCMPGTB — packed signed byte greater-than.
- *   D0=5, D1=3: byte 0 → 5>3 → 0xFF; upper bytes → 0>0 → 0x00
+ * Test 15: PCMPGTB — packed signed byte greater-than (result = b > a).
+ *   D0=3 (a), D1=5 (b): byte 0 → 5>3 → 0xFF; upper bytes → 0>0 → 0x00
  *   D2 = 0x000000FF
  *   opmode=0x2E, first=0xFE00, ext=(2<<11)|(1<<6)|0x2E=0x106E
  */
@@ -436,10 +463,10 @@ static const uint8_t rom_pcmpgtb[] = {
     0x00, 0x00, 0x10, 0x00,
     0x00, 0x00, 0x00, 0x10,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    /* 0x10: MOVE.L #5, D0 */
-    0x20, 0x3C, 0x00, 0x00, 0x00, 0x05,
-    /* 0x16: MOVE.L #3, D1 */
-    0x22, 0x3C, 0x00, 0x00, 0x00, 0x03,
+    /* 0x10: MOVE.L #3, D0 (a) */
+    0x20, 0x3C, 0x00, 0x00, 0x00, 0x03,
+    /* 0x16: MOVE.L #5, D1 (b) */
+    0x22, 0x3C, 0x00, 0x00, 0x00, 0x05,
     /* 0x1C: PCMPGTB D0,D1→D2 */
     0xFE, 0x00, 0x10, 0x6E,
     /* 0x20: BRA.S . */
@@ -511,8 +538,8 @@ static const uint8_t rom_lsrq[] = {
 };
 
 /*
- * Test 19: PCMPGTW — packed signed word greater-than.
- *   D0=5, D1=3: word 0 → 5>3 → 0xFFFF; upper words → 0>0 → 0
+ * Test 19: PCMPGTW — packed signed word greater-than (result = b > a).
+ *   D0=3 (a), D1=5 (b): word 0 → 5>3 → 0xFFFF; upper words → 0>0 → 0
  *   D2 = 0x0000FFFF
  *   opmode=0x2F, ext=(2<<11)|(1<<6)|0x2F = 0x106F
  */
@@ -520,10 +547,10 @@ static const uint8_t rom_pcmpgtw[] = {
     0x00, 0x00, 0x10, 0x00,
     0x00, 0x00, 0x00, 0x10,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    /* 0x10: MOVE.L #5, D0 */
-    0x20, 0x3C, 0x00, 0x00, 0x00, 0x05,
-    /* 0x16: MOVE.L #3, D1 */
-    0x22, 0x3C, 0x00, 0x00, 0x00, 0x03,
+    /* 0x10: MOVE.L #3, D0 (a) */
+    0x20, 0x3C, 0x00, 0x00, 0x00, 0x03,
+    /* 0x16: MOVE.L #5, D1 (b) */
+    0x22, 0x3C, 0x00, 0x00, 0x00, 0x05,
     /* 0x1C: PCMPGTW D0,D1→D2 */
     0xFE, 0x00, 0x10, 0x6F,
     /* 0x20: BRA.S . */
@@ -531,8 +558,8 @@ static const uint8_t rom_pcmpgtw[] = {
 };
 
 /*
- * Test 20: PCMPHIB — packed unsigned byte compare-high.
- *   D0=0x80 (a=128), D1=0x7F (b=127): byte 0 → 128>127 unsigned → 0xFF; others 0
+ * Test 20: PCMPHIB — packed unsigned byte compare-high (result = b > a unsigned).
+ *   D0=0x7F (a=127), D1=0x80 (b=128): byte 0 → 128>127 unsigned → 0xFF; others 0
  *   D2 = 0x000000FF
  *   opmode=0x22, ext=(2<<11)|(1<<6)|0x22 = 0x1062
  */
@@ -540,10 +567,10 @@ static const uint8_t rom_pcmphib[] = {
     0x00, 0x00, 0x10, 0x00,
     0x00, 0x00, 0x00, 0x10,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    /* 0x10: MOVE.L #0x80, D0 */
-    0x20, 0x3C, 0x00, 0x00, 0x00, 0x80,
-    /* 0x16: MOVE.L #0x7F, D1 */
-    0x22, 0x3C, 0x00, 0x00, 0x00, 0x7F,
+    /* 0x10: MOVE.L #0x7F, D0 (a) */
+    0x20, 0x3C, 0x00, 0x00, 0x00, 0x7F,
+    /* 0x16: MOVE.L #0x80, D1 (b) */
+    0x22, 0x3C, 0x00, 0x00, 0x00, 0x80,
     /* 0x1C: PCMPHIB D0,D1→D2 */
     0xFE, 0x00, 0x10, 0x62,
     /* 0x20: BRA.S . */
@@ -551,8 +578,8 @@ static const uint8_t rom_pcmphib[] = {
 };
 
 /*
- * Test 21: PCMPHIW — packed unsigned word compare-high.
- *   D0=0x8000 (a=32768), D1=0x7FFF (b=32767): word 0 → 32768>32767 unsigned → 0xFFFF; others 0
+ * Test 21: PCMPHIW — packed unsigned word compare-high (result = b > a unsigned).
+ *   D0=0x7FFF (a=32767), D1=0x8000 (b=32768): word 0 → 32768>32767 unsigned → 0xFFFF; others 0
  *   D2 = 0x0000FFFF
  *   opmode=0x23, ext=(2<<11)|(1<<6)|0x23 = 0x1063
  */
@@ -560,10 +587,10 @@ static const uint8_t rom_pcmphiw[] = {
     0x00, 0x00, 0x10, 0x00,
     0x00, 0x00, 0x00, 0x10,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    /* 0x10: MOVE.L #0x8000, D0 */
-    0x20, 0x3C, 0x00, 0x00, 0x80, 0x00,
-    /* 0x16: MOVE.L #0x7FFF, D1 */
-    0x22, 0x3C, 0x00, 0x00, 0x7F, 0xFF,
+    /* 0x10: MOVE.L #0x7FFF, D0 (a) */
+    0x20, 0x3C, 0x00, 0x00, 0x7F, 0xFF,
+    /* 0x16: MOVE.L #0x8000, D1 (b) */
+    0x22, 0x3C, 0x00, 0x00, 0x80, 0x00,
     /* 0x1C: PCMPHIW D0,D1→D2 */
     0xFE, 0x00, 0x10, 0x63,
     /* 0x20: BRA.S . */
@@ -661,42 +688,48 @@ static const uint8_t rom_storeilm[] = {
 };
 
 /*
- * Test 26: UNPACK1632 — zero-extend 2×uint16 to 2×uint32.
- *   D0=0x00020001 (word0=1, word1=2)
- *   UNPACK1632 D0,D0→E0: E0 = (2<<32)|1 = 0x0000000200000001
- *   opmode=0x1E, ext=(8<<11)|(0<<6)|0x1E = 0x401E
+ * Test 26: UNPACK1632 — convert 4×RGB565 words to 4×ARGB32 pixels across E0:E1.
+ *   D0=0x0000F800 (word0=0xF800=pure-red RGB565, word1=0x0000)
+ *   UNPACK1632 D0 → E0:E1:
+ *     Pixel 0 (w=0xF800): R5=0x1F→R8=0xFF, G6=0→G8=0, B5=0→B8=0
+ *       alpha=0xFF, red=0xFF, green=0x00, blue=0x00
+ *       pixel = 0x000000FF (as uint32 LE: byte0=alpha, byte1=red, byte2=green, byte3=blue)
+ *               = 0x0000FFFF
+ *     Pixel 1 (w=0x0000): alpha=0xFF, rgb=0 → pixel=0x000000FF
+ *     E0 = pixel0 | (pixel1 << 32) = 0x0000FFFF | (0xFF << 32) = 0x000000FF0000FFFF
+ *     Pixel 2,3 also w=0x0000 → pixel=0xFF each
+ *     E1 = 0xFF | (0xFF << 32) = 0x000000FF000000FF
+ *   opmode=0x1E, first=0xFE00 (VEA=D0=reg0), ext=(8<<11)|0x1E=0x401E
  */
 static const uint8_t rom_unpack1632[] = {
     0x00, 0x00, 0x10, 0x00,
     0x00, 0x00, 0x00, 0x10,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    /* 0x10: MOVE.L #0x00020001, D0 */
-    0x20, 0x3C, 0x00, 0x02, 0x00, 0x01,
-    /* 0x16: UNPACK1632 D0,D0→E0 */
+    /* 0x10: MOVE.L #0x0000F800, D0 (pure-red RGB565 in word0) */
+    0x20, 0x3C, 0x00, 0x00, 0xF8, 0x00,
+    /* 0x16: UNPACK1632 D0 → E0:E1 */
     0xFE, 0x00, 0x40, 0x1E,
     /* 0x1A: BRA.S . */
     0x60, 0xFE,
 };
 
 /*
- * Test 27: PACK3216 — pack 2×int32 from each src into 4×int16 (signed saturation).
- *   D0=10 (0x0A), D1=20 (0x14)
- *   PACK3216 D0,D1→E0:
- *     word0 = clamp(10)  = 0x000A  → E0[15:0]
- *     word1 = clamp(0)   = 0x0000  → E0[31:16]  (D0 zero-extended, high dword=0)
- *     word2 = clamp(20)  = 0x0014  → E0[47:32]
- *     word3 = clamp(0)   = 0x0000  → E0[63:48]
- *   E0 = 0x000000140000000A
- *   opmode=0x07, ext=(8<<11)|(1<<6)|0x07 = 0x4047
+ * Test 27: PACK3216 — convert 2 ARGB32 pixel pairs to 4×RGB565 words.
+ *   D0=0x0000F8FF (byte0=alpha=0xFF, byte1=R=0xF8, byte2=G=0x00, byte3=B=0x00)
+ *     Pixel 0 (base=0): R=0xF8, G=0x00, B=0x00 → RGB565=0xF800
+ *     Pixel 1 (base=4): bytes4-7=0 → RGB565=0x0000
+ *   D1=0x00000000 → pixels 2,3 = 0x0000
+ *   PACK3216 D0,D1→E0: E0[15:0]=0xF800, rest=0 → E0=0x000000000000F800
+ *   opmode=0x07, first=0xFE00, ext=(8<<11)|(1<<6)|0x07=0x4047
  */
 static const uint8_t rom_pack3216[] = {
     0x00, 0x00, 0x10, 0x00,
     0x00, 0x00, 0x00, 0x10,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    /* 0x10: MOVE.L #10, D0 */
-    0x20, 0x3C, 0x00, 0x00, 0x00, 0x0A,
-    /* 0x16: MOVE.L #20, D1 */
-    0x22, 0x3C, 0x00, 0x00, 0x00, 0x14,
+    /* 0x10: MOVE.L #0x0000F8FF, D0 (A=0xFF,R=0xF8,G=0x00,B=0x00 in LE byte order) */
+    0x20, 0x3C, 0x00, 0x00, 0xF8, 0xFF,
+    /* 0x16: MOVE.L #0, D1 */
+    0x22, 0x3C, 0x00, 0x00, 0x00, 0x00,
     /* 0x1C: PACK3216 D0,D1→E0 */
     0xFE, 0x00, 0x40, 0x47,
     /* 0x20: BRA.S . */
@@ -725,6 +758,155 @@ static const uint8_t rom_storem[] = {
     0x60, 0xFE,
 };
 
+
+/*
+ * Test 28: STOREM3 — cookie-cut store, mode 1 (byte != 0).
+ *   D0 = 0x00FF003400120000 as source data in E0.
+ *   Mode 1: write bytes != 0.  Destination E1 (initially 0).
+ *   Bytes: 0x00,0xFF,0x00,0x34,0x00,0x12,0x00,0x00
+ *   Non-zero bytes: index 1(0xFF), 3(0x34), 5(0x12)
+ *
+ *   For register form, STOREM3 just copies (no masking).
+ *   opmode=0x26, first=0xFE08 (VEA=E0, mode=1, reg=0), ext=(9<<11)|(1<<6)|0x26=0x4866
+ *
+ *   Actually, we'll use a simpler approach: STOREM3 register form = copy.
+ *   Load E0 with data, STOREM3 E0,#1,E1 → E1 = E0 (register form = copy).
+ *   Expected: E1 = E0
+ */
+static const uint8_t rom_storem3[] = {
+    0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x10,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    /* 0x10: MOVE.L #0x12345678, D0 */
+    0x20, 0x3C, 0x12, 0x34, 0x56, 0x78,
+    /* 0x16: STOREM3 D0,#1,D2: register form = copy D0→D2
+     * VEA = D0: mode=0, reg=0; first = 0xFE00 (A=0,B=0,D=0)
+     * ext = (D2_low=2)<<11 | (mode=1)<<6 | 0x26 = 0x1066 */
+    0xFE, 0x00, 0x10, 0x66,
+    /* 0x1A: BRA.S . */
+    0x60, 0xFE,
+};
+
+/*
+ * Test 29: PMULA — alpha blend with PRM semantics.
+ *   Code layout: byte 0 (LSB) = alpha, bytes 1-3 = color channels.
+ *   D0 (a): alpha=0x40(64), ch1=0x10(16), ch2=0x62(98), ch3=0xDC(220) → 0xDC621040
+ *   D1 (b): ch1=0xFF(255), ch2=0x80(128), ch3=0xB0(176)              → 0xB080FF00
+ *   PMULA D0,D1,D2: per-pixel alpha blend.
+ *   alpha=0x40=64: ch1=(64*0xFF)>>8+0x10=63+16=0x4F
+ *                  ch2=(64*0x80)>>8+0x62=32+98=0x82
+ *                  ch3=(64*0xB0)>>8+0xDC=44+220=264→255 (saturated)
+ *   D2 = 0xFF824F00 (alpha byte=0, ch1=0x4F, ch2=0x82, ch3=0xFF)
+ *
+ *   opmode=0x19, ext=(2<<11)|(1<<6)|0x19=0x1059
+ */
+static const uint8_t rom_pmula[] = {
+    0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x10,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    /* 0x10: MOVE.L #$DC621040, D0 (a: alpha=0x40 in byte0) */
+    0x20, 0x3C, 0xDC, 0x62, 0x10, 0x40,
+    /* 0x16: MOVE.L #$B080FF00, D1 (b: ch1=0xFF, ch2=0x80, ch3=0xB0) */
+    0x22, 0x3C, 0xB0, 0x80, 0xFF, 0x00,
+    /* 0x1C: PMULA D0,D1,D2 */
+    0xFE, 0x00, 0x10, 0x59,
+    /* 0x20: BRA.S . */
+    0x60, 0xFE,
+};
+
+/*
+ * Test 30: MINITERM — blitter-style boolean op.
+ *   4 consecutive source registers D0-D3:
+ *     D0 = channel A = 0xFF00FF00
+ *     D1 = channel B = 0xF0F0F0F0
+ *     D2 = channel C = 0x0000FFFF
+ *     D3 = miniterm  = 0x000000E2  (E2 = BSEL-like: (A&B)|(~A&~B&C))
+ *   Result in E0: for each bit: mt[(a<<2)|(b<<1)|c]
+ *   mt=0xE2=11100010: mt[0]=0,mt[1]=1,mt[2]=0,mt[3]=0,mt[4]=0,mt[5]=1,mt[6]=1,mt[7]=1
+ *   Per-nibble (va,vb,vc → idx → mt bit):
+ *     nib0: (0,0,1)→1→1=F  nib1: (0,1,1)→3→0=0  nib2: (1,0,1)→5→1=F  nib3: (1,1,1)→7→1=F
+ *     nib4: (0,0,0)→0→0=0  nib5: (0,1,0)→2→0=0  nib6: (1,0,0)→4→0=0  nib7: (1,1,0)→6→1=F
+ *   Result (MSB→LSB): F,0,0,0,F,F,0,F = 0xF000FF0F
+ *
+ *   MINITERM D0-D3,E0: VEA mode=0, reg=0 → D0 base, first=0xFE40 (A=0,B=0,D=1, mode=0, reg=0)
+ *   ext=(E0=8, low4=8)<<11 | 0x2A = 0x402A
+ *   Wait, D_bit is in first word bit 6. E0=reg 8, D_bit=0 means regs 0-15.
+ *   dst=E0=8→ dst_low=8, D_bit=0 → ext = (8<<11)|0x2A = 0x402A
+ *   first=0xFE00 (VEA=D0, mode=0, reg=0, A=B=D=0)
+ */
+static const uint8_t rom_miniterm[] = {
+    0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x10,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    /* 0x10: MOVE.L #0xFF00FF00, D0 (channel A) */
+    0x20, 0x3C, 0xFF, 0x00, 0xFF, 0x00,
+    /* 0x16: MOVE.L #0xF0F0F0F0, D1 (channel B) */
+    0x22, 0x3C, 0xF0, 0xF0, 0xF0, 0xF0,
+    /* 0x1C: MOVE.L #0x0000FFFF, D2 (channel C) */
+    0x24, 0x3C, 0x00, 0x00, 0xFF, 0xFF,
+    /* 0x22: MOVE.L #0xE2, D3 (miniterm byte) */
+    0x26, 0x3C, 0x00, 0x00, 0x00, 0xE2,
+    /* 0x28: MINITERM D0-D3,E0 */
+    0xFE, 0x00, 0x40, 0x2A,
+    /* 0x2C: BRA.S . */
+    0x60, 0xFE,
+};
+
+/*
+ * Test 31: LOADI — indirect register load (register form).
+ *   D0 = 42 (register file index 42 = E2 since 40+2=42)
+ *   D1 = 0xDEADBEEF (value to copy)
+ *   LOAD D1,(D0) = LOADI: loads D1 value into register at index 42 = E2
+ *   Expected: E2 = 0x00000000DEADBEEF
+ *
+ *   LOADI encoding: opmode=0x01 with ext bit 12 set.
+ *   VEA=D1 (mode=0, reg=1), first=0xFE01? No: LOADI <VEA>,(d).
+ *   VEA = src1 = D1, d = D0 (the register with the index).
+ *   d=D0: the ext d-bit at bit 11 = 0, D_bit = 0 → decoded dst = 0|2 = 2 (bit 12 set).
+ *   ext = (0<<14)|(0<<13)|(1<<12)|(0<<11) | (0<<6) | 0x01 = 0x1001
+ *   VEA = D1: first word mode=0, reg=1 → 0xFE01 (A=B=D=0)
+ *   Wait, D_bit is in first word bit 6. We need D_bit=0.
+ *   first = 0xFE01 (A=0,B=0,D=0, mode=0, reg=1)
+ */
+static const uint8_t rom_loadi[] = {
+    0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x10,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    /* 0x10: MOVE.L #42, D0 (register file index: 42=E2) */
+    0x20, 0x3C, 0x00, 0x00, 0x00, 0x2A,
+    /* 0x16: MOVE.L #0xDEADBEEF, D1 */
+    0x22, 0x3C, 0xDE, 0xAD, 0xBE, 0xEF,
+    /* 0x1C: LOADI D1,D0 → load D1's value into register[D0_value=42] = E2 */
+    0xFE, 0x01, 0x10, 0x01,
+    /* 0x20: BRA.S . */
+    0x60, 0xFE,
+};
+
+/*
+ * Test 32: STOREI — indirect register read (register form).
+ *   D0 = 1 (register file index 1 = D1)
+ *   D1 = 0xCAFEBABE
+ *   STOREI D1,(D0): reads index from D0 (=1→D1), copies D1's value into D0.
+ *   Expected: D0 = 0xCAFEBABE
+ *
+ *   STOREI encoding: opmode=0x04 with ext bit 7 set.
+ *   VEA=D1 (mode=0, reg=1), first=0xFE01 (A=B=D=0)
+ *   ext: dst=D0→(D_bit=0, ext[14:11]=0), bit 7=1, opmode=0x04 → 0x0084
+ */
+static const uint8_t rom_storei[] = {
+    0x00, 0x00, 0x10, 0x00,
+    0x00, 0x00, 0x00, 0x10,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    /* 0x10: MOVE.L #1, D0 (register file index: 1=D1) */
+    0x20, 0x3C, 0x00, 0x00, 0x00, 0x01,
+    /* 0x16: MOVE.L #$CAFEBABE, D1 */
+    0x22, 0x3C, 0xCA, 0xFE, 0xBA, 0xBE,
+    /* 0x1C: STOREI D1,(D0) → read reg[D0_value=1]=D1 value, write to D0 */
+    0xFE, 0x01, 0x00, 0x84,
+    /* 0x20: BRA.S . */
+    0x60, 0xFE,
+};
+
 /* ------------------------------------------------------------------ */
 /* Test table                                                          */
 /* ------------------------------------------------------------------ */
@@ -748,24 +930,29 @@ static const test68080_t tests[] = {
     { "pmaxuw",        rom_pmaxuw,       sizeof(rom_pmaxuw),       "PMAXUW D0,D1→D2: 0x00030002",       4 },
     { "packuswb",      rom_packuswb,     sizeof(rom_packuswb),     "PACKUSWB D0,D1→E0: 8-byte packed",  4 },
     { "paddb_mem_ea",  rom_paddb_mem,    sizeof(rom_paddb_mem),    "PADDB (A0),D1→D2: mem+reg arith",   4 },
-    { "translo_concat",rom_translo,      sizeof(rom_translo),      "TRANSLO D0,D1→E0: 0x123456789ABCDEF0", 4 },
-    { "transhi_halves",rom_transhi,      sizeof(rom_transhi),      "TRANSHI E0,E1→E2: 0x12345678AABBCCDD", 8 },
+    { "transhi_xpose",  rom_transhi,      sizeof(rom_transhi),      "TRANSHI E0-E3→E4:E5: col-0,1 extract", 8 },
+    { "translo_xpose",  rom_translo,      sizeof(rom_translo),      "TRANSLO E0-E3→E4:E5: col-2,3 extract", 8 },
     { "c2p_bit_xpose", rom_c2p,          sizeof(rom_c2p),          "C2P D0→E0: bit-matrix transpose",   3 },
     { "bsel_blend",    rom_bsel,         sizeof(rom_bsel),         "BSEL D0,D1→D2: ternary blend",       4 },
-    { "pcmpgtb_cmp",   rom_pcmpgtb,      sizeof(rom_pcmpgtb),      "PCMPGTB D0,D1→D2: 5>3 → 0xFF",      4 },
+    { "pcmpgtb_cmp",   rom_pcmpgtb,      sizeof(rom_pcmpgtb),      "PCMPGTB D0,D1→D2: b>a 5>3 → 0xFF",  4 },
     { "lslq_shift",    rom_lslq,         sizeof(rom_lslq),         "LSLQ D0,D1→E0: 1<<4=0x10",          4 },
     { "vperm_bytes",   rom_vperm,        sizeof(rom_vperm),        "VPERM D0,D0→E0 ctrl=D1: 0x7878...", 3 },
     { "lsrq_shift",    rom_lsrq,         sizeof(rom_lsrq),         "LSRQ D0,D1→E0: 0x10>>4=1",          4 },
-    { "pcmpgtw_cmp",   rom_pcmpgtw,      sizeof(rom_pcmpgtw),      "PCMPGTW D0,D1→D2: 5>3 → 0xFFFF",    4 },
-    { "pcmphib_cmp",   rom_pcmphib,      sizeof(rom_pcmphib),      "PCMPHIB D0,D1→D2: 0x80>0x7F → 0xFF",4 },
-    { "pcmphiw_cmp",   rom_pcmphiw,      sizeof(rom_pcmphiw),      "PCMPHIW D0,D1→D2: 0x8000>0x7FFF",   4 },
+    { "pcmpgtw_cmp",   rom_pcmpgtw,      sizeof(rom_pcmpgtw),      "PCMPGTW D0,D1→D2: b>a 5>3 → 0xFFFF",4 },
+    { "pcmphib_cmp",   rom_pcmphib,      sizeof(rom_pcmphib),      "PCMPHIB D0,D1→D2: b>a 0x80>0x7F",   4 },
+    { "pcmphiw_cmp",   rom_pcmphiw,      sizeof(rom_pcmphiw),      "PCMPHIW D0,D1→D2: b>a 0x8000>0x7FFF",4 },
     { "bflyb_pair",    rom_bflyb,        sizeof(rom_bflyb),        "BFLYB D0,D1→D2:D3 sum/diff pair",    4 },
     { "bflyw_pair",    rom_bflyw,        sizeof(rom_bflyw),        "BFLYW D0,D1→D2:D3 sum/diff pair",    4 },
     { "storec_count",  rom_storec,       sizeof(rom_storec),       "STOREC D0,D1→E0: first 3 bytes",     4 },
     { "storeilm_mask", rom_storeilm,     sizeof(rom_storeilm),     "STOREILM D0,D1→E0: masked blend",    4 },
-    { "unpack1632_uw", rom_unpack1632,   sizeof(rom_unpack1632),   "UNPACK1632 D0→E0: u16→u32 expand",   3 },
-    { "pack3216_sw",   rom_pack3216,     sizeof(rom_pack3216),     "PACK3216 D0,D1→E0: i32→i16 pack",    4 },
-    { "storem_byte",   rom_storem,       sizeof(rom_storem),       "STOREM D0,D1→E0: mask=0x80→byte0",   4 },
+    { "unpack1632_rgb", rom_unpack1632,   sizeof(rom_unpack1632),   "UNPACK1632 D0→E0:E1: RGB565→ARGB32", 3 },
+    { "pack3216_rgb",   rom_pack3216,     sizeof(rom_pack3216),     "PACK3216 D0,D1→E0: ARGB32→RGB565",   4 },
+    { "storem_byte",    rom_storem,       sizeof(rom_storem),       "STOREM D0,D1→E0: mask=0x80→byte0",   4 },
+    { "storem3_copy",   rom_storem3,      sizeof(rom_storem3),      "STOREM3 D0,#1,D2: reg-form copy",    4 },
+    { "pmula_blend",    rom_pmula,        sizeof(rom_pmula),        "PMULA alpha-blend D0,D1→D2",         4 },
+    { "miniterm_e2",    rom_miniterm,     sizeof(rom_miniterm),     "MINITERM D0-D3→E0: $E2 bsel-like",   6 },
+    { "loadi_indirect", rom_loadi,        sizeof(rom_loadi),        "LOADI D1→reg[42]=E2: indirect load",  4 },
+    { "storei_indirect",rom_storei,       sizeof(rom_storei),       "STOREI D1,(D0): reg[1]=D1→D0",       4 },
 };
 
 #define NUM_TESTS (sizeof(tests) / sizeof(tests[0]))
@@ -787,8 +974,10 @@ static int check_result(size_t idx)
     case 7: return cpu.d[2] == 0x00020003u;     /* pmaxuw: lane0=max(3,2)=3, lane1=max(1,2)=2 */
     case 8: return cpu.e[0] == 0x0000040300000201ULL; /* packuswb: full 8-byte result in E0 */
     case  9: return cpu.d[2] == 0x03030303u;                        /* paddb_mem_ea  */
-    case 10: return cpu.e[0] == 0x123456789ABCDEF0ULL;              /* translo_concat */
-    case 11: return cpu.e[2] == 0x12345678AABBCCDDULL;              /* transhi_halves */
+    case 10: return cpu.e[4] == 0x0010000C00080004ULL &&            /* transhi_xpose  */
+                    cpu.e[5] == 0x000F000B00070003ULL;
+    case 11: return cpu.e[4] == 0x000E000A00060002ULL &&            /* translo_xpose  */
+                    cpu.e[5] == 0x000D000900050001ULL;
     case 12: return cpu.e[0] == 0x8000000000000000ULL;              /* c2p_bit_xpose  */
     case 13: return cpu.d[2] == 0xF0F0F0F0u;                        /* bsel_blend     */
     case 14: return cpu.d[2] == 0x000000FFu;                        /* pcmpgtb_cmp    */
@@ -802,9 +991,15 @@ static int check_result(size_t idx)
     case 22: return cpu.d[2] == 0x00030002u && cpu.d[3] == 0x00010000u; /* bflyw_pair */
     case 23: return cpu.e[0] == 0x0000000000020304ULL;             /* storec_count   */
     case 24: return cpu.e[0] == 0x0000000001020004ULL;             /* storeilm_mask  */
-    case 25: return cpu.e[0] == 0x0000000200000001ULL;             /* unpack1632_uw  */
-    case 26: return cpu.e[0] == 0x000000140000000AULL;             /* pack3216_sw    */
+    case 25: return cpu.e[0] == 0x000000FF0000FFFFULL &&            /* unpack1632_rgb */
+                    cpu.e[1] == 0x000000FF000000FFULL;
+    case 26: return cpu.e[0] == 0x000000000000F800ULL;             /* pack3216_rgb   */
     case 27: return cpu.e[0] == 0x00000000000000FFULL;             /* storem_byte    */
+    case 28: return cpu.d[2] == 0x12345678u;                       /* storem3_copy   */
+    case 29: return cpu.d[2] == 0xFF824F00u;                       /* pmula_blend    */
+    case 30: return cpu.e[0] == 0x00000000F000FF0FULL;             /* miniterm_e2    */
+    case 31: return cpu.e[2] == 0x00000000DEADBEEFULL;             /* loadi_indirect */
+    case 32: return cpu.d[0] == 0xCAFEBABEu;                       /* storei_indirect */
     default: return 0;
     }
 }

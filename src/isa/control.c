@@ -1069,7 +1069,7 @@ static int op_fpu_bcc(uint16_t op, int sub)
  *   0x20 PCMPEQB     0x21 PCMPEQW    0x24 STOREC      0x25 STOREILM
  *   0x22 PCMPHIB     0x23 PCMPHIW    0x24 STOREC      0x25 STOREILM
  *   0x26 STOREM3     0x28 C2P         0x29 BSEL        0x2C PCMPGEB
- *   0x2E PCMPGTB     0x2F PCMPGTW
+ *   0x2D PCMPGEW     0x2E PCMPGTB    0x2F PCMPGTW
  *   0x30 PMINSB      0x31 PMINSW     0x32 PMINUB      0x33 PMINUW
  *   0x34 PMAXSB      0x35 PMAXSW     0x36 PMAXUB      0x37 PMAXUW
  *   0x38 LSLQ        0x39 LSRQ
@@ -1274,7 +1274,8 @@ static uint64_t pcmpeqw(uint64_t a, uint64_t b)
     return result;
 }
 
-/* Packed signed byte compare-ge: lane = 0xFF if a[i] >= b[i] (signed), else 0x00. */
+/* Packed signed byte compare-ge: lane = 0xFF if a[i] >= b[i] (signed).
+ * AMMX convention: result = b >= a, so caller passes (b, a). */
 static uint64_t pcmpgeb(uint64_t a, uint64_t b)
 {
     uint64_t result = 0;
@@ -1407,15 +1408,27 @@ static uint64_t pmull(uint64_t a, uint64_t b)
     return result;
 }
 
-/* PMULA: multiply-accumulate, 8 × byte lanes: d[i] = d[i] + ((a[i]*b[i]) >> 8). */
-static uint64_t pmula(uint64_t a, uint64_t b, uint64_t d)
+/* PMULA: ARGB alpha-blend, 2 × 32-bit pixels per 64-bit register.
+ * Per pixel: alpha = a[byte 0], if alpha == 255 → d = b (exact copy);
+ * otherwise d[channel] = saturate8((alpha * b[channel]) >> 8 + a[channel]),
+ * d[alpha byte] = 0.  (AC68080PRM page 65) */
+static uint64_t pmula(uint64_t a, uint64_t b)
 {
     uint64_t result = 0;
-    for (int i = 0; i < 8; i++) {
-        uint16_t la  = (uint8_t)(a >> (i * 8));
-        uint16_t lb  = (uint8_t)(b >> (i * 8));
-        uint8_t  acc = (uint8_t)(d >> (i * 8));
-        result |= (uint64_t)(uint8_t)(acc + ((la * lb) >> 8)) << (i * 8);
+    for (int p = 0; p < 2; p++) {
+        int base = p * 32;
+        uint8_t alpha = (uint8_t)(a >> base);
+        if (alpha == 255) {
+            uint32_t pixel = (uint32_t)(b >> base) & 0x00FFFFFFu;
+            result |= (uint64_t)pixel << base;
+        } else {
+            for (int c = 1; c <= 3; c++) {
+                uint16_t ac = (uint8_t)(a >> (base + c * 8));
+                uint16_t bc = (uint8_t)(b >> (base + c * 8));
+                uint16_t val = ((alpha * bc) >> 8) + ac;
+                result |= (uint64_t)(uint8_t)(val > 255 ? 255 : val) << (base + c * 8);
+            }
+        }
     }
     return result;
 }
@@ -1450,43 +1463,56 @@ static uint64_t packuswb(uint64_t a, uint64_t b)
     return result;
 }
 
-/* PACK3216: pack 2 signed int32 dwords from a and 2 from b into 4 int16 lanes.
- * Each lane is clamped to [-32768, 32767] (signed saturation). */
+/* PACK3216: pack 32-bit ARGB data from two registers into 4 × RGB565 words.
+ * Each source register holds two ARGB pixels (4 bytes each, byte order A/R/G/B
+ * from byte-index 0 upwards in little-endian lane convention).
+ * Output: 4 RGB565 words in a single 64-bit register.
+ * Equivalent C (from AMMX.doc.txt):
+ *   if (i < 2) src = a  else src = b
+ *   base = (i&1)*4
+ *   diw = ((src[base+1]&0xF8)<<8) | ((src[base+2]&0xFC)<<3) | ((src[base+3]&0xF8)>>3) */
 static uint64_t pack3216(uint64_t a, uint64_t b)
 {
     uint64_t result = 0;
-    for (int i = 0; i < 2; i++) {
-        int32_t la = (int32_t)(a >> (i * 32));
-        int16_t ca = la < -32768 ? -32768 : la > 32767 ? 32767 : (int16_t)la;
-        result |= (uint64_t)(uint16_t)ca << (i * 16);
-    }
-    for (int i = 0; i < 2; i++) {
-        int32_t lb = (int32_t)(b >> (i * 32));
-        int16_t cb = lb < -32768 ? -32768 : lb > 32767 ? 32767 : (int16_t)lb;
-        result |= (uint64_t)(uint16_t)cb << ((i + 2) * 16);
+    for (int i = 0; i < 4; i++) {
+        uint64_t src  = (i < 2) ? a : b;
+        int      base = (i & 1) * 4;
+        uint8_t  r    = (uint8_t)(src >> ((base + 1) * 8));
+        uint8_t  g    = (uint8_t)(src >> ((base + 2) * 8));
+        uint8_t  bv   = (uint8_t)(src >> ((base + 3) * 8));
+        uint16_t diw  = (uint16_t)(((r & 0xF8u) << 8) | ((g & 0xFCu) << 3) | ((bv & 0xF8u) >> 3));
+        result |= (uint64_t)diw << (i * 16);
     }
     return result;
 }
 
-/* UNPACK1632: zero-extend the low 2 × 16-bit words of a to 2 × 32-bit dwords.
- * Result: { 0x0000:a[1], 0x0000:a[0] } packed into 64 bits. */
-static uint64_t unpack1632(uint64_t a)
+/* UNPACK1632: expand 4 × RGB565 words into 4 × 32-bit ARGB pixels across a
+ * consecutive register pair (dst and dst+1).
+ * Alpha is filled as 0xFF; R/G/B channels are expanded with their low bits
+ * replicated (standard RGB565→RGB888 expansion).
+ * Equivalent C (from AMMX.doc.txt):
+ *   d[i*4]   = 0xFF
+ *   d[i*4+1] = ((a[i]>>8)&0xF8) | ((a[i]>>13)&0x7)
+ *   d[i*4+2] = ((a[i]>>3)&0xFC) | ((a[i]>>9 )&0x3)
+ *   d[i*4+3] = ((a[i]<<3)&0xF8) | ((a[i]>>2 )&0x7) */
+static void op_ammx_unpack(uint64_t src, int dst)
 {
-    uint32_t lo = (uint16_t)(a);
-    uint32_t hi = (uint16_t)(a >> 16);
-    return ((uint64_t)hi << 32) | lo;
-}
-
-/* TRANSHI: concatenate high 32-bit halves — dst[63:32]=a[63:32], dst[31:0]=b[63:32]. */
-static uint64_t transhi(uint64_t a, uint64_t b)
-{
-    return ((a >> 32) << 32) | (b >> 32);
-}
-
-/* TRANSLO: concatenate low 32-bit halves — dst[63:32]=a[31:0], dst[31:0]=b[31:0]. */
-static uint64_t translo(uint64_t a, uint64_t b)
-{
-    return (a << 32) | (uint32_t)b;
+    uint64_t out0 = 0, out1 = 0;
+    for (int i = 0; i < 4; i++) {
+        uint16_t w     = (uint16_t)(src >> (i * 16));
+        uint8_t  alpha = 0xFF;
+        uint8_t  red   = (uint8_t)(((w >> 8) & 0xF8u) | ((w >> 13) & 0x07u));
+        uint8_t  green = (uint8_t)(((w >> 3) & 0xFCu) | ((w >>  9) & 0x03u));
+        uint8_t  blue  = (uint8_t)(((w << 3) & 0xF8u) | ((w >>  2) & 0x07u));
+        uint64_t pixel = (uint64_t)alpha
+                       | ((uint64_t)red   <<  8)
+                       | ((uint64_t)green << 16)
+                       | ((uint64_t)blue  << 24);
+        if (i < 2) out0 |= pixel << (i * 32);
+        else       out1 |= pixel << ((i - 2) * 32);
+    }
+    ammx_reg_write(dst,     out0);
+    ammx_reg_write(dst + 1, out1);
 }
 
 /* C2P: 8×8 bit-matrix transpose (chunky-to-planar).
@@ -1543,6 +1569,19 @@ static uint64_t pcmpgtb(uint64_t a, uint64_t b)
     return result;
 }
 
+/* PCMPGEW: packed signed word greater-or-equal. Lane = 0xFFFF if a[i] >= b[i].
+ * AMMX convention: result = b >= a, so caller passes (b, a). */
+static uint64_t pcmpgew(uint64_t a, uint64_t b)
+{
+    uint64_t result = 0;
+    for (int i = 0; i < 4; i++) {
+        int16_t la = (int16_t)(a >> (i * 16));
+        int16_t lb = (int16_t)(b >> (i * 16));
+        result |= (uint64_t)(la >= lb ? 0xFFFFU : 0x0000U) << (i * 16);
+    }
+    return result;
+}
+
 /* PCMPGTW: packed signed word greater-than. Lane = 0xFFFF or 0x0000. */
 static uint64_t pcmpgtw(uint64_t a, uint64_t b)
 {
@@ -1561,10 +1600,6 @@ static int ammx_compute(int opmode, uint64_t a, uint64_t b, int dst)
 {
     uint64_t result;
     switch (opmode) {
-    /* Transfer halves */
-    case 0x02: result = transhi(a, b);                      break;  /* TRANSHI */
-    case 0x03: result = translo(a, b);                      break;  /* TRANSLO */
-
     /* Masked byte blend (reads existing dst; mask = low byte of b) */
     case 0x05: {                                                     /* STOREM  */
         uint8_t  mask   = (uint8_t)b;
@@ -1598,22 +1633,21 @@ static int ammx_compute(int opmode, uint64_t a, uint64_t b, int dst)
     /* Average */
     case 0x0C: result = pavgb(a, b);                        break;  /* PAVGB   */
 
-    /* Pack / unpack */
+    /* Pack / unpack (UNPACK1632 writes register pair; handled outside ammx_compute) */
     case 0x06: result = packuswb(a, b);                     break;  /* PACKUSWB */
     case 0x07: result = pack3216(a, b);                     break;  /* PACK3216 */
-    case 0x1E: result = unpack1632(a);                      break;  /* UNPACK1632 */
 
     /* Multiply */
     case 0x18: result = pmul88(a, b);                       break;  /* PMUL88 */
-    case 0x19: result = pmula(a, b, ammx_reg_read(dst));    break;  /* PMULA  */
+    case 0x19: result = pmula(a, b);                       break;  /* PMULA  */
     case 0x1A: result = pmulh(a, b);                        break;  /* PMULH  */
     case 0x1B: result = pmull(a, b);                        break;  /* PMULL  */
 
     /* Compare */
     case 0x20: result = pcmpeqb(a, b);                      break;  /* PCMPEQB */
     case 0x21: result = pcmpeqw(a, b);                      break;  /* PCMPEQW */
-    case 0x22: result = pcmphib(a, b);                      break;  /* PCMPHIB */
-    case 0x23: result = pcmphiw(a, b);                      break;  /* PCMPHIW */
+    case 0x22: result = pcmphib(b, a);                      break;  /* PCMPHIB: b > a */
+    case 0x23: result = pcmphiw(b, a);                      break;  /* PCMPHIW: b > a */
 
     /* Masked store variants (read-modify-write into dst) */
     case 0x24: {                                                     /* STOREC  */
@@ -1635,13 +1669,14 @@ static int ammx_compute(int opmode, uint64_t a, uint64_t b, int dst)
                        | (a        &  (0xFFULL << (i * 8)));
         break;
     }
-    case 0x26: result = ammx_reg_read(dst);                 break;  /* STOREM3: no-op stub — semantics undocumented in public sources */
+    /* STOREM3 (0x26): handled outside ammx_compute — needs register number for mask_mode */
 
     case 0x28: result = c2p(a);                             break;  /* C2P    */
     case 0x29: result = (a & b) | (ammx_reg_read(dst) & ~b); break; /* BSEL   */
-    case 0x2C: result = pcmpgeb(a, b);                      break;  /* PCMPGEB */
-    case 0x2E: result = pcmpgtb(a, b);                      break;  /* PCMPGTB */
-    case 0x2F: result = pcmpgtw(a, b);                      break;  /* PCMPGTW */
+    case 0x2C: result = pcmpgeb(b, a);                      break;  /* PCMPGEB: b >= a */
+    case 0x2D: result = pcmpgew(b, a);                      break;  /* PCMPGEW: b >= a */
+    case 0x2E: result = pcmpgtb(b, a);                      break;  /* PCMPGTB: b > a  */
+    case 0x2F: result = pcmpgtw(b, a);                      break;  /* PCMPGTW: b > a  */
 
     /* Min / max */
     case 0x30: result = pminsb(a, b);                       break;  /* PMINSB  */
@@ -1693,6 +1728,107 @@ static int op_ammx_bfly(int opmode, uint64_t a, uint64_t b, int dst)
         return 1;
     }
     return 0;
+}
+
+/* TRANSHI/TRANSLO: 4×4 word matrix transposition.
+ * Reads 4 consecutive registers starting at src1 (must be multiple of 4).
+ * Writes to consecutive pair dst, dst+1 (must be multiple of 2).
+ *
+ * TRANSHI (opmode 0x02): for each of the 4 input registers, extract words 0 and 1.
+ *   dst[i]   = word0 of src1+i  (cols 0 from each row → first output)
+ *   dst+1[i] = word1 of src1+i  (cols 1 from each row → second output)
+ *
+ * TRANSLO (opmode 0x03): same but words 2 and 3.
+ *
+ * Word k of a 64-bit register (little-endian lane convention): bits (k*16+15):(k*16).
+ * Memory operands are not supported; this function is only called from register form. */
+static int op_ammx_trans(int opmode, int src1, int dst)
+{
+    if (opmode != 0x02 && opmode != 0x03) return 0;
+    int woff = (opmode == 0x02) ? 0 : 2;   /* TRANSHI: word pair 0,1; TRANSLO: 2,3 */
+    uint64_t e = 0, f = 0;
+    for (int i = 0; i < 4; i++) {
+        uint64_t r  = ammx_reg_read(src1 + i);
+        uint16_t we = (uint16_t)(r >> (woff       * 16));
+        uint16_t wf = (uint16_t)(r >> ((woff + 1) * 16));
+        e |= (uint64_t)we << (i * 16);
+        f |= (uint64_t)wf << (i * 16);
+    }
+    ammx_reg_write(dst,     e);
+    ammx_reg_write(dst + 1, f);
+    return 1;
+}
+
+/* STOREM3: cookie-cut store with 4 mask modes (AC68080PRM page 73).
+ * For each element of source data, a condition selects whether it is written.
+ * mask_mode: 0=Long (msb=1), 1=Byte (!=0), 2=Word (!=0xF81F), 3=Word (msb=0).
+ * Returns the merged result (src data where condition met, old dst where not). */
+static uint64_t storem3(uint64_t src, uint64_t dst, int mask_mode)
+{
+    uint64_t result = dst;
+    switch (mask_mode & 3) {
+    case 0:
+        for (int i = 0; i < 2; i++) {
+            uint32_t lw = (uint32_t)(src >> (i * 32));
+            if (lw & 0x80000000u)
+                result = (result & ~(0xFFFFFFFFULL << (i * 32)))
+                       | ((uint64_t)lw << (i * 32));
+        }
+        break;
+    case 1:
+        for (int i = 0; i < 8; i++) {
+            uint8_t by = (uint8_t)(src >> (i * 8));
+            if (by != 0)
+                result = (result & ~(0xFFULL << (i * 8)))
+                       | ((uint64_t)by << (i * 8));
+        }
+        break;
+    case 2:
+        for (int i = 0; i < 4; i++) {
+            uint16_t w = (uint16_t)(src >> (i * 16));
+            if (w != 0xF81F)
+                result = (result & ~(0xFFFFULL << (i * 16)))
+                       | ((uint64_t)w << (i * 16));
+        }
+        break;
+    case 3:
+        for (int i = 0; i < 4; i++) {
+            uint16_t w = (uint16_t)(src >> (i * 16));
+            if (!(w & 0x8000u))
+                result = (result & ~(0xFFFFULL << (i * 16)))
+                       | ((uint64_t)w << (i * 16));
+        }
+        break;
+    }
+    return result;
+}
+
+/* MINITERM: Amiga Blitter-style boolean raster-op on 3 operands.
+ * 4 consecutive source registers provide: a (channel A), b (channel B),
+ * c (channel C), mt (miniterm byte in low 8 bits).
+ * For each of 64 bits, output = miniterm_bit[(a_bit<<2)|(b_bit<<1)|c_bit].
+ * (AC68080PRM page 50) */
+static uint64_t miniterm_op(uint64_t va, uint64_t vb, uint64_t vc, uint8_t mt)
+{
+    uint64_t result = 0;
+    for (int i = 0; i < 64; i++) {
+        int idx = (int)(((va >> i) & 1) << 2)
+                | (int)(((vb >> i) & 1) << 1)
+                | (int)((vc >> i) & 1);
+        if (mt & (1 << idx))
+            result |= 1ULL << i;
+    }
+    return result;
+}
+
+/* Map a LOADI/STOREI register file index (0-63, modulo 64) to an ammx_reg
+ * index.  Returns -1 for address/B registers (not held in the AMMX file). */
+static int ammx_regfile_index(int idx)
+{
+    idx &= 63;
+    if (idx < 8)  return idx;           /* D0-D7  → 0-7   */
+    if (idx >= 40 && idx < 64) return idx - 32; /* E0-E23 → 8-31  */
+    return -1;                          /* A/B regs: unsupported */
 }
 
 /* General AMMX instruction handler.
@@ -1747,23 +1883,48 @@ static int op_ammx_gen(uint16_t op, uint16_t ext)
     int vea_reg  = op & 7;
 
     if (vea_mode >= 2) {
-        /* Memory EA form.
-         * LOAD: read 64 bits from the EA into dst.
-         * STORE: write dst register to the EA.
-         * Arithmetic ops: read src1 from the EA, src2 from register, compute, write dst. */
+        /* Memory EA form. */
         switch (opmode) {
-        case 0x01: /* LOAD (EA) → dst */
-            ammx_reg_write(dst, ammx_ea_read64(vea_mode, vea_reg));
+        case 0x01: /* LOAD / LOADI (EA) → dst */
+            if (ext & 0x1000) {
+                /* LOADI: dst field bit 1 is the indirect flag.
+                 * The index register is encoded in bit 11 + D_bit. */
+                int idx_reg = (D_bit << 4) | ((ext >> 11) & 1);
+                int ri = ammx_regfile_index((int)(uint32_t)ammx_reg_read(idx_reg));
+                if (ri >= 0)
+                    ammx_reg_write(ri, ammx_ea_read64(vea_mode, vea_reg));
+            } else {
+                ammx_reg_write(dst, ammx_ea_read64(vea_mode, vea_reg));
+            }
             break;
-        case 0x04: /* STORE dst → (EA) */
-            ammx_ea_write64(vea_mode, vea_reg, ammx_reg_read(dst));
+        case 0x04: /* STORE / STOREI dst → (EA) */
+            if (ext & 0x0080) {
+                /* STOREI: src2 field bit 1 is the indirect flag.
+                 * dst holds the register whose value indexes the register file. */
+                int ri = ammx_regfile_index((int)(uint32_t)ammx_reg_read(dst));
+                if (ri >= 0)
+                    ammx_ea_write64(vea_mode, vea_reg, ammx_reg_read(ri));
+            } else {
+                ammx_ea_write64(vea_mode, vea_reg, ammx_reg_read(dst));
+            }
             break;
+        case 0x26: {
+            /* STOREM3: cookie-cut store to memory.
+             * dst = source data register ("b"), src2 & 3 = mask_mode.
+             * Read existing memory, apply mask, write back. */
+            uint64_t mem = ammx_ea_read64(vea_mode, vea_reg);
+            uint64_t src = ammx_reg_read(dst);
+            uint64_t res = storem3(src, mem, src2 & 3);
+            ammx_ea_write64(vea_mode, vea_reg, res);
+            break;
+        }
         default: {
-            /* Arithmetic with memory source: src1 = memory, src2 = register. */
             uint64_t a = ammx_ea_read64(vea_mode, vea_reg);
             uint64_t b = ammx_reg_read(src2);
-            if (!op_ammx_bfly(opmode, a, b, dst))
-                ammx_compute(opmode, a, b, dst);
+            if (!op_ammx_bfly(opmode, a, b, dst)) {
+                if (opmode == 0x1E) op_ammx_unpack(a, dst);
+                else                ammx_compute(opmode, a, b, dst);
+            }
             break;
         }
         }
@@ -1775,23 +1936,51 @@ static int op_ammx_gen(uint16_t op, uint16_t ext)
     uint64_t a = ammx_reg_read(src1);
     uint64_t b = ammx_reg_read(src2);
 
-    /* Register LOAD / LOADI: copy src1 to dst (zero-extends D→E automatically).
-     * LOADI (bit 12 of ext): load 5-bit immediate (ext bits 10:6) to dst instead. */
+    /* Register LOAD / LOADI: copy src1 value to dst (or indirect). */
     if (opmode == 0x01) {
-        if (ext & 0x1000)
-            ammx_reg_write(dst, (uint64_t)((ext >> 6) & 0x1F));
-        else
+        if (ext & 0x1000) {
+            int idx_reg = (D_bit << 4) | ((ext >> 11) & 1);
+            int ri = ammx_regfile_index((int)(uint32_t)ammx_reg_read(idx_reg));
+            if (ri >= 0) ammx_reg_write(ri, a);
+        } else {
             ammx_reg_write(dst, a);
+        }
         return CYCLES_AMMX;
     }
-    /* Register STORE: copy src1 to dst (register-to-register move). */
+    /* Register STORE / STOREI: copy src1 to dst (or indirect read). */
     if (opmode == 0x04) {
+        if (ext & 0x0080) {
+            int ri = ammx_regfile_index((int)(uint32_t)ammx_reg_read(dst));
+            if (ri >= 0) ammx_reg_write(dst, ammx_reg_read(ri));
+        } else {
+            ammx_reg_write(dst, a);
+        }
+        return CYCLES_AMMX;
+    }
+
+    /* STOREM3 register form: no masking, just copy source to dst (PRM p73). */
+    if (opmode == 0x26) {
         ammx_reg_write(dst, a);
         return CYCLES_AMMX;
     }
 
-    if (op_ammx_bfly(opmode, a, b, dst))
+    /* MINITERM: 3-input boolean raster-op (PRM p50).
+     * 4 consecutive source regs: a=channel A, b=channel B, c=channel C, mt=miniterm byte. */
+    if (opmode == 0x2A) {
+        uint64_t va = ammx_reg_read(src1);
+        uint64_t vb = ammx_reg_read(src1 + 1);
+        uint64_t vc = ammx_reg_read(src1 + 2);
+        uint8_t  mt = (uint8_t)ammx_reg_read(src1 + 3);
+        ammx_reg_write(dst, miniterm_op(va, vb, vc, mt));
         return CYCLES_AMMX;
+    }
+
+    /* Multi-register-write ops: BFLY (dst:dst+1 sum/diff), TRANS (4-reg transpose),
+     * UNPACK1632 (RGB565→ARGB to dst:dst+1). */
+    if (op_ammx_bfly(opmode, a, b, dst) ||
+        op_ammx_trans(opmode, src1, dst))
+        return CYCLES_AMMX;
+    if (opmode == 0x1E) { op_ammx_unpack(a, dst); return CYCLES_AMMX; }
     ammx_compute(opmode, a, b, dst);
     return CYCLES_AMMX;
 }
