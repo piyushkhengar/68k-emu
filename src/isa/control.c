@@ -1635,7 +1635,7 @@ static int ammx_compute(int opmode, uint64_t a, uint64_t b, int dst)
                        | (a        &  (0xFFULL << (i * 8)));
         break;
     }
-    case 0x26: result = ammx_reg_read(dst);                 break;  /* STOREM3: stub */
+    case 0x26: result = ammx_reg_read(dst);                 break;  /* STOREM3: no-op stub — semantics undocumented in public sources */
 
     case 0x28: result = c2p(a);                             break;  /* C2P    */
     case 0x29: result = (a & b) | (ammx_reg_read(dst) & ~b); break; /* BSEL   */
@@ -1668,9 +1668,9 @@ static int ammx_compute(int opmode, uint64_t a, uint64_t b, int dst)
  * Confirmed from vasm: VDR2/VXR2 = Dn:Dn+1 or En:En+1 double-register operand. */
 static int op_ammx_bfly(int opmode, uint64_t a, uint64_t b, int dst)
 {
-    if (opmode == 0x1C) {           /* BFLYB: 4 × uint8 butterfly */
+    if (opmode == 0x1C) {           /* BFLYB: 8 × uint8 butterfly (64-bit register) */
         uint64_t sum = 0, diff = 0;
-        for (int i = 0; i < 4; i++) {
+        for (int i = 0; i < 8; i++) {
             uint8_t la = (uint8_t)(a >> (i * 8));
             uint8_t lb = (uint8_t)(b >> (i * 8));
             sum  |= (uint64_t)(uint8_t)(la + lb) << (i * 8);
@@ -1680,9 +1680,9 @@ static int op_ammx_bfly(int opmode, uint64_t a, uint64_t b, int dst)
         ammx_reg_write(dst + 1, diff);
         return 1;
     }
-    if (opmode == 0x1D) {           /* BFLYW: 2 × int16 butterfly */
+    if (opmode == 0x1D) {           /* BFLYW: 4 × int16 butterfly (64-bit register) */
         uint64_t sum = 0, diff = 0;
-        for (int i = 0; i < 2; i++) {
+        for (int i = 0; i < 4; i++) {
             int16_t la = (int16_t)(a >> (i * 16));
             int16_t lb = (int16_t)(b >> (i * 16));
             sum  |= (uint64_t)(uint16_t)(la + lb) << (i * 16);
@@ -1796,52 +1796,21 @@ static int op_ammx_gen(uint16_t op, uint16_t ext)
     return CYCLES_AMMX;
 }
 
-/* AMMX cpSAVE stub: write a null AMMX state frame to the stack (same pattern as op_fsave). */
-static int op_ammx_save(uint16_t op)
-{
-    (void)op;
-    /* Push a minimal null frame: two zero words. */
-    uint32_t sp = cpu_sp();
-    sp -= 2; mem_write16(sp, 0x0000);
-    sp -= 2; mem_write16(sp, 0x0000);
-    cpu_sp_set(sp);
-    return CYCLES_AMMX;
-}
-
-/* AMMX cpRESTORE stub: pop the null frame. */
-static int op_ammx_restore(uint16_t op)
-{
-    (void)op;
-    uint16_t fmt = mem_read16(cpu_sp());
-    cpu_sp_set(cpu_sp() + 2);
-    /* If non-null frame, discard remaining frame bytes (at minimum 2 more). */
-    if (fmt != 0) cpu_sp_set(cpu_sp() + 2);
-    return CYCLES_AMMX;
-}
-
-/* AMMX branch-condition stubs (cpBcc, cpDBcc, cpScc, cpTRAPcc — rarely used). */
-static int op_ammx_bcc(uint16_t op, uint8_t sub)
-{
-    (void)op;
-    (void)sub;
-    /* Fetch and discard extension word (condition + displacement). */
-    fetch16();
-    return CYCLES_AMMX;
-}
-
-/* Top-level AMMX dispatch. Mirrors op_fpu_dispatch() structure. */
+/* Top-level AMMX dispatch.
+ * Unlike the standard Motorola coprocessor protocol, AMMX is integrated into
+ * the 68080 pipeline — bits 8-6 of the first opword are NOT a sub-type selector.
+ * They are the A/B/D register-extension flags already decoded by op_ammx_gen:
+ *   bit 8 (A): extends src1 to the E8-E23 range
+ *   bit 7 (B): extends src2 to the E8-E23 range
+ *   bit 6 (D): extends dst  to the E8-E23 range
+ * Treating them as cpSAVE/cpRESTORE/cpBcc selectors would misroute any
+ * instruction whose operands lie in E8-E23, silently producing wrong results
+ * or corrupting the stack (sub=6/7). cpSAVE and cpRESTORE stubs are kept as
+ * dead helpers in case a future opcode study proves they exist. */
 int op_ammx_dispatch(uint16_t op)
 {
-    uint8_t sub = (op >> 6) & 7;
-    switch (sub) {
-    case 0: {
-        uint16_t ext = fetch16();
-        return op_ammx_gen(op, ext);
-    }
-    case 6: return op_ammx_save(op);
-    case 7: return op_ammx_restore(op);
-    default: return op_ammx_bcc(op, sub);
-    }
+    uint16_t ext = fetch16();
+    return op_ammx_gen(op, ext);
 }
 
 int op_fpu_dispatch(uint16_t op)
