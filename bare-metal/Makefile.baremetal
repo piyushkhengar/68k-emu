@@ -1,0 +1,216 @@
+# bare-metal/Makefile.baremetal
+# Included by the root Makefile.
+# Builds a GRUB multiboot2 bootable ISO containing the 68k emulator.
+#
+# Targets:
+#   make baremetal    — build bare-metal/os.iso
+#   make qemu-bm      — boot iso in QEMU (SDL display)
+#   make qemu-bm-serial — boot with serial output to stdio (no display)
+#   make burn-usb DEVICE=/dev/diskN — burn to USB (Phase 7)
+#
+# Prerequisites (macOS):
+#   brew install i686-elf-gcc i686-elf-binutils i686-elf-grub nasm xorriso qemu
+
+# ---- Toolchain -------------------------------------------------------------
+CC_BM    = i686-elf-gcc
+AS_BM    = nasm
+LD_BM    = i686-elf-gcc
+OBJCOPY  = i686-elf-objcopy
+
+# Path to GCC's own freestanding headers (stdint.h, stddef.h, stdbool.h, stdarg.h)
+SYSINCL  = $(shell i686-elf-gcc -print-file-name=include 2>/dev/null)
+
+# grub-mkrescue may be installed under a prefixed name on macOS
+GRUB_MKRESCUE = $(shell which grub-mkrescue 2>/dev/null || \
+                         which i686-elf-grub-mkrescue 2>/dev/null || \
+                         echo grub-mkrescue)
+
+# ---- Compiler flags --------------------------------------------------------
+# -nostdinc:        block all OS system headers
+# -isystem SYSINCL: re-add only the compiler's own freestanding headers
+# -I bare-metal/include: shadow headers (stdio.h, stdlib.h, string.h, setjmp.h)
+#                         plus bare.h with all shims
+# -DBARE_METAL:     guard for any future #ifdef BARE_METAL paths
+
+CFLAGS_BM = -std=c11 -ffreestanding -O2 -Wall -Wextra \
+            -nostdlib -nostdinc \
+            -isystem $(SYSINCL) \
+            -I bare-metal/include \
+            -I src -I src/core -I src/isa -I src/genesis \
+            -DBARE_METAL \
+            -fno-stack-protector \
+            -mno-red-zone \
+            -mno-mmx -mno-sse -mno-sse2
+
+ASFLAGS_BM = -f elf32
+
+LDFLAGS_BM      = -T bare-metal/link.ld -ffreestanding -nostdlib
+LDFLAGS_BM_TAIL = -lgcc
+
+# ---- Source lists ----------------------------------------------------------
+
+BM_BOOT_OBJS = bare-metal/boot/boot.o
+
+BM_LIB_OBJS = \
+    bare-metal/lib/vga.o.bm \
+    bare-metal/lib/libbm.o.bm \
+    bare-metal/lib/kbd.o.bm \
+    bare-metal/lib/serial.o.bm \
+    bare-metal/lib/setjmp_bm.o
+
+BM_KERNEL_OBJS = \
+    bare-metal/kernel/kmain.o.bm \
+    bare-metal/kernel/rom_embed.o.bm \
+    bare-metal/kernel/bus_bare.o.bm \
+    bare-metal/kernel/genesis_bare.o.bm \
+    bare-metal/kernel/vesa.o.bm
+
+# Core 68k CPU + ISA (compiled freestanding; shadow headers replace libc)
+BM_CORE_OBJS = \
+    src/core/cpu.o.bm \
+    src/core/memory.o.bm \
+    src/core/ea.o.bm \
+    src/isa/move.o.bm \
+    src/isa/alu.o.bm \
+    src/isa/branch.o.bm \
+    src/isa/control.o.bm \
+    src/isa/immediate.o.bm \
+    src/isa/logic.o.bm \
+    src/isa/shift.o.bm \
+    src/isa/bit.o.bm \
+    src/isa/movem.o.bm \
+    src/isa/movep.o.bm \
+    src/timing.o.bm
+
+# Genesis subsystem (vdp/z80/psg/ym2612/io compiled freestanding;
+# bus.c and genesis.c are replaced by bus_bare.c and genesis_bare.c)
+BM_GENESIS_OBJS = \
+    src/genesis/vdp.o.bm \
+    src/genesis/z80.o.bm \
+    src/genesis/psg.o.bm \
+    src/genesis/ym2612.o.bm \
+    src/genesis/io.o.bm
+
+BM_ALL_OBJS = $(BM_BOOT_OBJS) $(BM_LIB_OBJS) $(BM_KERNEL_OBJS) \
+              $(BM_CORE_OBJS) $(BM_GENESIS_OBJS)
+
+# ---- Pattern rules ---------------------------------------------------------
+
+# Assembly (boot stub and setjmp)
+bare-metal/boot/boot.o: bare-metal/boot/boot.asm
+	$(AS_BM) $(ASFLAGS_BM) $< -o $@
+
+bare-metal/lib/setjmp_bm.o: bare-metal/lib/setjmp_bm.asm
+	$(AS_BM) $(ASFLAGS_BM) $< -o $@
+
+# C sources under bare-metal/ (lib, kernel)
+bare-metal/lib/%.o.bm: bare-metal/lib/%.c
+	$(CC_BM) $(CFLAGS_BM) -c $< -o $@
+
+bare-metal/kernel/%.o.bm: bare-metal/kernel/%.c
+	$(CC_BM) $(CFLAGS_BM) -c $< -o $@
+
+# C sources under src/ (core, isa, genesis) — use .o.bm to avoid colliding
+# with the normal host build .o files
+src/core/%.o.bm: src/core/%.c
+	$(CC_BM) $(CFLAGS_BM) -c $< -o $@
+
+src/isa/%.o.bm: src/isa/%.c
+	$(CC_BM) $(CFLAGS_BM) -c $< -o $@
+
+src/genesis/%.o.bm: src/genesis/%.c
+	$(CC_BM) $(CFLAGS_BM) -c $< -o $@
+
+src/%.o.bm: src/%.c
+	$(CC_BM) $(CFLAGS_BM) -c $< -o $@
+
+# ---- ROM embed (generated C source) ----------------------------------------
+# Generate manually when ROM filename contains spaces:
+#   python3 tools/gen_rom_embed.py mcl68_minimal.bin > bare-metal/kernel/rom_embed.c
+#   python3 tools/gen_rom_embed.py "Sonic The Hedgehog (USA, Europe).gen" > bare-metal/kernel/rom_embed.c
+#
+# For simple filenames (no spaces) you can also use:
+#   make embed-rom ROM_BIN=my_rom.gen
+
+ROM_BIN ?= mcl68_minimal.bin
+
+# Phony helper: embed-rom — works for filenames without spaces
+.PHONY: embed-rom embed-sonic
+embed-rom:
+	python3 tools/gen_rom_embed.py "$(ROM_BIN)" > bare-metal/kernel/rom_embed.c
+
+embed-sonic:
+	python3 tools/gen_rom_embed.py "Sonic The Hedgehog (USA, Europe).gen" > bare-metal/kernel/rom_embed.c
+
+# rom_embed.c must exist before building; generate it if missing using default ROM
+bare-metal/kernel/rom_embed.c:
+	python3 tools/gen_rom_embed.py "$(ROM_BIN)" > $@
+
+# ---- Link ------------------------------------------------------------------
+
+bare-metal/kernel.elf: $(BM_ALL_OBJS)
+	$(LD_BM) $(LDFLAGS_BM) -o $@ $^ $(LDFLAGS_BM_TAIL)
+
+# ---- ISO -------------------------------------------------------------------
+
+bare-metal/isodir/boot/kernel.elf: bare-metal/kernel.elf
+	mkdir -p bare-metal/isodir/boot/grub
+	cp $< $@
+
+bare-metal/os.iso: bare-metal/isodir/boot/kernel.elf \
+                   bare-metal/isodir/boot/grub/grub.cfg
+	$(GRUB_MKRESCUE) -o $@ bare-metal/isodir
+
+# ---- Top-level targets -----------------------------------------------------
+
+.PHONY: baremetal qemu-bm qemu-bm-serial burn-usb clean-bm
+
+baremetal: bare-metal/os.iso
+
+# Cocoa window on macOS, SDL on Linux
+QEMU_DISPLAY := $(shell qemu-system-i386 -display help 2>&1 | grep -q cocoa && echo cocoa || echo sdl)
+
+qemu-bm: bare-metal/os.iso
+	qemu-system-i386 \
+	    -cdrom bare-metal/os.iso \
+	    -m 128M \
+	    -vga std \
+	    -no-reboot -no-shutdown \
+	    -display $(QEMU_DISPLAY) \
+	    -serial stdio
+
+# Headless: serial output on stdout, no display (CI / scripted testing)
+qemu-bm-headless: bare-metal/os.iso
+	qemu-system-i386 \
+	    -cdrom bare-metal/os.iso \
+	    -m 128M \
+	    -vga std \
+	    -no-reboot -no-shutdown \
+	    -display none \
+	    -serial stdio
+
+# Fast iteration: boot ELF directly via QEMU's built-in multiboot loader
+# (no ISO needed — useful during active development)
+qemu-bm-elf: bare-metal/kernel.elf
+	qemu-system-i386 \
+	    -kernel bare-metal/kernel.elf \
+	    -m 128M \
+	    -vga std \
+	    -no-reboot -no-shutdown \
+	    -display $(QEMU_DISPLAY) \
+	    -serial stdio
+
+# Burn to USB for real hardware testing.  Usage: make burn-usb DEVICE=/dev/diskN
+burn-usb: bare-metal/os.iso
+	@if [ -z "$(DEVICE)" ]; then \
+	    echo "Usage: make burn-usb DEVICE=/dev/diskN"; exit 1; fi
+	@echo "WARNING: This will DESTROY all data on $(DEVICE)"
+	@echo "Press ENTER to continue, Ctrl-C to abort"; read _
+	dd if=$< of=$(DEVICE) bs=4m status=progress
+	sync
+
+clean-bm:
+	rm -f $(BM_ALL_OBJS) bare-metal/lib/setjmp_bm.o bare-metal/kernel.elf bare-metal/os.iso \
+	      bare-metal/isodir/boot/kernel.elf \
+	      bare-metal/kernel/rom_embed.c
+	@# Note: rom_embed.c is regenerated by 'make embed-sonic' or 'make embed-rom'

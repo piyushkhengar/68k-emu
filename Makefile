@@ -44,7 +44,9 @@ MUSASHI_EMU_SRCS = src/core/cpu.c src/core/memory.c src/core/ea.c \
 MUSASHI_DIFF_SRCS = $(MUSASHI_EMU_SRCS) $(MUSASHI_SRCS) src/musashi_diff.c
 MUSASHI_CFLAGS = $(CFLAGS) -Ideps/musashi -Ideps/musashi/softfloat -DMUSASHI_DIFF_MODE -Wno-unused-parameter -Wno-sign-compare
 
-.PHONY: all clean test mcl68-test genesis processor-tests processor-tests-68010 processor-tests-68020 processor-tests-68030 processor-tests-68040 processor-tests-68060 processor-tests-68080 musashi-diff
+.PHONY: all clean test mcl68-test genesis processor-tests processor-tests-68010 processor-tests-68020 processor-tests-68030 processor-tests-68040 processor-tests-68060 processor-tests-68080 musashi-diff baremetal qemu-bm qemu-bm-headless qemu-bm-elf burn-usb clean-bm
+
+include bare-metal/Makefile.baremetal
 
 all: $(TARGET)
 
