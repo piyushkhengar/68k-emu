@@ -135,6 +135,16 @@ static struct {
     uint8_t  timer_b_enable;/* Timer B overflow sets status flag */
     uint8_t  ch3_mode;      /* Channel 3 special frequency mode */
 
+    /* DAC sample buffer for sample-accurate playback.
+     * CPU writes to reg 0x2A accumulate here during frame execution;
+     * ym2612_run_samples() distributes them across FM ticks. */
+#define DAC_BUF_MAX 2048
+    uint8_t  dac_buf[DAC_BUF_MAX];
+    int      dac_buf_count;
+    int      dac_render_total;  /* snapshot of dac_buf_count at render start */
+    uint32_t dac_step;          /* fixed-point 16.16 step through dac_buf   */
+    uint32_t dac_acc;           /* fixed-point 16.16 accumulator            */
+
     /* debug counters */
     int      dbg_dac_writes;
     int      dbg_ym_writes;   /* total data register writes per frame */
@@ -309,6 +319,8 @@ void ym2612_write(uint8_t port, uint8_t val)
         }
         case 0x2A:
             ym.dac_data = val;
+            if (ym.dac_buf_count < DAC_BUF_MAX)
+                ym.dac_buf[ym.dac_buf_count++] = val;
             ym.dbg_dac_writes++;
             break;
         case 0x2B:
@@ -608,6 +620,13 @@ static void ym_tick(int32_t *left, int32_t *right)
     for (int c = 0; c < YM_CHANNELS; c++) {
         int32_t out;
         if (c == 5 && ym.dac_enable) {
+            if (ym.dac_render_total > 0) {
+                int idx = (int)(ym.dac_acc >> 16);
+                if (idx >= ym.dac_render_total)
+                    idx = ym.dac_render_total - 1;
+                ym.dac_data = ym.dac_buf[idx];
+                ym.dac_acc += ym.dac_step;
+            }
             out = ((int32_t)ym.dac_data - 128) << 6;
         } else {
             out = synth_channel(&ym.ch[c]);
@@ -632,6 +651,20 @@ void ym2612_debug_frame(void)
 void ym2612_run_samples(int32_t *buf, int count, int sample_rate)
 {
     uint32_t step = (uint32_t)(((uint64_t)YM_NATIVE_RATE << 16) / sample_rate);
+
+    /* Distribute buffered DAC writes evenly across the FM ticks we're
+     * about to generate.  This turns the single-value dac_data into a
+     * proper waveform for PCM samples like the "SEGA" voice. */
+    int dac_n = ym.dac_buf_count;
+    if (dac_n > 0) {
+        int est_ticks = (int)((int64_t)count * YM_NATIVE_RATE / sample_rate);
+        if (est_ticks < 1) est_ticks = count;
+        ym.dac_render_total = dac_n;
+        ym.dac_step = (uint32_t)(((uint64_t)dac_n << 16) / (uint32_t)est_ticks);
+        ym.dac_acc = 0;
+    } else {
+        ym.dac_render_total = 0;
+    }
 
     for (int i = 0; i < count; i++) {
         int32_t l_acc = 0, r_acc = 0;
@@ -659,4 +692,8 @@ void ym2612_run_samples(int32_t *buf, int count, int sample_rate)
         buf[i * 2]     += l_acc / ticks / 2;
         buf[i * 2 + 1] += r_acc / ticks / 2;
     }
+
+    /* Reset DAC buffer for next frame's writes */
+    ym.dac_buf_count = 0;
+    ym.dac_render_total = 0;
 }
