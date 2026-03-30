@@ -13,6 +13,8 @@
 #include "genesis_bare.h"
 #include "vesa.h"
 #include "vdp.h"
+#include "sb16.h"
+#include "irq_hw.h"
 
 /* ---- External declarations ----------------------------------------------- */
 void serial_init(void);
@@ -113,6 +115,8 @@ static void run_genesis_game(void)
         return;
     }
 
+    sb16_init();
+
     if (vesa_available()) {
         vesa_clear();
         vesa_startup_check();   /* brief white corner — confirms blit works */
@@ -133,6 +137,9 @@ static void run_genesis_game(void)
         /* Blit to screen */
         if (vesa_available())
             vesa_blit();
+
+        /* Render audio into inactive DMA half (non-blocking) */
+        sb16_render_frame();
 
         /* Poll keyboard → joypad state */
         kbd_poll_joypad();
@@ -192,6 +199,9 @@ void kmain(uint32_t mb_info_phys)
     vga_clear();
 
     kprintf("68k-emu bare-metal\n");
+
+    /* PIC + IDT + enable interrupts (needed for SB16 audio DMA) */
+    irq_init();
 
     /* Parse multiboot2 info for VESA framebuffer */
     parse_multiboot2(mb_info_phys);
