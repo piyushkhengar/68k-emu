@@ -8,6 +8,7 @@
 #include "cpu_internal.h"
 #include "memory.h"
 #include "genesis/genesis_tests.h"
+#include "amiga/bus_tests.h"
 #include "tests_68010.h"
 #include "tests_68020.h"
 #include "tests_68030.h"
@@ -1770,6 +1771,10 @@ int run_all_tests(double speed_mhz)
 
     int timing_fails = run_timing_tests();
     if (timing_fails)
+        failed = 1;
+
+    int amiga_bus_fails = run_amiga_bus_tests();
+    if (amiga_bus_fails)
         failed = 1;
 
     int fails_68010 = run_68010_tests();

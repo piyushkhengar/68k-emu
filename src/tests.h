@@ -29,4 +29,7 @@ int run_all_tests(double speed_mhz);
 /* Timing unit tests. Returns number of failures (0 = all pass). */
 int run_timing_tests(void);
 
+/* Amiga bus unit tests. Returns number of failures (0 = all pass). */
+int run_amiga_bus_tests(void);
+
 #endif /* TESTS_H */

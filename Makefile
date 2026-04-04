@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -g -std=c11 -Isrc -Isrc/core -Isrc/isa -Isrc/genesis -I.
+CFLAGS = -Wall -Wextra -g -std=c11 -Isrc -Isrc/core -Isrc/isa -Isrc/genesis -Isrc/amiga -I.
 TARGET = 68k-emu
 
 # Optional: -DHAVE_ZLIB and -lz for .json.gz support
@@ -27,7 +27,9 @@ GENESIS_SRCS = src/genesis/bus.c src/genesis/vdp.c src/genesis/io.c \
                src/genesis/z80.c src/genesis/psg.c src/genesis/ym2612.c \
                src/genesis/genesis.c src/genesis/genesis_tests.c
 
-SRCS = $(CORE_SRCS) $(GENESIS_SRCS)
+AMIGA_SRCS = src/amiga/bus.c src/amiga/bus_tests.c
+
+SRCS = $(CORE_SRCS) $(GENESIS_SRCS) $(AMIGA_SRCS)
 OBJS = $(SRCS:.c=.o)
 
 # ---- Musashi differential validator ------------------------------------
