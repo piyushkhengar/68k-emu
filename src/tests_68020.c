@@ -23,6 +23,7 @@
 #include "cpu_internal.h"
 #include "memory.h"
 #include <stdio.h>
+#include <string.h>
 
 /* ------------------------------------------------------------------ */
 /* Test ROMs                                                           */
@@ -566,15 +567,7 @@ static const uint8_t rom_link_l[] = {
 /* Test table                                                          */
 /* ------------------------------------------------------------------ */
 
-typedef struct {
-    const char    *name;
-    const uint8_t *rom;
-    size_t         size;
-    const char    *description;
-    int            max_steps;
-} test68020_t;
-
-static const test68020_t tests[] = {
+static const builtin_test_t tests[] = {
     { "brief_scale",      rom_brief_scale,      sizeof(rom_brief_scale),      "Brief ext: long index × 4",            10 },
     { "brief_word_scale", rom_brief_word_scale, sizeof(rom_brief_word_scale), "Brief ext: word index × 2 + disp8",    10 },
     { "full_ext_bd16",    rom_full_ext,         sizeof(rom_full_ext),         "Full ext: word base displacement",      10 },
@@ -635,7 +628,7 @@ int run_68020_tests(void)
     cpu_init(CPU_MODEL_68020);
 
     for (size_t i = 0; i < NUM_TESTS; i++) {
-        const test68020_t *t = &tests[i];
+        const builtin_test_t *t = &tests[i];
 
         mem_set_bus(NULL);
         mem_reset();
@@ -664,4 +657,13 @@ int run_68020_tests(void)
     cpu_init(CPU_MODEL_68000);
 
     return failed;
+}
+
+const builtin_test_t *find_68020_test(const char *name)
+{
+    for (size_t i = 0; i < NUM_TESTS; i++) {
+        if (strcmp(tests[i].name, name) == 0)
+            return &tests[i];
+    }
+    return NULL;
 }

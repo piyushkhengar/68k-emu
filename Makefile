@@ -20,8 +20,14 @@ CORE_SRCS = src/main.c src/system.c \
             src/isa/move.c src/isa/alu.c src/isa/branch.c src/isa/control.c \
             src/isa/immediate.c src/isa/logic.c src/isa/shift.c src/isa/bit.c \
             src/isa/movem.c src/isa/movep.c \
-            src/tests.c src/tests_68010.c src/tests_68020.c src/tests_68030.c src/tests_68040.c src/tests_68060.c src/tests_68080.c src/timing.c src/timing_tests.c src/processor_tests.c \
+            src/test_runner.c \
+            src/tests_68000.c src/tests_68010.c src/tests_68020.c src/tests_68030.c src/tests_68040.c src/tests_68060.c src/tests_68080.c \
+            src/timing.c src/timing_tests.c src/processor_tests.c \
             deps/cJSON/cJSON.c
+
+MACHINE_TEST_SRCS = src/machine_tests/runner.c \
+                    src/machine_tests/amiga.c \
+                    src/machine_tests/genesis.c
 
 GENESIS_SRCS = src/genesis/bus.c src/genesis/vdp.c src/genesis/io.c \
                src/genesis/z80.c src/genesis/psg.c src/genesis/ym2612.c \
@@ -30,7 +36,7 @@ GENESIS_SRCS = src/genesis/bus.c src/genesis/vdp.c src/genesis/io.c \
 AMIGA_SRCS = src/amiga/bus.c src/amiga/bus_tests.c \
              src/amiga/paula.c src/amiga/paula_tests.c
 
-SRCS = $(CORE_SRCS) $(GENESIS_SRCS) $(AMIGA_SRCS)
+SRCS = $(CORE_SRCS) $(GENESIS_SRCS) $(AMIGA_SRCS) $(MACHINE_TEST_SRCS)
 OBJS = $(SRCS:.c=.o)
 
 # ---- Musashi differential validator ------------------------------------

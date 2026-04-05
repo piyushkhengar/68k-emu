@@ -18,6 +18,7 @@
 #include "cpu_internal.h"
 #include "memory.h"
 #include <stdio.h>
+#include <string.h>
 
 /* ------------------------------------------------------------------ */
 /* Test ROMs                                                           */
@@ -157,15 +158,7 @@ static const uint8_t rom_vbr_reloc[0x304] = {
 /* Test table                                                          */
 /* ------------------------------------------------------------------ */
 
-typedef struct {
-    const char   *name;
-    const uint8_t *rom;
-    size_t        size;
-    const char   *description;
-    int           max_steps;
-} test68010_t;
-
-static const test68010_t tests[] = {
+static const builtin_test_t tests[] = {
     { "movec_vbr",     rom_movec_vbr,      sizeof(rom_movec_vbr),      "MOVEC VBR round-trip",              10 },
     { "movec_sfc",     rom_movec_sfc,      sizeof(rom_movec_sfc),      "MOVEC SFC/DFC round-trip",          15 },
     { "rtd",           rom_rtd,            sizeof(rom_rtd),            "RTD stack cleanup",                 10 },
@@ -208,7 +201,7 @@ int run_68010_tests(void)
     cpu_init(CPU_MODEL_68010);
 
     for (size_t i = 0; i < NUM_TESTS; i++) {
-        const test68010_t *t = &tests[i];
+        const builtin_test_t *t = &tests[i];
 
         mem_set_bus(NULL);
         mem_reset();
@@ -237,4 +230,13 @@ int run_68010_tests(void)
     cpu_init(CPU_MODEL_68000);
 
     return failed;
+}
+
+const builtin_test_t *find_68010_test(const char *name)
+{
+    for (size_t i = 0; i < NUM_TESTS; i++) {
+        if (strcmp(tests[i].name, name) == 0)
+            return &tests[i];
+    }
+    return NULL;
 }

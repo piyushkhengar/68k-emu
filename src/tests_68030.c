@@ -27,6 +27,7 @@
 #include "cpu_internal.h"
 #include "memory.h"
 #include <stdio.h>
+#include <string.h>
 
 /* ------------------------------------------------------------------ */
 /* Test ROMs                                                           */
@@ -178,15 +179,7 @@ static const uint8_t rom_pflush_noop[] = {
 /* Test table                                                          */
 /* ------------------------------------------------------------------ */
 
-typedef struct {
-    const char    *name;
-    const uint8_t *rom;
-    size_t         size;
-    const char    *description;
-    int            max_steps;
-} test68030_t;
-
-static const test68030_t tests[] = {
+static const builtin_test_t tests[] = {
     { "cacr_rw",      rom_cacr_rw,      sizeof(rom_cacr_rw),      "MOVEC CACR round-trip",             6 },
     { "caar_rw",      rom_caar_rw,      sizeof(rom_caar_rw),      "MOVEC CAAR round-trip",             6 },
     { "tc_pmove",     rom_tc_pmove,     sizeof(rom_tc_pmove),     "PMOVE TC: write then read back",    9 },
@@ -225,7 +218,7 @@ int run_68030_tests(void)
     cpu_init(CPU_MODEL_68030);
 
     for (size_t i = 0; i < NUM_TESTS; i++) {
-        const test68030_t *t = &tests[i];
+        const builtin_test_t *t = &tests[i];
 
         mem_set_bus(NULL);
         mem_reset();
@@ -254,4 +247,13 @@ int run_68030_tests(void)
     cpu_init(CPU_MODEL_68000);
 
     return failed;
+}
+
+const builtin_test_t *find_68030_test(const char *name)
+{
+    for (size_t i = 0; i < NUM_TESTS; i++) {
+        if (strcmp(tests[i].name, name) == 0)
+            return &tests[i];
+    }
+    return NULL;
 }

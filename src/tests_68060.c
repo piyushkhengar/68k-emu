@@ -42,6 +42,7 @@
 #include "cpu_internal.h"
 #include "memory.h"
 #include <stdio.h>
+#include <string.h>
 
 /* ------------------------------------------------------------------ */
 /* Test ROMs                                                           */
@@ -138,15 +139,7 @@ static const uint8_t rom_movep_line1111[] = {
 /* Test table                                                          */
 /* ------------------------------------------------------------------ */
 
-typedef struct {
-    const char    *name;
-    const uint8_t *rom;
-    size_t         size;
-    const char    *description;
-    int            max_steps;
-} test68060_t;
-
-static const test68060_t tests[] = {
+static const builtin_test_t tests[] = {
     { "lpstop_sentinel",  rom_lpstop_sentinel,  sizeof(rom_lpstop_sentinel),  "LPSTOP: D0 sentinel preserved, halted=1",    3 },
     { "lpstop_sr",        rom_lpstop_sr,        sizeof(rom_lpstop_sr),        "LPSTOP #0x2500: SR interrupt mask = IPL 5",  2 },
     { "movep_line1111",   rom_movep_line1111,   sizeof(rom_movep_line1111),   "MOVEP on 68060 raises Line-1111 exception",  6 },
@@ -183,7 +176,7 @@ int run_68060_tests(void)
     cpu_init(CPU_MODEL_68060);
 
     for (size_t i = 0; i < NUM_TESTS; i++) {
-        const test68060_t *t = &tests[i];
+        const builtin_test_t *t = &tests[i];
 
         mem_set_bus(NULL);
         mem_reset();
@@ -212,4 +205,13 @@ int run_68060_tests(void)
     cpu_init(CPU_MODEL_68000);
 
     return failed;
+}
+
+const builtin_test_t *find_68060_test(const char *name)
+{
+    for (size_t i = 0; i < NUM_TESTS; i++) {
+        if (strcmp(tests[i].name, name) == 0)
+            return &tests[i];
+    }
+    return NULL;
 }

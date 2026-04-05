@@ -90,6 +90,7 @@
 #include "cpu_internal.h"
 #include "memory.h"
 #include <stdio.h>
+#include <string.h>
 
 /* ------------------------------------------------------------------ */
 /* Test ROMs                                                           */
@@ -336,15 +337,7 @@ static const uint8_t rom_fsave_frestore[] = {
 /* Test table                                                          */
 /* ------------------------------------------------------------------ */
 
-typedef struct {
-    const char    *name;
-    const uint8_t *rom;
-    size_t         size;
-    const char    *description;
-    int            max_steps;
-} test68040_t;
-
-static const test68040_t tests[] = {
+static const builtin_test_t tests[] = {
     { "tc_movec",       rom_tc_movec,       sizeof(rom_tc_movec),       "MOVEC TC round-trip (cr=0x003)",    6 },
     { "urp_movec",      rom_urp_movec,      sizeof(rom_urp_movec),      "MOVEC URP round-trip (cr=0x806)",   6 },
     { "itt0_movec",     rom_itt0_movec,     sizeof(rom_itt0_movec),     "MOVEC ITT0 round-trip (cr=0x004)",  6 },
@@ -389,7 +382,7 @@ int run_68040_tests(void)
     cpu_init(CPU_MODEL_68040);
 
     for (size_t i = 0; i < NUM_TESTS; i++) {
-        const test68040_t *t = &tests[i];
+        const builtin_test_t *t = &tests[i];
 
         mem_set_bus(NULL);
         mem_reset();
@@ -418,4 +411,13 @@ int run_68040_tests(void)
     cpu_init(CPU_MODEL_68000);
 
     return failed;
+}
+
+const builtin_test_t *find_68040_test(const char *name)
+{
+    for (size_t i = 0; i < NUM_TESTS; i++) {
+        if (strcmp(tests[i].name, name) == 0)
+            return &tests[i];
+    }
+    return NULL;
 }

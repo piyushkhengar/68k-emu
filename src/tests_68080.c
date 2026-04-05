@@ -55,6 +55,7 @@
 #include "cpu_internal.h"
 #include "memory.h"
 #include <stdio.h>
+#include <string.h>
 #include <stdint.h>
 
 /* ------------------------------------------------------------------ */
@@ -857,15 +858,7 @@ static const uint8_t rom_miniterm[] = {
 /* Test table                                                          */
 /* ------------------------------------------------------------------ */
 
-typedef struct {
-    const char    *name;
-    const uint8_t *rom;
-    size_t         size;
-    const char    *description;
-    int            max_steps;
-} test68080_t;
-
-static const test68080_t tests[] = {
+static const builtin_test_t tests[] = {
     { "lpstop_68080",  rom_lpstop_68080, sizeof(rom_lpstop_68080), "LPSTOP inherited from 68060",      3 },
     { "paddb_dreg",    rom_paddb,        sizeof(rom_paddb),        "PADDB D0,D1→D2: 0x05050505",       5 },
     { "peor_zero",     rom_peor_zero,    sizeof(rom_peor_zero),    "PEOR D0,D0→D1: self-XOR=0",        4 },
@@ -961,7 +954,7 @@ int run_68080_tests(void)
     cpu_init(CPU_MODEL_68080);
 
     for (size_t i = 0; i < NUM_TESTS; i++) {
-        const test68080_t *t = &tests[i];
+        const builtin_test_t *t = &tests[i];
 
         mem_set_bus(NULL);
         mem_reset();
@@ -997,4 +990,13 @@ int run_68080_tests(void)
     cpu_init(CPU_MODEL_68000);
 
     return failed;
+}
+
+const builtin_test_t *find_68080_test(const char *name)
+{
+    for (size_t i = 0; i < NUM_TESTS; i++) {
+        if (strcmp(tests[i].name, name) == 0)
+            return &tests[i];
+    }
+    return NULL;
 }

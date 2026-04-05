@@ -3,19 +3,10 @@
  * Each test has reset vector at 0, code at 0x10, loop back.
  */
 
-#include "tests.h"
+#include "tests_68000.h"
 #include "cpu.h"
 #include "cpu_internal.h"
 #include "memory.h"
-#include "genesis/genesis_tests.h"
-#include "amiga/bus_tests.h"
-#include "amiga/paula_tests.h"
-#include "tests_68010.h"
-#include "tests_68020.h"
-#include "tests_68030.h"
-#include "tests_68040.h"
-#include "tests_68060.h"
-#include "tests_68080.h"
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -1699,7 +1690,7 @@ static const unsigned expected_cycles[NUM_BUILTIN_TESTS] = {
     550,  /* smoke */
 };
 
-const builtin_test_t *find_builtin_test(const char *name)
+const builtin_test_t *find_68000_test(const char *name)
 {
     for (size_t i = 0; i < NUM_BUILTIN_TESTS; i++) {
         if (strcmp(builtin_tests[i].name, name) == 0)
@@ -1708,13 +1699,13 @@ const builtin_test_t *find_builtin_test(const char *name)
     return NULL;
 }
 
-int run_all_tests(double speed_mhz)
+int run_68000_tests(double speed_mhz)
 {
     int failed = 0;
     uint64_t cycles_this_slice = 0;
     double slice_start = get_monotonic_sec();
 
-    printf("Running regression tests%s...\n", speed_mhz > 0 ? " at given speed" : "");
+    printf("Running 68000 regression tests%s...\n", speed_mhz > 0 ? " at given speed" : "");
     fflush(stdout);
 
     for (size_t i = 0; i < NUM_BUILTIN_TESTS; i++) {
@@ -1766,49 +1757,5 @@ int run_all_tests(double speed_mhz)
         }
     }
 
-    int genesis_fails = run_genesis_tests(speed_mhz);
-    if (genesis_fails)
-        failed = 1;
-
-    int timing_fails = run_timing_tests();
-    if (timing_fails)
-        failed = 1;
-
-    int amiga_bus_fails = run_amiga_bus_tests();
-    if (amiga_bus_fails)
-        failed = 1;
-
-    int paula_fails = run_paula_tests();
-    if (paula_fails)
-        failed = 1;
-
-    int fails_68010 = run_68010_tests();
-    if (fails_68010)
-        failed = 1;
-
-    int fails_68020 = run_68020_tests();
-    if (fails_68020)
-        failed = 1;
-
-    int fails_68030 = run_68030_tests();
-    if (fails_68030)
-        failed = 1;
-
-    int fails_68040 = run_68040_tests();
-    if (fails_68040)
-        failed = 1;
-
-    int fails_68060 = run_68060_tests();
-    if (fails_68060)
-        failed = 1;
-
-    int fails_68080 = run_68080_tests();
-    if (fails_68080)
-        failed = 1;
-
-    if (failed)
-        printf("Some tests failed.\n");
-    else
-        printf("All tests passed.\n");
     return failed ? 1 : 0;
 }

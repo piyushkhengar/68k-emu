@@ -20,7 +20,7 @@
 #include "cpu_internal.h"
 #include "memory.h"
 #include "processor_tests.h"
-#include "tests.h"
+#include "test_runner.h"
 #include "system.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -192,7 +192,7 @@ int main(int argc, char *argv[])
 
     const builtin_test_t *test = NULL;
     if (rom_or_test && !system_name)
-        test = find_builtin_test(rom_or_test);
+        test = find_test_by_name(rom_or_test);
 
     const system_t *sys = NULL;
     if (system_name) {
