@@ -19,6 +19,8 @@
  */
 
 #include "tests_68020.h"
+#include "tests_68000.h"
+#include "tests_68010.h"
 #include "cpu.h"
 #include "cpu_internal.h"
 #include "memory.h"
@@ -591,7 +593,7 @@ static const builtin_test_t tests[] = {
 /* Pass/fail criteria                                                  */
 /* ------------------------------------------------------------------ */
 
-static int check_result(size_t idx)
+int check_68020_result(size_t idx)
 {
     switch (idx) {
     case 0: return cpu.a[2] == 0x1014;          /* A2 = 0x1000 + (5<<2) + 0 */
@@ -620,12 +622,21 @@ static int check_result(size_t idx)
 int run_68020_tests(void)
 {
     int failed = 0;
+    size_t n;
 
     printf("Running 68020 tests...\n");
     fflush(stdout);
 
-    /* Switch to 68020 mode for this suite. */
+    if (run_suite_in_mode(get_68000_tests(&n), n, check_68000_result,
+                          CPU_MODEL_68020, "68000 tests in 68020 mode"))
+        failed = 1;
+    if (run_suite_in_mode(get_68010_tests(&n), n, check_68010_result,
+                          CPU_MODEL_68020, "68010 tests in 68020 mode"))
+        failed = 1;
+
+    /* Switch to 68020 mode for native tests. */
     cpu_init(CPU_MODEL_68020);
+    printf("  [native] 68020-specific tests...\n");
 
     for (size_t i = 0; i < NUM_TESTS; i++) {
         const builtin_test_t *t = &tests[i];
@@ -644,11 +655,11 @@ int run_68020_tests(void)
             steps++;
         }
 
-        int pass = check_result(i);
+        int pass = check_68020_result(i);
         if (pass) {
-            printf("  %-20s PASS\n", t->name);
+            printf("    %-22s PASS\n", t->name);
         } else {
-            printf("  %-20s FAIL\n", t->name);
+            printf("    %-22s FAIL\n", t->name);
             failed = 1;
         }
     }
@@ -666,4 +677,10 @@ const builtin_test_t *find_68020_test(const char *name)
             return &tests[i];
     }
     return NULL;
+}
+
+const builtin_test_t *get_68020_tests(size_t *out_count)
+{
+    *out_count = NUM_TESTS;
+    return tests;
 }

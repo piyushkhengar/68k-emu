@@ -1611,7 +1611,7 @@ static const builtin_test_t builtin_tests[] = {
     { "abcd", abcd_test, sizeof(abcd_test), "Running ABCD test", 0 },
     { "sbcd", sbcd_test, sizeof(sbcd_test), "Running SBCD test", 0 },
     { "stop", stop_test, sizeof(stop_test), "Running STOP test", 0 },
-    { "trapv", trapv_test, sizeof(trapv_test), "Running TRAPV test", 150 },
+    { "trapv", trapv_test, sizeof(trapv_test), "Running TRAPV test", 150, CPU_MODEL_68000 },
     { "chk", chk_test, sizeof(chk_test), "Running CHK test", 0 },
     { "line1010", line1010_test, sizeof(line1010_test), "Running Line 1010 test", 0 },
     { "move_ccr", move_ccr_test, sizeof(move_ccr_test), "Running MOVE to CCR test", 0 },
@@ -1697,6 +1697,17 @@ const builtin_test_t *find_68000_test(const char *name)
             return &builtin_tests[i];
     }
     return NULL;
+}
+
+const builtin_test_t *get_68000_tests(size_t *out_count)
+{
+    *out_count = NUM_BUILTIN_TESTS;
+    return builtin_tests;
+}
+
+int check_68000_result(size_t idx)
+{
+    return check_test_result(idx);
 }
 
 int run_68000_tests(double speed_mhz)

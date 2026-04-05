@@ -51,6 +51,12 @@
  */
 
 #include "tests_68080.h"
+#include "tests_68000.h"
+#include "tests_68010.h"
+#include "tests_68020.h"
+#include "tests_68030.h"
+#include "tests_68040.h"
+#include "tests_68060.h"
 #include "cpu.h"
 #include "cpu_internal.h"
 #include "memory.h"
@@ -898,7 +904,7 @@ static const builtin_test_t tests[] = {
 /* Pass/fail criteria                                                  */
 /* ------------------------------------------------------------------ */
 
-static int check_result(size_t idx)
+int check_68080_result(size_t idx)
 {
     switch (idx) {
     case 0: return cpu.d[0] == 77 && cpu.halted == 1;
@@ -946,12 +952,33 @@ static int check_result(size_t idx)
 int run_68080_tests(void)
 {
     int failed = 0;
+    size_t n;
 
     printf("Running 68080 tests...\n");
     fflush(stdout);
 
-    /* Switch to 68080 mode for this suite. */
+    if (run_suite_in_mode(get_68000_tests(&n), n, check_68000_result,
+                          CPU_MODEL_68080, "68000 tests in 68080 mode"))
+        failed = 1;
+    if (run_suite_in_mode(get_68010_tests(&n), n, check_68010_result,
+                          CPU_MODEL_68080, "68010 tests in 68080 mode"))
+        failed = 1;
+    if (run_suite_in_mode(get_68020_tests(&n), n, check_68020_result,
+                          CPU_MODEL_68080, "68020 tests in 68080 mode"))
+        failed = 1;
+    if (run_suite_in_mode(get_68030_tests(&n), n, check_68030_result,
+                          CPU_MODEL_68080, "68030 tests in 68080 mode"))
+        failed = 1;
+    if (run_suite_in_mode(get_68040_tests(&n), n, check_68040_result,
+                          CPU_MODEL_68080, "68040 tests in 68080 mode"))
+        failed = 1;
+    if (run_suite_in_mode(get_68060_tests(&n), n, check_68060_result,
+                          CPU_MODEL_68080, "68060 tests in 68080 mode"))
+        failed = 1;
+
+    /* Switch to 68080 mode for native tests. */
     cpu_init(CPU_MODEL_68080);
+    printf("  [native] 68080-specific tests...\n");
 
     for (size_t i = 0; i < NUM_TESTS; i++) {
         const builtin_test_t *t = &tests[i];
@@ -970,11 +997,11 @@ int run_68080_tests(void)
             steps++;
         }
 
-        int pass = check_result(i);
+        int pass = check_68080_result(i);
         if (pass) {
-            printf("  %-22s PASS\n", t->name);
+            printf("    %-22s PASS\n", t->name);
         } else {
-            printf("  %-22s FAIL  (D2=%08X D3=%08X E0=%016llX E1=%016llX E2=%016llX halted=%d)\n",
+            printf("    %-22s FAIL  (D2=%08X D3=%08X E0=%016llX E1=%016llX E2=%016llX halted=%d)\n",
                    t->name,
                    cpu.d[2],
                    cpu.d[3],
@@ -990,6 +1017,12 @@ int run_68080_tests(void)
     cpu_init(CPU_MODEL_68000);
 
     return failed;
+}
+
+const builtin_test_t *get_68080_tests(size_t *out_count)
+{
+    *out_count = NUM_TESTS;
+    return tests;
 }
 
 const builtin_test_t *find_68080_test(const char *name)

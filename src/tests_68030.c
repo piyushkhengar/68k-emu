@@ -23,6 +23,9 @@
  */
 
 #include "tests_68030.h"
+#include "tests_68000.h"
+#include "tests_68010.h"
+#include "tests_68020.h"
 #include "cpu.h"
 #include "cpu_internal.h"
 #include "memory.h"
@@ -182,8 +185,8 @@ static const uint8_t rom_pflush_noop[] = {
 static const builtin_test_t tests[] = {
     { "cacr_rw",      rom_cacr_rw,      sizeof(rom_cacr_rw),      "MOVEC CACR round-trip",             6 },
     { "caar_rw",      rom_caar_rw,      sizeof(rom_caar_rw),      "MOVEC CAAR round-trip",             6 },
-    { "tc_pmove",     rom_tc_pmove,     sizeof(rom_tc_pmove),     "PMOVE TC: write then read back",    9 },
-    { "pflush_noop",  rom_pflush_noop,  sizeof(rom_pflush_noop),  "PFLUSHA: no-op, sentinel preserved", 4 },
+    { "tc_pmove",     rom_tc_pmove,     sizeof(rom_tc_pmove),     "PMOVE TC: write then read back",    9, CPU_MODEL_68030 },
+    { "pflush_noop",  rom_pflush_noop,  sizeof(rom_pflush_noop),  "PFLUSHA: no-op, sentinel preserved", 4, CPU_MODEL_68030 },
 };
 
 #define NUM_TESTS (sizeof(tests) / sizeof(tests[0]))
@@ -192,7 +195,7 @@ static const builtin_test_t tests[] = {
 /* Pass/fail criteria                                                  */
 /* ------------------------------------------------------------------ */
 
-static int check_result(size_t idx)
+int check_68030_result(size_t idx)
 {
     switch (idx) {
     case 0: return cpu.d[1] == 1;           /* MOVEC CACR round-trip: D1 = 1 */
@@ -210,12 +213,24 @@ static int check_result(size_t idx)
 int run_68030_tests(void)
 {
     int failed = 0;
+    size_t n;
 
     printf("Running 68030 tests...\n");
     fflush(stdout);
 
-    /* Switch to 68030 mode for this suite. */
+    if (run_suite_in_mode(get_68000_tests(&n), n, check_68000_result,
+                          CPU_MODEL_68030, "68000 tests in 68030 mode"))
+        failed = 1;
+    if (run_suite_in_mode(get_68010_tests(&n), n, check_68010_result,
+                          CPU_MODEL_68030, "68010 tests in 68030 mode"))
+        failed = 1;
+    if (run_suite_in_mode(get_68020_tests(&n), n, check_68020_result,
+                          CPU_MODEL_68030, "68020 tests in 68030 mode"))
+        failed = 1;
+
+    /* Switch to 68030 mode for native tests. */
     cpu_init(CPU_MODEL_68030);
+    printf("  [native] 68030-specific tests...\n");
 
     for (size_t i = 0; i < NUM_TESTS; i++) {
         const builtin_test_t *t = &tests[i];
@@ -234,11 +249,11 @@ int run_68030_tests(void)
             steps++;
         }
 
-        int pass = check_result(i);
+        int pass = check_68030_result(i);
         if (pass) {
-            printf("  %-20s PASS\n", t->name);
+            printf("    %-22s PASS\n", t->name);
         } else {
-            printf("  %-20s FAIL\n", t->name);
+            printf("    %-22s FAIL\n", t->name);
             failed = 1;
         }
     }
@@ -256,4 +271,10 @@ const builtin_test_t *find_68030_test(const char *name)
             return &tests[i];
     }
     return NULL;
+}
+
+const builtin_test_t *get_68030_tests(size_t *out_count)
+{
+    *out_count = NUM_TESTS;
+    return tests;
 }

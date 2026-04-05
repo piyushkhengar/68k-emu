@@ -18,7 +18,7 @@
 
 /* Supported CPU models in the 68k family. */
 typedef enum {
-    CPU_MODEL_68000 = 0,
+    CPU_MODEL_68000 = 1,  /* starts at 1; 0 is reserved as "no retirement" sentinel */
     CPU_MODEL_68010,
     CPU_MODEL_68020,
     CPU_MODEL_68030,

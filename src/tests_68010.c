@@ -14,6 +14,7 @@
  */
 
 #include "tests_68010.h"
+#include "tests_68000.h"
 #include "cpu.h"
 #include "cpu_internal.h"
 #include "memory.h"
@@ -173,7 +174,7 @@ static const builtin_test_t tests[] = {
 /* Pass/fail criteria                                                  */
 /* ------------------------------------------------------------------ */
 
-static int check_result(size_t idx)
+int check_68010_result(size_t idx)
 {
     switch (idx) {
     case 0: return cpu.d[1] == 0x1234;
@@ -193,12 +194,18 @@ static int check_result(size_t idx)
 int run_68010_tests(void)
 {
     int failed = 0;
+    size_t n;
 
     printf("Running 68010 tests...\n");
     fflush(stdout);
 
-    /* Switch to 68010 mode for this suite. */
+    if (run_suite_in_mode(get_68000_tests(&n), n, check_68000_result,
+                          CPU_MODEL_68010, "68000 tests in 68010 mode"))
+        failed = 1;
+
+    /* Switch to 68010 mode for native tests. */
     cpu_init(CPU_MODEL_68010);
+    printf("  [native] 68010-specific tests...\n");
 
     for (size_t i = 0; i < NUM_TESTS; i++) {
         const builtin_test_t *t = &tests[i];
@@ -217,11 +224,11 @@ int run_68010_tests(void)
             steps++;
         }
 
-        int pass = check_result(i);
+        int pass = check_68010_result(i);
         if (pass) {
-            printf("  %-16s PASS\n", t->name);
+            printf("    %-22s PASS\n", t->name);
         } else {
-            printf("  %-16s FAIL\n", t->name);
+            printf("    %-22s FAIL\n", t->name);
             failed = 1;
         }
     }
@@ -239,4 +246,10 @@ const builtin_test_t *find_68010_test(const char *name)
             return &tests[i];
     }
     return NULL;
+}
+
+const builtin_test_t *get_68010_tests(size_t *out_count)
+{
+    *out_count = NUM_TESTS;
+    return tests;
 }
