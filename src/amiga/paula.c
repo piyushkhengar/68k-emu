@@ -6,6 +6,7 @@
  */
 
 #include "paula.h"
+#include "cpu.h"
 #include <string.h>
 
 /* ------------------------------------------------------------------ */
@@ -92,6 +93,44 @@ uint16_t paula_read_reg(const paula_t *p, uint16_t offset)
     case 0x01E: return p->intreq;
     default:    return 0;
     }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Interrupt controller                                                */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Field naming note (inherited from original implementation):
+ *   p->intreq = hardware INTENA register (enable, bit 14 = master enable)
+ *   p->adkcon = hardware INTREQ register (request)
+ * This is backwards from what the names suggest.  The write offsets in
+ * paula_write_reg() map 0x09C → intreq and 0x09E → adkcon, whereas
+ * real hardware has INTENA at 0x09C and INTREQ at 0x09E.
+ * All functions below are correct for this mapping.
+ */
+
+void paula_assert_intreq(paula_t *p, uint16_t bits)
+{
+    p->adkcon |= (bits & 0x7FFFu);
+    paula_update_irq(p);
+}
+
+void paula_update_irq(paula_t *p)
+{
+    /* Master enable is bit 14 of hardware INTENA (= p->intreq field). */
+    uint16_t active = 0;
+    if (p->intreq & 0x4000u)
+        active = p->intreq & p->adkcon & 0x3FFFu;
+
+    int level = 0;
+    if (active & 0x0007u) level = 1;   /* TBE / DSKBLK / SOFT  (bits 0-2) */
+    if (active & 0x0008u) level = 2;   /* PORTS / CIA-A         (bit  3)   */
+    if (active & 0x0070u) level = 3;   /* COPER / VERTB / BLIT  (bits 4-6) */
+    if (active & 0x0780u) level = 4;   /* AUD0-3                (bits 7-10)*/
+    if (active & 0x1800u) level = 5;   /* RBF / DSKSYN          (bits 11-12)*/
+    if (active & 0x2000u) level = 6;   /* EXTER / CIA-B         (bit  13)  */
+
+    cpu_ipl = level;
 }
 
 /* ------------------------------------------------------------------ */

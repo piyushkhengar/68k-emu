@@ -1,15 +1,24 @@
 /*
  * Amiga 500 bus — address decoder and memory dispatch.
  *
- * Phase 1 scope: Chip RAM, Kickstart ROM, Gary OVL overlay, Slow RAM,
- * and stub responses for CIA and custom chip registers.  Custom chip and
- * CIA handlers will be replaced by real implementations in later phases.
+ * Chapter 2: CIA-A/B fully wired; custom chip registers dispatched to Paula.
+ * Agnus and Denise dispatch will be added in Chapter 3.
  */
 
 #include "bus.h"
+#include "cia.h"
+#include "paula.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+
+/* ------------------------------------------------------------------ */
+/*  Chip singletons (shared with amiga.c via bus.h externs)            */
+/* ------------------------------------------------------------------ */
+
+paula_t amiga_paula;
+cia_t   amiga_cia_a;
+cia_t   amiga_cia_b;
 
 /* ------------------------------------------------------------------ */
 /*  Chip RAM (512 KB)                                                  */
@@ -82,6 +91,10 @@ int amiga_bus_init(const uint8_t *rom_data, size_t size)
     memset(chip_ram, 0, sizeof(chip_ram));
     memset(slow_ram, 0, sizeof(slow_ram));
     ovl_active = true;
+
+    paula_init(&amiga_paula);
+    cia_init(&amiga_cia_a);
+    cia_init(&amiga_cia_b);
     return 0;
 }
 
@@ -90,6 +103,10 @@ void amiga_bus_reset(void)
     memset(chip_ram, 0, sizeof(chip_ram));
     memset(slow_ram, 0, sizeof(slow_ram));
     ovl_active = true;
+
+    paula_reset(&amiga_paula);
+    cia_reset(&amiga_cia_a);
+    cia_reset(&amiga_cia_b);
 }
 
 /* ------------------------------------------------------------------ */
@@ -112,13 +129,17 @@ uint8_t amiga_bus_read8(uint32_t addr)
     if (addr < 0xBFD000u)
         return 0xFF;
 
-    /* CIA-B: 0xBFD000–0xBFDFFF (even bytes) — Phase 1 stub */
-    if (addr < 0xBFE000u)
-        return 0xFF;
+    /* CIA-B: 0xBFD000–0xBFDFFF (even bytes) */
+    if (addr < 0xBFE000u) {
+        uint8_t reg = (uint8_t)((addr >> 8) & 0xFu);
+        return cia_read(&amiga_cia_b, reg);
+    }
 
-    /* CIA-A: 0xBFE000–0xBFEFFF (odd bytes) — Phase 1 stub */
-    if (addr < 0xBFF000u)
-        return 0xFF;
+    /* CIA-A: 0xBFE000–0xBFEFFF (odd bytes) */
+    if (addr < 0xBFF000u) {
+        uint8_t reg = (uint8_t)((addr >> 8) & 0xFu);
+        return cia_read(&amiga_cia_a, reg);
+    }
 
     /* Open bus gap: 0xBFF000–0xBFFFFF */
     if (addr < 0xC00000u)
@@ -132,9 +153,14 @@ uint8_t amiga_bus_read8(uint32_t addr)
     if (addr < 0xDFF000u)
         return 0xFF;
 
-    /* Custom chip registers: 0xDFF000–0xDFFFFF — Phase 1 stub */
-    if (addr < 0xE00000u)
-        return 0x00;
+    /* Custom chip registers: 0xDFF000–0xDFFFFF — dispatch to Paula.
+     * Agnus and Denise will be added in Chapter 3.
+     * Registers are 16-bit; 8-bit reads return the appropriate byte. */
+    if (addr < 0xE00000u) {
+        uint16_t off = (uint16_t)(addr & 0xFFEu);  /* word-align */
+        uint16_t val = paula_read_reg(&amiga_paula, off);
+        return (addr & 1u) ? (uint8_t)(val & 0xFFu) : (uint8_t)(val >> 8);
+    }
 
     /* Open bus gap: 0xE00000–0xF7FFFF */
     if (addr < 0xF80000u)
@@ -146,6 +172,10 @@ uint8_t amiga_bus_read8(uint32_t addr)
 
 uint16_t amiga_bus_read16(uint32_t addr)
 {
+    addr &= 0xFFFFFFu;
+    /* Custom chip registers return a 16-bit value; read atomically. */
+    if (addr >= 0xDFF000u && addr < 0xE00000u)
+        return paula_read_reg(&amiga_paula, (uint16_t)(addr & 0xFFEu));
     return ((uint16_t)amiga_bus_read8(addr) << 8) | amiga_bus_read8(addr + 1);
 }
 
@@ -170,15 +200,19 @@ void amiga_bus_write8(uint32_t addr, uint8_t val)
 
     if (addr < 0xBFD000u) return;  /* open bus */
 
-    /* CIA-B: 0xBFD000–0xBFDFFF — Phase 1 stub, ignore writes */
-    if (addr < 0xBFE000u)
+    /* CIA-B: 0xBFD000–0xBFDFFF */
+    if (addr < 0xBFE000u) {
+        uint8_t reg = (uint8_t)((addr >> 8) & 0xFu);
+        cia_write(&amiga_cia_b, reg, val);
         return;
+    }
 
     /* CIA-A: 0xBFE000–0xBFEFFF */
     if (addr < 0xBFF000u) {
-        /* reg = bits [11:8] of address (Amiga hardware convention). */
-        uint8_t reg = (addr >> 8) & 0xF;
-        if (reg == 0 && (val & 0x01))   /* PRA bit 0 = OVL */
+        uint8_t reg = (uint8_t)((addr >> 8) & 0xFu);
+        cia_write(&amiga_cia_a, reg, val);
+        /* CIA-A PRA bit 0 = /OVL: writing 1 deactivates the overlay. */
+        if (reg == CIA_PRA && (val & 0x01u))
             amiga_bus_set_ovl(false);
         return;
     }
@@ -193,7 +227,11 @@ void amiga_bus_write8(uint32_t addr, uint8_t val)
 
     if (addr < 0xDFF000u) return;
 
-    /* Custom chip registers: 0xDFF000–0xDFFFFF — Phase 1 stub, ignore */
+    /* Custom chip registers: 0xDFF000–0xDFFFFF.
+     * Custom chip registers are 16-bit write-only; 8-bit writes are
+     * not supported by the hardware and silently ignored here.
+     * Use amiga_bus_write16() for correct dispatch.
+     * Agnus and Denise dispatch will be added in Chapter 3. */
     if (addr < 0xE00000u)
         return;
 
@@ -202,8 +240,16 @@ void amiga_bus_write8(uint32_t addr, uint8_t val)
 
 void amiga_bus_write16(uint32_t addr, uint16_t val)
 {
-    amiga_bus_write8(addr,     (val >> 8) & 0xFF);
-    amiga_bus_write8(addr + 1,  val & 0xFF);
+    addr &= 0xFFFFFFu;
+    /* Custom chip registers are 16-bit; dispatch atomically to preserve the
+     * SET/CLR bit 15 semantics.  Agnus/Denise added in Chapter 3. */
+    if (addr >= 0xDFF000u && addr < 0xE00000u) {
+        uint16_t off = (uint16_t)(addr & 0xFFEu);
+        paula_write_reg(&amiga_paula, off, val);
+        return;
+    }
+    amiga_bus_write8(addr,     (uint8_t)((val >> 8) & 0xFFu));
+    amiga_bus_write8(addr + 1, (uint8_t)(val & 0xFFu));
 }
 
 void amiga_bus_write32(uint32_t addr, uint32_t val)

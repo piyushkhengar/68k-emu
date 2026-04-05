@@ -4,6 +4,13 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
+#include "paula.h"
+#include "cia.h"
+
+/* Chip singletons owned by bus.c; used by amiga.c for per-scanline ticking. */
+extern paula_t amiga_paula;
+extern cia_t   amiga_cia_a;
+extern cia_t   amiga_cia_b;
 
 /*
  * Amiga 500 address bus — Phase 1 (boot to display window).

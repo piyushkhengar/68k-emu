@@ -2,9 +2,11 @@
 #include <string.h>
 
 extern const system_t system_genesis;
+extern const system_t system_amiga;
 
 static const system_t *systems[] = {
     &system_genesis,
+    &system_amiga,
 };
 
 #define NUM_SYSTEMS (sizeof(systems) / sizeof(systems[0]))
