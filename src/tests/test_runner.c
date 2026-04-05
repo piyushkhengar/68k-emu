@@ -6,7 +6,7 @@
 #include "tests_68040.h"
 #include "tests_68060.h"
 #include "tests_68080.h"
-#include "machine_tests/runner.h"
+#include "machine/runner.h"
 #include "memory.h"
 #include <stdio.h>
 

@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -g -std=c11 -Isrc -Isrc/core -Isrc/isa -Isrc/genesis -Isrc/amiga -I.
+CFLAGS = -Wall -Wextra -g -std=c11 -Isrc -Isrc/core -Isrc/isa -Isrc/genesis -Isrc/amiga -Isrc/tests -Isrc/tests/cpu -I.
 TARGET = 68k-emu
 
 # Optional: -DHAVE_ZLIB and -lz for .json.gz support
@@ -20,14 +20,14 @@ CORE_SRCS = src/main.c src/system.c \
             src/isa/move.c src/isa/alu.c src/isa/branch.c src/isa/control.c \
             src/isa/immediate.c src/isa/logic.c src/isa/shift.c src/isa/bit.c \
             src/isa/movem.c src/isa/movep.c \
-            src/test_runner.c \
-            src/tests_68000.c src/tests_68010.c src/tests_68020.c src/tests_68030.c src/tests_68040.c src/tests_68060.c src/tests_68080.c \
-            src/timing.c src/timing_tests.c src/processor_tests.c \
+            src/tests/test_runner.c \
+            src/tests/cpu/tests_68000.c src/tests/cpu/tests_68010.c src/tests/cpu/tests_68020.c src/tests/cpu/tests_68030.c src/tests/cpu/tests_68040.c src/tests/cpu/tests_68060.c src/tests/cpu/tests_68080.c \
+            src/timing.c src/tests/timing_tests.c src/tests/processor_tests.c \
             deps/cJSON/cJSON.c
 
-MACHINE_TEST_SRCS = src/machine_tests/runner.c \
-                    src/machine_tests/amiga.c \
-                    src/machine_tests/genesis.c
+MACHINE_TEST_SRCS = src/tests/machine/runner.c \
+                    src/tests/machine/amiga.c \
+                    src/tests/machine/genesis.c
 
 GENESIS_SRCS = src/genesis/bus.c src/genesis/vdp.c src/genesis/io.c \
                src/genesis/z80.c src/genesis/psg.c src/genesis/ym2612.c \

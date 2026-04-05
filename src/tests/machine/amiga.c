@@ -1,4 +1,4 @@
-#include "machine_tests/amiga.h"
+#include "amiga.h"
 #include "amiga/bus_tests.h"
 #include "amiga/paula_tests.h"
 

@@ -1,4 +1,4 @@
-#include "machine_tests/genesis.h"
+#include "genesis.h"
 #include "genesis/genesis_tests.h"
 
 int run_genesis_machine_tests(double speed_mhz)

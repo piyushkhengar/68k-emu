@@ -1,6 +1,6 @@
-#include "machine_tests/runner.h"
-#include "machine_tests/amiga.h"
-#include "machine_tests/genesis.h"
+#include "runner.h"
+#include "amiga.h"
+#include "genesis.h"
 
 int run_all_machine_tests(double speed_mhz)
 {
