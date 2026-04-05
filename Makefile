@@ -22,7 +22,7 @@ CORE_SRCS = src/main.c src/system.c \
             src/isa/movem.c src/isa/movep.c \
             src/tests/test_runner.c \
             src/tests/cpu/tests_68000.c src/tests/cpu/tests_68010.c src/tests/cpu/tests_68020.c src/tests/cpu/tests_68030.c src/tests/cpu/tests_68040.c src/tests/cpu/tests_68060.c src/tests/cpu/tests_68080.c \
-            src/timing.c src/tests/timing_tests.c src/tests/processor_tests.c \
+            src/timing.c src/tests/cpu/timing_tests.c src/tests/cpu/processor_tests.c \
             deps/cJSON/cJSON.c
 
 MACHINE_TEST_SRCS = src/tests/machine/runner.c \
