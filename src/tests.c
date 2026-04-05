@@ -9,6 +9,7 @@
 #include "memory.h"
 #include "genesis/genesis_tests.h"
 #include "amiga/bus_tests.h"
+#include "amiga/paula_tests.h"
 #include "tests_68010.h"
 #include "tests_68020.h"
 #include "tests_68030.h"
@@ -1775,6 +1776,10 @@ int run_all_tests(double speed_mhz)
 
     int amiga_bus_fails = run_amiga_bus_tests();
     if (amiga_bus_fails)
+        failed = 1;
+
+    int paula_fails = run_paula_tests();
+    if (paula_fails)
         failed = 1;
 
     int fails_68010 = run_68010_tests();

@@ -27,7 +27,8 @@ GENESIS_SRCS = src/genesis/bus.c src/genesis/vdp.c src/genesis/io.c \
                src/genesis/z80.c src/genesis/psg.c src/genesis/ym2612.c \
                src/genesis/genesis.c src/genesis/genesis_tests.c
 
-AMIGA_SRCS = src/amiga/bus.c src/amiga/bus_tests.c
+AMIGA_SRCS = src/amiga/bus.c src/amiga/bus_tests.c \
+             src/amiga/paula.c src/amiga/paula_tests.c
 
 SRCS = $(CORE_SRCS) $(GENESIS_SRCS) $(AMIGA_SRCS)
 OBJS = $(SRCS:.c=.o)
