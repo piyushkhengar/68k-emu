@@ -36,6 +36,7 @@ GENESIS_SRCS = src/genesis/bus.c src/genesis/vdp.c src/genesis/io.c \
 AMIGA_SRCS = src/amiga/bus.c src/amiga/bus_tests.c \
              src/amiga/paula.c src/amiga/paula_tests.c \
              src/amiga/cia.c src/amiga/cia_tests.c \
+             src/amiga/agnus.c src/amiga/agnus_tests.c \
              src/amiga/amiga.c
 
 SRCS = $(CORE_SRCS) $(GENESIS_SRCS) $(AMIGA_SRCS) $(MACHINE_TEST_SRCS)
