@@ -252,9 +252,13 @@ static void test_cia_b_stub_read(void)
 static void test_custom_reg_stub_read(void)
 {
     reset_bus();
-    /* 0xDFF002 = DMACONR — should read 0 in Phase 1 stub. */
-    BASSERT(amiga_bus_read8(0xDFF002) == 0x00,
-            "DMACONR stub: expected 0x00, got 0x%02X",
+    /*
+     * 0xDFF002 = DMACONR high byte.
+     * Bit 14 (BLTDONE) is always 1 in our synchronous model, so the
+     * high byte = 0x40 and the low byte = 0x00 at reset.
+     */
+    BASSERT(amiga_bus_read8(0xDFF002) == 0x40,
+            "DMACONR high byte: expected 0x40 (BLTDONE), got 0x%02X",
             amiga_bus_read8(0xDFF002));
     BASSERT(amiga_bus_read8(0xDFF000) == 0x00,
             "custom 0xDFF000 stub: expected 0x00, got 0x%02X",

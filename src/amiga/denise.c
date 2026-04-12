@@ -98,6 +98,27 @@ void denise_write_reg(denise_t *d, uint16_t offset, uint16_t val)
         d->color[idx] = val & 0x0FFFu;   /* mask to 12 bits */
         return;
     }
+
+    /*
+     * Sprite registers: SPRxPOS/CTL/DATA/DATB at 0x140–0x17E.
+     * Each sprite occupies 4 consecutive word registers (8 bytes):
+     *   offset = 0x140 + sprite_index * 8 + register_within_sprite * 2
+     *   register_within_sprite: 0=POS 1=CTL 2=DATA 3=DATB
+     */
+    if (offset >= 0x140 && offset <= 0x17E) {
+        unsigned rel = (offset - 0x140u) / 2u;   /* 0..31 */
+        unsigned idx = rel / 4u;                  /* sprite index 0..7 */
+        unsigned reg = rel % 4u;                  /* 0=pos 1=ctl 2=data 3=datb */
+        if (idx < DENISE_SPRITES) {
+            switch (reg) {
+            case 0: d->spr[idx].pos  = val; break;
+            case 1: d->spr[idx].ctl  = val; break;
+            case 2: d->spr[idx].data = val; break;
+            case 3: d->spr[idx].datb = val; break;
+            }
+        }
+        return;
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -163,5 +184,43 @@ void denise_render_line(denise_t *d,
         }
 
         pixels[px] = denise_expand_color(d->color[color_idx]);
+    }
+
+    /*
+     * Sprite overlay — rendered on top of bitplanes.
+     *
+     * Sprites 0–1 have highest priority, then 2–3, 4–5, 6–7.
+     * We iterate highest priority last so lower-numbered sprites win.
+     * (Iterating 7..0 means sprite 0 overwrites sprite 7 → sprite 0 wins.)
+     *
+     * Horizontal position: hstart = ((pos & 0xFF) << 1) | ((ctl >> 1) & 1).
+     * The 320-pixel display window starts at hstart = 0x81.
+     * screen_x = hstart - 0x81.
+     *
+     * A sprite is considered inactive when both DATA and DATB are zero
+     * (the Copper writes 0/0 at vstop on real hardware).
+     */
+    for (int n = DENISE_SPRITES - 1; n >= 0; n--) {
+        if (!d->spr[n].data && !d->spr[n].datb)
+            continue;
+
+        int hstart  = (int)(((d->spr[n].pos & 0xFFu) << 1) | ((d->spr[n].ctl >> 1) & 1u));
+        int screen_x = hstart - 0x81;
+        int pair    = n / 2;
+        int base    = 16 + pair * 4;   /* palette base for this sprite pair */
+
+        for (int bit = 0; bit < 16; bit++) {
+            int sx = screen_x + bit;
+            if (sx < 0 || sx >= DENISE_WIDTH)
+                continue;
+
+            /* Bit 15 of DATA/DATB is the leftmost sprite pixel */
+            int bit0 = (d->spr[n].data >> (15 - bit)) & 1;
+            int bit1 = (d->spr[n].datb >> (15 - bit)) & 1;
+            int cidx = (bit1 << 1) | bit0;
+
+            if (cidx != 0)
+                pixels[sx] = denise_expand_color(d->color[base + cidx]);
+        }
     }
 }

@@ -40,13 +40,35 @@
 #define DENISE_WIDTH   320   /* lores pixel width */
 #define DENISE_PLANES    6   /* maximum bitplanes */
 #define DENISE_COLORS   32   /* palette entries   */
+#define DENISE_SPRITES   8   /* hardware sprites  */
+
+/*
+ * Sprite state written by the Copper (Ch 3) or DMA (Ch 5).
+ *
+ * Each sprite is 16 pixels wide. DATA/DATB form a 2-bit colour index
+ * per pixel: bit0 from DATA, bit1 from DATB. Index 0 = transparent.
+ *
+ * Horizontal position (hstart):
+ *   hstart = ((pos & 0xFF) << 1) | ((ctl >> 1) & 1)
+ * The left edge of the 320-pixel display window is at hstart = 0x81,
+ * so screen_x = hstart - 0x81.
+ *
+ * Colours: sprite pair n/2 uses COLOR[16 + (n/2)*4 + colour_index].
+ */
+typedef struct {
+    uint16_t pos;   /* SPRxPOS: bits 15:8 = VSTART[7:0], bits 7:0 = HSTART[8:1] */
+    uint16_t ctl;   /* SPRxCTL: bits 15:8 = VSTOP[7:0],  bit 1 = HSTART[0]      */
+    uint16_t data;  /* SPRxDATA: bit-plane A (bit 0 of colour index)             */
+    uint16_t datb;  /* SPRxDATB: bit-plane B (bit 1 of colour index)             */
+} sprite_t;
 
 typedef struct {
-    uint16_t color[DENISE_COLORS];  /* palette: 12-bit 0x0RGB per entry */
-    uint16_t bplcon0;               /* bitplane control register 0       */
-    uint16_t bplcon1;               /* horizontal scroll (stored only)   */
-    uint16_t bplcon2;               /* priority control (stored only)    */
-    uint32_t bplpt[DENISE_PLANES];  /* bitplane pointers into chip RAM   */
+    uint16_t color[DENISE_COLORS];     /* palette: 12-bit 0x0RGB per entry */
+    uint16_t bplcon0;                  /* bitplane control register 0       */
+    uint16_t bplcon1;                  /* horizontal scroll (stored only)   */
+    uint16_t bplcon2;                  /* priority control (stored only)    */
+    uint32_t bplpt[DENISE_PLANES];     /* bitplane pointers into chip RAM   */
+    sprite_t spr[DENISE_SPRITES];      /* sprite registers                  */
 } denise_t;
 
 /* Lifecycle */

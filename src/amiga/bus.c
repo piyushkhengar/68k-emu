@@ -152,22 +152,47 @@ static uint16_t custom_read_reg(uint16_t off)
 
 static void custom_write_reg(uint16_t off, uint16_t val)
 {
-    /* Agnus-owned writes */
+    /* ---- Agnus: Blitter registers (0x040–0x066) ------------------- */
+    if (off >= 0x040u && off <= 0x066u) {
+        if (off == 0x058u) {
+            /* BLTSIZE write triggers synchronous blit then fires IRQ */
+            agnus_blitter_execute(&amiga_agnus, chip_ram, CHIP_RAM_SIZE, val);
+            paula_assert_intreq(&amiga_paula, INTREQ_BLIT);
+        } else {
+            agnus_write_reg(&amiga_agnus, off, val);
+        }
+        return;
+    }
+
+    /* ---- Agnus: Copper registers (0x080–0x08A) -------------------- */
+    if (off >= 0x080u && off <= 0x08Au) {
+        agnus_write_reg(&amiga_agnus, off, val);
+        return;
+    }
+
+    /* ---- Agnus: DMACON (0x096) ------------------------------------ */
     if (off == 0x096u) {
         agnus_write_reg(&amiga_agnus, off, val);
         return;
     }
 
-    /* Denise-owned writes: BPLxPT pointers, BPLCON0–2, palette */
+    /* ---- Denise: BPLxPT pointers, BPLCON0–2, sprites, palette ---- */
     if ((off >= 0x0E0u && off <= 0x0F6u) ||
          off == 0x100u || off == 0x102u || off == 0x104u ||
+        (off >= 0x140u && off <= 0x17Eu) ||
         (off >= 0x180u && off <= 0x1BEu)) {
         denise_write_reg(&amiga_denise, off, val);
         return;
     }
 
-    /* Paula handles everything else (INTENA, INTREQ, ADKCON, audio, …) */
+    /* ---- Paula: INTENA, INTREQ, ADKCON, audio, … ------------------ */
     paula_write_reg(&amiga_paula, off, val);
+}
+
+/* Public wrapper used by the Copper write callback in amiga.c */
+void amiga_bus_write_custom(uint16_t offset, uint16_t val)
+{
+    custom_write_reg(offset, val);
 }
 
 /* ------------------------------------------------------------------ */

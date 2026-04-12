@@ -21,6 +21,13 @@ const uint8_t *amiga_bus_chip_ram(void);
 uint32_t       amiga_bus_chip_ram_size(void);
 
 /*
+ * amiga_bus_write_custom — write to a custom chip register by offset.
+ * Used as the Copper's write callback so it shares the same dispatch
+ * as CPU bus writes.
+ */
+void amiga_bus_write_custom(uint16_t offset, uint16_t val);
+
+/*
  * Amiga 500 address bus — Phase 1 (boot to display window).
  *
  * Memory map:

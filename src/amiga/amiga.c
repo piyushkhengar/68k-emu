@@ -117,6 +117,16 @@ void amiga_run(void)
             /* Advance Agnus beam counter to the start of this scanline. */
             agnus_tick_scanline(&amiga_agnus, line);
 
+            /* At the top of each frame, restart the Copper from COP1LC. */
+            if (line == 0)
+                amiga_agnus.copper_pc = amiga_agnus.cop1lc;
+
+            /* Run the Copper — executes MOVEs and WAITs up to this line. */
+            agnus_copper_scanline(&amiga_agnus,
+                                  amiga_bus_chip_ram(),
+                                  amiga_bus_chip_ram_size(),
+                                  amiga_bus_write_custom);
+
             /* Run the 68000 for one scanline worth of CPU cycles. */
             int cycles = 0;
             while (cycles < CPU_CYCLES_PER_LINE) {
