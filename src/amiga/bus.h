@@ -6,11 +6,19 @@
 #include <stdbool.h>
 #include "paula.h"
 #include "cia.h"
+#include "agnus.h"
+#include "denise.h"
 
 /* Chip singletons owned by bus.c; used by amiga.c for per-scanline ticking. */
-extern paula_t amiga_paula;
-extern cia_t   amiga_cia_a;
-extern cia_t   amiga_cia_b;
+extern paula_t  amiga_paula;
+extern cia_t    amiga_cia_a;
+extern cia_t    amiga_cia_b;
+extern agnus_t  amiga_agnus;
+extern denise_t amiga_denise;
+
+/* Chip RAM accessor — used by amiga.c to pass chip_ram to denise_render_line. */
+const uint8_t *amiga_bus_chip_ram(void);
+uint32_t       amiga_bus_chip_ram_size(void);
 
 /*
  * Amiga 500 address bus — Phase 1 (boot to display window).

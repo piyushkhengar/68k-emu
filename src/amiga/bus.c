@@ -8,6 +8,8 @@
 #include "bus.h"
 #include "cia.h"
 #include "paula.h"
+#include "agnus.h"
+#include "denise.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -16,9 +18,11 @@
 /*  Chip singletons (shared with amiga.c via bus.h externs)            */
 /* ------------------------------------------------------------------ */
 
-paula_t amiga_paula;
-cia_t   amiga_cia_a;
-cia_t   amiga_cia_b;
+paula_t  amiga_paula;
+cia_t    amiga_cia_a;
+cia_t    amiga_cia_b;
+agnus_t  amiga_agnus;
+denise_t amiga_denise;
 
 /* ------------------------------------------------------------------ */
 /*  Chip RAM (512 KB)                                                  */
@@ -95,6 +99,8 @@ int amiga_bus_init(const uint8_t *rom_data, size_t size)
     paula_init(&amiga_paula);
     cia_init(&amiga_cia_a);
     cia_init(&amiga_cia_b);
+    agnus_init(&amiga_agnus);
+    denise_init(&amiga_denise);
     return 0;
 }
 
@@ -107,6 +113,61 @@ void amiga_bus_reset(void)
     paula_reset(&amiga_paula);
     cia_reset(&amiga_cia_a);
     cia_reset(&amiga_cia_b);
+    agnus_reset(&amiga_agnus);
+    denise_reset(&amiga_denise);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Chip RAM accessor (used by amiga.c to pass to denise_render_line)  */
+/* ------------------------------------------------------------------ */
+
+const uint8_t *amiga_bus_chip_ram(void)      { return chip_ram; }
+uint32_t       amiga_bus_chip_ram_size(void) { return CHIP_RAM_SIZE; }
+
+/* ------------------------------------------------------------------ */
+/*  Custom chip register dispatch (offset from 0xDFF000 base)          */
+/*                                                                      */
+/*  Ownership:                                                          */
+/*    Agnus  reads : DMACONR (0x002), VPOSR (0x004), VHPOSR (0x006)   */
+/*    Agnus  writes: DMACON  (0x096)                                   */
+/*    Denise reads : COLOR00–31 (0x180–0x1BE)                          */
+/*    Denise writes: BPLxPT (0x0E0–0x0F6), BPLCON0–2 (0x100–0x104),  */
+/*                   COLOR00–31 (0x180–0x1BE)                          */
+/*    Paula         everything else                                     */
+/* ------------------------------------------------------------------ */
+
+static uint16_t custom_read_reg(uint16_t off)
+{
+    /* Agnus-owned reads */
+    if (off == 0x002 || off == 0x004 || off == 0x006)
+        return agnus_read_reg(&amiga_agnus, off);
+
+    /* Denise-owned reads (colour registers are readable) */
+    if (off >= 0x180u && off <= 0x1BEu)
+        return denise_read_reg(&amiga_denise, off);
+
+    /* Paula handles everything else */
+    return paula_read_reg(&amiga_paula, off);
+}
+
+static void custom_write_reg(uint16_t off, uint16_t val)
+{
+    /* Agnus-owned writes */
+    if (off == 0x096u) {
+        agnus_write_reg(&amiga_agnus, off, val);
+        return;
+    }
+
+    /* Denise-owned writes: BPLxPT pointers, BPLCON0–2, palette */
+    if ((off >= 0x0E0u && off <= 0x0F6u) ||
+         off == 0x100u || off == 0x102u || off == 0x104u ||
+        (off >= 0x180u && off <= 0x1BEu)) {
+        denise_write_reg(&amiga_denise, off, val);
+        return;
+    }
+
+    /* Paula handles everything else (INTENA, INTREQ, ADKCON, audio, …) */
+    paula_write_reg(&amiga_paula, off, val);
 }
 
 /* ------------------------------------------------------------------ */
@@ -153,12 +214,11 @@ uint8_t amiga_bus_read8(uint32_t addr)
     if (addr < 0xDFF000u)
         return 0xFF;
 
-    /* Custom chip registers: 0xDFF000–0xDFFFFF — dispatch to Paula.
-     * Agnus and Denise will be added in Chapter 3.
+    /* Custom chip registers: 0xDFF000–0xDFFFFF.
      * Registers are 16-bit; 8-bit reads return the appropriate byte. */
     if (addr < 0xE00000u) {
         uint16_t off = (uint16_t)(addr & 0xFFEu);  /* word-align */
-        uint16_t val = paula_read_reg(&amiga_paula, off);
+        uint16_t val = custom_read_reg(off);
         return (addr & 1u) ? (uint8_t)(val & 0xFFu) : (uint8_t)(val >> 8);
     }
 
@@ -175,7 +235,7 @@ uint16_t amiga_bus_read16(uint32_t addr)
     addr &= 0xFFFFFFu;
     /* Custom chip registers return a 16-bit value; read atomically. */
     if (addr >= 0xDFF000u && addr < 0xE00000u)
-        return paula_read_reg(&amiga_paula, (uint16_t)(addr & 0xFFEu));
+        return custom_read_reg((uint16_t)(addr & 0xFFEu));
     return ((uint16_t)amiga_bus_read8(addr) << 8) | amiga_bus_read8(addr + 1);
 }
 
@@ -242,10 +302,9 @@ void amiga_bus_write16(uint32_t addr, uint16_t val)
 {
     addr &= 0xFFFFFFu;
     /* Custom chip registers are 16-bit; dispatch atomically to preserve the
-     * SET/CLR bit 15 semantics.  Agnus/Denise added in Chapter 3. */
+     * SET/CLR bit 15 semantics. */
     if (addr >= 0xDFF000u && addr < 0xE00000u) {
-        uint16_t off = (uint16_t)(addr & 0xFFEu);
-        paula_write_reg(&amiga_paula, off, val);
+        custom_write_reg((uint16_t)(addr & 0xFFEu), val);
         return;
     }
     amiga_bus_write8(addr,     (uint8_t)((val >> 8) & 0xFFu));

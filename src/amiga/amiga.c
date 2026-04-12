@@ -1,8 +1,8 @@
 /*
  * Amiga 500 system: system_t implementation + PAL run loop.
  *
- * Chapter 2 scope: CIA-A/B tick, Paula interrupt controller, headless boot.
- * Graphical output (SDL2 window) deferred to Chapter 3.
+ * Chapter 3: adds SDL2 graphical run loop (HAVE_SDL2).
+ * Headless path (amiga_run_headless) unchanged from Chapter 2.
  *
  * PAL timing:
  *   CPU clock:  7,093,790 Hz
@@ -18,6 +18,10 @@
 #include "cpu.h"
 #include "memory.h"
 #include <stdio.h>
+
+#ifdef HAVE_SDL2
+#  include "renderer.h"
+#endif
 
 /* ------------------------------------------------------------------ */
 /*  PAL constants                                                       */
@@ -96,7 +100,57 @@ static void amiga_shutdown(void)
 
 void amiga_run(void)
 {
+#ifdef HAVE_SDL2
+    if (renderer_init() < 0)
+        return;
+
+    /*
+     * Framebuffer: AMIGA_HEIGHT visible lines × AMIGA_WIDTH pixels.
+     * Lines 0–(AMIGA_HEIGHT-1) are rendered by Denise each frame.
+     * Lines AMIGA_HEIGHT–311 still run the CPU and CIAs for correct timing
+     * but are not blitted to the screen (vertical blanking / overscan region).
+     */
+    static uint32_t framebuffer[AMIGA_HEIGHT * AMIGA_WIDTH];
+
+    while (!renderer_poll_events()) {
+        for (int line = 0; line < PAL_LINES; line++) {
+            /* Advance Agnus beam counter to the start of this scanline. */
+            agnus_tick_scanline(&amiga_agnus, line);
+
+            /* Run the 68000 for one scanline worth of CPU cycles. */
+            int cycles = 0;
+            while (cycles < CPU_CYCLES_PER_LINE) {
+                int c = cpu_step();
+                if (c == 0) {
+                    cycles = CPU_CYCLES_PER_LINE;  /* CPU halted */
+                    break;
+                }
+                cpu.cycles += (uint32_t)c;
+                cycles += c;
+            }
+
+            /* Tick CIA-A (PORTS = level 2) and CIA-B (EXTER = level 6). */
+            cia_tick(&amiga_cia_a, E_CLOCKS_PER_LINE, &amiga_paula, INTREQ_PORTS);
+            cia_tick(&amiga_cia_b, E_CLOCKS_PER_LINE, &amiga_paula, INTREQ_EXTER);
+
+            /* Render visible lines into the framebuffer. */
+            if (line < AMIGA_HEIGHT) {
+                denise_render_line(&amiga_denise,
+                                   amiga_bus_chip_ram(),
+                                   amiga_bus_chip_ram_size(),
+                                   &framebuffer[line * AMIGA_WIDTH]);
+            }
+        }
+
+        /* End of frame: fire vertical blank interrupt and present. */
+        paula_assert_intreq(&amiga_paula, INTREQ_VERTB);
+        renderer_present(framebuffer);
+    }
+
+    renderer_shutdown();
+#else
     fprintf(stderr, "Amiga graphical mode requires SDL2.  Build with:  make amiga\n");
+#endif
 }
 
 void amiga_run_headless(int max_frames)

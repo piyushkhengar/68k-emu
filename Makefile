@@ -57,7 +57,7 @@ MUSASHI_EMU_SRCS = src/core/cpu.c src/core/memory.c src/core/ea.c \
 MUSASHI_DIFF_SRCS = $(MUSASHI_EMU_SRCS) $(MUSASHI_SRCS) src/musashi_diff.c
 MUSASHI_CFLAGS = $(CFLAGS) -Ideps/musashi -Ideps/musashi/softfloat -DMUSASHI_DIFF_MODE -Wno-unused-parameter -Wno-sign-compare
 
-.PHONY: all clean test mcl68-test genesis processor-tests processor-tests-68010 processor-tests-68020 processor-tests-68030 processor-tests-68040 processor-tests-68060 processor-tests-68080 musashi-diff baremetal qemu-bm qemu-bm-headless qemu-bm-elf burn-usb clean-bm
+.PHONY: all clean test mcl68-test genesis amiga processor-tests processor-tests-68010 processor-tests-68020 processor-tests-68030 processor-tests-68040 processor-tests-68060 processor-tests-68080 musashi-diff baremetal qemu-bm qemu-bm-headless qemu-bm-elf burn-usb clean-bm
 
 include bare-metal/Makefile.baremetal
 
@@ -81,6 +81,18 @@ src/genesis/renderer.o: src/genesis/renderer.c
 src/genesis/audio.o: src/genesis/audio.c
 	$(CC) $(CFLAGS) $(SDL2_CFLAGS) -DHAVE_SDL2 -c -o $@ $<
 
+# Amiga target: rebuild with SDL2 for graphical output
+#   - amiga.c recompiled with -DHAVE_SDL2 (separate .o to avoid conflicts)
+#   - renderer.c compiled with SDL2 headers
+amiga: $(filter-out src/amiga/amiga.o,$(OBJS)) src/amiga/amiga_sdl.o src/amiga/renderer.o
+	$(CC) $(CFLAGS) $(SDL2_CFLAGS) -o $(TARGET) $(filter-out src/amiga/amiga.o,$(OBJS)) src/amiga/amiga_sdl.o src/amiga/renderer.o $(LDFLAGS) $(SDL2_LIBS)
+
+src/amiga/amiga_sdl.o: src/amiga/amiga.c
+	$(CC) $(CFLAGS) $(SDL2_CFLAGS) -DHAVE_SDL2 -c -o $@ $<
+
+src/amiga/renderer.o: src/amiga/renderer.c
+	$(CC) $(CFLAGS) $(SDL2_CFLAGS) -c -o $@ $<
+
 %.o: %.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
@@ -93,7 +105,7 @@ deps/musashi/m68kops.c: deps/musashi/m68kmake.c deps/musashi/m68k_in.c
 	cd deps/musashi && ./m68kmake
 
 clean:
-	rm -f $(OBJS) src/genesis/genesis_sdl.o src/genesis/renderer.o src/genesis/audio.o src/system.o $(TARGET)
+	rm -f $(OBJS) src/genesis/genesis_sdl.o src/genesis/renderer.o src/genesis/audio.o src/amiga/amiga_sdl.o src/amiga/renderer.o src/system.o $(TARGET)
 	rm -f 68k-musashi-diff deps/musashi/m68kmake
 
 # SPEED: run tests at given MHz (e.g. make test SPEED=7.09). Omit for hyperspeed.
