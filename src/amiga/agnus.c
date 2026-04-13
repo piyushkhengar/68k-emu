@@ -150,15 +150,29 @@ void agnus_copper_scanline(agnus_t *ag,
             uint8_t  bfv = (uint8_t)(ir2 >> 8);
             uint8_t  bfh = (uint8_t)(ir2 & 0xFEu);
 
-            /* End-of-list sentinel */
-            if (ir1 == 0xFFFFu && ir2 == 0xFFFEu)
+            /*
+             * End-of-list sentinel.
+             * Park copper_pc beyond chip_ram_size so the guard at the top of
+             * this function fires immediately on any subsequent call.  This
+             * prevents the Copper from reading garbage data that follows the
+             * sentinel in chip RAM (e.g. bitplane data that looks like MOVE
+             * COLOR00 instructions) on lines 256–311 or before line 0 of the
+             * next frame is set up.
+             */
+            if (ir1 == 0xFFFFu && ir2 == 0xFFFEu) {
+                ag->copper_pc = chip_ram_size;
                 return;
+            }
 
             /*
              * Compare (beam & mask) >= (wait_pos & mask).
-             * Treat beam as a 16-bit value: high byte = line, low byte = hpos.
+             * Treat beam as a 16-bit value: high byte = line[7:0], low byte = hpos.
+             *
+             * The Copper's VP field is only 8 bits (VPOS[7:0]); mask ag->line to
+             * 8 bits so that PAL lines 256–311 correctly wrap to 0–55 rather
+             * than overflowing the uint16_t and appearing as 0.
              */
-            uint16_t beam     = (uint16_t)((ag->line << 8) | (ag->hpos & 0xFFu));
+            uint16_t beam     = (uint16_t)(((ag->line & 0xFFu) << 8) | (ag->hpos & 0xFFu));
             uint16_t wait_pos = (uint16_t)((vp << 8) | hp);
             uint16_t mask     = (uint16_t)((bfv << 8) | bfh);
             int condition = (beam & mask) >= (wait_pos & mask);

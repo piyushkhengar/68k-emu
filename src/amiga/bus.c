@@ -296,9 +296,18 @@ void amiga_bus_write8(uint32_t addr, uint8_t val)
     if (addr < 0xBFF000u) {
         uint8_t reg = (uint8_t)((addr >> 8) & 0xFu);
         cia_write(&amiga_cia_a, reg, val);
-        /* CIA-A PRA bit 0 = /OVL: writing 1 deactivates the overlay. */
-        if (reg == CIA_PRA && (val & 0x01u))
-            amiga_bus_set_ovl(false);
+        /* Recalculate OVL after any PRA or DDRA write.
+         * OVL is directly driven by CIA-A PRA bit 0:
+         *   DDRA bit 0 = 0 (input)  → external pull-up → HIGH → OVL active
+         *   DDRA bit 0 = 1 (output) → pin = PRA bit 0
+         *     PRA bit 0 = 1 → HIGH → OVL active
+         *     PRA bit 0 = 0 → LOW  → OVL deactivated */
+        if (reg == CIA_PRA || reg == CIA_DDRA) {
+            bool pin0 = (amiga_cia_a.ddra & 0x01u)
+                      ? (amiga_cia_a.pra & 0x01u)   /* output: driven by PRA */
+                      : 1u;                           /* input: pull-up = HIGH */
+            amiga_bus_set_ovl(pin0);
+        }
         return;
     }
 

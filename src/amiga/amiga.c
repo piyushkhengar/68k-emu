@@ -149,12 +149,58 @@ void amiga_run(void)
                                    amiga_bus_chip_ram(),
                                    amiga_bus_chip_ram_size(),
                                    &framebuffer[line * AMIGA_WIDTH]);
+
+                /*
+                 * Agnus auto-increments each active bitplane pointer by one
+                 * row's worth of bytes after DMA-fetching the row's words.
+                 * 320 pixels / 16 bits per word = 20 words = 40 bytes per row.
+                 */
+                int np = (amiga_denise.bplcon0 >> 12) & 7;
+                if (np > DENISE_PLANES) np = DENISE_PLANES;
+                for (int n = 0; n < np; n++)
+                    amiga_denise.bplpt[n] += DENISE_WIDTH / 8;
             }
         }
 
         /* End of frame: fire vertical blank interrupt and present. */
         paula_assert_intreq(&amiga_paula, INTREQ_VERTB);
         renderer_present(framebuffer);
+
+        /* ---- Diagnostic: print key chip state until stable ---- */
+        {
+            static int  dbg_f           = 0;
+            static int  last_dmacon     = -1;
+            static int  last_color00    = -1;
+            uint32_t mid_px = framebuffer[(AMIGA_HEIGHT / 2) * AMIGA_WIDTH + AMIGA_WIDTH / 2];
+            int dmacon  = amiga_agnus.dmacon;
+            int color00 = amiga_denise.color[0];
+            ++dbg_f;
+
+            /* Print when something changes OR for the first 20 frames */
+            if (dbg_f <= 20 ||
+                dmacon  != last_dmacon  ||
+                color00 != last_color00) {
+
+                fprintf(stderr,
+                    "[F%03d] PC=%06X COLOR00=%04X COLOR01=%04X BPLCON0=%04X(BPU=%d)"
+                    " BPL1PT=%06X DMACON=%04X COP1LC=%06X midpx=%08X\n",
+                    dbg_f, cpu.pc,
+                    amiga_denise.color[0], amiga_denise.color[1],
+                    amiga_denise.bplcon0,  (amiga_denise.bplcon0 >> 12) & 7,
+                    amiga_denise.bplpt[0],
+                    amiga_agnus.dmacon, amiga_agnus.cop1lc,
+                    mid_px);
+                last_dmacon  = dmacon;
+                last_color00 = color00;
+            }
+            /* Periodic PC dump every 10 frames after initial burst */
+            if (dbg_f >= 20 && dbg_f % 10 == 0 && dbg_f <= 120)
+                fprintf(stderr, "[F%03d-PC] cpu.pc=%06X SR=%04X D0=%08X A7=%08X\n",
+                        dbg_f, cpu.pc, cpu.sr, cpu.d[0], cpu.a[7]);
+            /* Stop printing after 120 frames (≈2.4 seconds) */
+            if (dbg_f == 120)
+                fprintf(stderr, "[diagnostic complete]\n");
+        }
     }
 
     renderer_shutdown();

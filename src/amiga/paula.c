@@ -89,6 +89,14 @@ uint16_t paula_read_reg(const paula_t *p, uint16_t offset)
     switch (offset) {
     case 0x002: return p->dmacon;
     case 0x010: return p->adkcon;
+
+    case 0x018: /* SERDATR — serial port status + data.
+                 * Bit 14 RXD=1 (idle), bit 13 TSRE=1, bit 12 TBE=1,
+                 * bit 11 RBF=1, data=0xFF → low 7 bits = 0x7F (keyboard
+                 * init-done code) after Kickstart's ANDI #$7F masking.
+                 * Satisfies both the FC30DC handshake and FC223E reader. */
+        return 0x7FFF;
+
     case 0x01C: return p->intena;
     case 0x01E: return p->intreq;
     default:    return 0;

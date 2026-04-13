@@ -336,8 +336,10 @@ static void test_cia_a_pra_clears_ovl_via_bus(void)
             "pre-PRA: expected ROM 0xDE via OVL, got 0x%02X",
             amiga_bus_read8(0x000000));
 
-    /* Write CIA-A PRA with bit 0 = 1 (Kickstart's OVL deactivation). */
-    amiga_bus_write8(0xBFE001, 0x01);
+    /* Kickstart sets DDRA bit 0 = output, then writes PRA bit 0 = 0.
+     * Since PRA defaults to 0, the DDRA write drives pin LOW → OVL off. */
+    amiga_bus_write8(0xBFE201, 0x03);  /* DDRA: bits 0,1 as output */
+    amiga_bus_write8(0xBFE001, 0x02);  /* PRA: bit 0 = 0 → OVL off */
 
     /* OVL cleared: address 0 now exposes chip RAM (zeroed by init). */
     BASSERT(amiga_bus_read8(0x000000) == 0x00,

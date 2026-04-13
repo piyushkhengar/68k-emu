@@ -266,7 +266,9 @@ static void test_custom_reg_stub_read(void)
 }
 
 /* ------------------------------------------------------------------ */
-/*  Test: CIA-A PRA write with bit 0 set deactivates OVL              */
+/*  Test: CIA-A DDRA+PRA matching Kickstart deactivates OVL           */
+/*  Real hardware: OVL tracks effective pin level of CIA-A PRA bit 0.  */
+/*  DDRA bit 0=output + PRA bit 0=0 → pin LOW → OVL deactivated.      */
 /* ------------------------------------------------------------------ */
 
 static void test_cia_a_pra_clears_ovl(void)
@@ -275,8 +277,11 @@ static void test_cia_a_pra_clears_ovl(void)
     /* With OVL on, address 0 reads ROM. */
     BASSERT(amiga_bus_read8(0x000000) == 0xDE, "pre-PRA: OVL active");
 
-    /* Kickstart writes bit 0 of PRA at 0xBFE001. */
-    amiga_bus_write8(0xBFE001, 0x01);
+    /* Kickstart sets DDRA bits 0,1 as output, then writes PRA bit 0 = 0.
+     * Since PRA defaults to 0 after reset, the DDRA write alone is enough
+     * to drive the pin LOW and deactivate OVL. */
+    amiga_bus_write8(0xBFE201, 0x03);  /* DDRA: bits 0,1 as output */
+    amiga_bus_write8(0xBFE001, 0x02);  /* PRA: bit 1=1 (LED), bit 0=0 */
 
     /* Now 0x000000 must expose chip RAM (zeroed), not ROM. */
     BASSERT(amiga_bus_read8(0x000000) == 0x00,
@@ -285,16 +290,18 @@ static void test_cia_a_pra_clears_ovl(void)
 }
 
 /* ------------------------------------------------------------------ */
-/*  Test: CIA-A PRA write with bit 0 clear does NOT deactivate OVL   */
+/*  Test: PRA write without DDRA output does NOT deactivate OVL       */
+/*  When DDRA bit 0 = 0 (input), the external pull-up keeps OVL HIGH. */
 /* ------------------------------------------------------------------ */
 
 static void test_cia_a_pra_bit0_clear_keeps_ovl(void)
 {
     reset_bus();
-    /* Write PRA with bit 0 = 0 — OVL must stay active. */
+    /* DDRA defaults to 0 (all inputs) — pull-up keeps OVL active.
+     * Writing PRA with bit 0 = 0 has no effect on the pin. */
     amiga_bus_write8(0xBFE001, 0xFE);
     BASSERT(amiga_bus_read8(0x000000) == 0xDE,
-            "PRA bit0=0 must not clear OVL, expected 0xDE, got 0x%02X",
+            "PRA bit0=0 (input pin) must not clear OVL, expected 0xDE, got 0x%02X",
             amiga_bus_read8(0x000000));
 }
 
