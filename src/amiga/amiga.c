@@ -74,12 +74,38 @@ static void amiga_int_ack(int level)
 /*  system_t callbacks                                                  */
 /* ------------------------------------------------------------------ */
 
+/*
+ * amiga_reset_external — called by the CPU's RESET instruction (0x4E70).
+ *
+ * Resets all external hardware WITHOUT clearing RAM.  This re-activates
+ * OVL (CIA-A DDRA defaults to 0 → pin 0 is input → pull-up HIGH → OVL).
+ * After RESET, Kickstart reads the vector table from ROM (via OVL) and
+ * uses it for the warm-start JMP ($4).W sequence.
+ */
+static void amiga_reset_external(void)
+{
+    paula_reset(&amiga_paula);
+    cia_reset(&amiga_cia_a);
+    cia_reset(&amiga_cia_b);
+    agnus_reset(&amiga_agnus);
+    denise_reset(&amiga_denise);
+    /* CIA-A reset clears DDRA/PRA → pin 0 = input → pull-up → OVL active */
+    amiga_bus_set_ovl(true);
+    /* Clear the 'HELP' watchdog magic at $0.  Kickstart writes 'HELP' to
+     * $0 before risky init operations; if the system crashes and resets,
+     * finding 'HELP' at $0 triggers diagnostic/keyboard mode.  Since we
+     * don't actually crash, clear it to prevent false watchdog trips on
+     * warm restart.  (On real hardware the warm-start path at FC3100-FC3112
+     * clears this, but that path only runs when HELP is found during the
+     * early cold boot check, not during normal RESET recovery.) */
+    amiga_bus_write32(0x000000, 0x00000000);
+}
+
 static int amiga_init(const uint8_t *rom, size_t size)
 {
     if (amiga_bus_init(rom, size) < 0)
         return -1;
     mem_set_bus(&amiga_bus_vtable);
-    cpu_set_int_ack(amiga_int_ack);
     /*
      * Force 68010 model so Kickstart's Exec ColdStart can execute MOVEC
      * (VBR/SFC).  On a real 68000 these trigger an illegal-instruction
@@ -90,6 +116,9 @@ static int amiga_init(const uint8_t *rom, size_t size)
      * MOVEC, MOVES, and RTD, none of which break 68000 software.
      */
     cpu_init(CPU_MODEL_68010);
+    /* Set callbacks AFTER cpu_init (which clears them). */
+    cpu_set_int_ack(amiga_int_ack);
+    cpu_set_reset_cb(amiga_reset_external);
     return 0;
 }
 
@@ -102,6 +131,7 @@ static void amiga_shutdown(void)
 {
     mem_set_bus(NULL);
     cpu_set_int_ack(NULL);
+    cpu_set_reset_cb(NULL);
 }
 
 /* ------------------------------------------------------------------ */
@@ -225,11 +255,29 @@ void amiga_run_headless(int max_frames)
 
     uint32_t prev_pc = 0;
 
+    /* ---- Boot trace state (active for first BOOT_TRACE_FRAMES frames) ---- */
+    #define BOOT_TRACE_FRAMES 1000
+    uint32_t bt_last_execbase = 0;  /* last observed ExecBase at $4 */
+    uint32_t bt_last_resmod   = 0;  /* last observed ResModules pointer */
+    int      bt_reset_count   = 0;  /* number of RESET instructions seen */
+    int      bt_exc_count     = 0;  /* number of exceptions taken */
+    int      bt_jump_count    = 0;  /* number of significant PC jumps */
+    uint32_t bt_total_steps   = 0;  /* total cpu_step calls in trace window */
+
     for (int frame = 1; frame <= max_frames; frame++) {
+        int trace_active = (frame <= BOOT_TRACE_FRAMES);
+
+        if (trace_active && frame == 1)
+            printf("[BOOT-TRACE] === trace active for frames 1-%d ===\n",
+                   BOOT_TRACE_FRAMES);
+
         for (int line = 0; line < PAL_LINES; line++) {
             /* Run CPU for one scanline worth of cycles. */
             int cycles = 0;
             while (cycles < CPU_CYCLES_PER_LINE) {
+                uint32_t pc_before = cpu.pc;
+                uint16_t sr_before = cpu.sr;
+
                 int c = cpu_step();
                 if (c == 0) {
                     cycles = CPU_CYCLES_PER_LINE;  /* halted */
@@ -237,6 +285,93 @@ void amiga_run_headless(int max_frames)
                 }
                 cpu.cycles += (uint32_t)c;
                 cycles += c;
+
+                if (trace_active) {
+                    bt_total_steps++;
+                    uint32_t pc_after = cpu.pc;
+                    uint16_t ir       = cpu.ir;
+
+                    /* 1. Detect RESET instruction (opcode 0x4E70) */
+                    if (ir == 0x4E70) {
+                        bt_reset_count++;
+                        printf("[BOOT-TRACE F%02d L%03d] RESET instruction at PC=%06X "
+                               "(count=%d) SR=%04X A7=%08X\n",
+                               frame, line, pc_before, bt_reset_count,
+                               cpu.sr, cpu.a[7]);
+                    }
+
+                    /* 2. Detect exceptions: S-bit went 0->1 and PC jumped
+                     *    to an address that looks like a vector handler,
+                     *    OR any jump into the autovector range.
+                     *    Simpler heuristic: SR went from user to supervisor
+                     *    mode, or PC landed in a different region via a
+                     *    non-sequential change while supervisor. */
+                    int s_before = (sr_before & SR_S) != 0;
+                    int s_after  = (cpu.sr & SR_S) != 0;
+                    if (!s_before && s_after && pc_after != pc_before) {
+                        bt_exc_count++;
+                        printf("[BOOT-TRACE F%02d L%03d] EXCEPTION: "
+                               "PC %06X -> %06X  SR %04X->%04X  "
+                               "ir=%04X (exc#%d)\n",
+                               frame, line, pc_before, pc_after,
+                               sr_before, cpu.sr, ir, bt_exc_count);
+                    }
+                    /* Also detect supervisor-mode exceptions (e.g. double
+                     * fault, NMI): IPL mask changed AND big PC jump */
+                    else if (s_before && s_after &&
+                             (sr_before & SR_I_MASK) != (cpu.sr & SR_I_MASK) &&
+                             pc_after != pc_before) {
+                        int vec_guess = (int)(cpu.sr >> 8) & 7;
+                        bt_exc_count++;
+                        printf("[BOOT-TRACE F%02d L%03d] SV-EXCEPTION: "
+                               "PC %06X -> %06X  SR %04X->%04X  "
+                               "IPL-mask=%d (exc#%d)\n",
+                               frame, line, pc_before, pc_after,
+                               sr_before, cpu.sr, vec_guess, bt_exc_count);
+                    }
+
+                    /* 2b. Detect entry into keyboard handler or HELP check */
+                    if (pc_after >= 0xFC3090 && pc_after <= 0xFC30C0 &&
+                        (pc_before < 0xFC3090 || pc_before > 0xFC30C0)) {
+                        printf("[BOOT-TRACE F%02d L%03d] KBD-ENTRY: "
+                               "PC %06X -> %06X  ir=%04X SR=%04X->%04X "
+                               "D0=%08X A7=%08X\n",
+                               frame, line, pc_before, pc_after,
+                               ir, sr_before, cpu.sr,
+                               cpu.d[0], cpu.a[7]);
+                    }
+                    /* 2c. Detect code reaching FC3018-FC3028 (HELP check area) */
+                    if (pc_after >= 0xFC3018 && pc_after <= 0xFC3028 &&
+                        (pc_before < 0xFC3018 || pc_before > 0xFC3028)) {
+                        uint32_t eb = amiga_bus_read32(4);
+                        uint32_t eb202 = (eb >= 0x20 && eb < 0x80000) ?
+                            amiga_bus_read32(eb + 0x202) : 0xDEAD;
+                        printf("[BOOT-TRACE F%02d L%03d] HELP-CHECK: "
+                               "PC %06X -> %06X  ir=%04X [$0]=%08X "
+                               "EB=%08X EB+$202=%08X\n",
+                               frame, line, pc_before, pc_after,
+                               ir, amiga_bus_read32(0), eb, eb202);
+                    }
+
+                    /* 3. Significant PC jump (> 256 bytes, not a RESET) */
+                    if (ir != 0x4E70) {
+                        int32_t delta = (int32_t)pc_after - (int32_t)pc_before;
+                        if (delta > 256 || delta < -256) {
+                            bt_jump_count++;
+                            /* Only log the first 200 jumps to avoid flood */
+                            if (bt_jump_count <= 200) {
+                                printf("[BOOT-TRACE F%02d L%03d] JUMP: "
+                                       "PC %06X -> %06X  (delta=%+d) "
+                                       "ir=%04X SR=%04X\n",
+                                       frame, line, pc_before, pc_after,
+                                       (int)delta, ir, cpu.sr);
+                            } else if (bt_jump_count == 201) {
+                                printf("[BOOT-TRACE] ... suppressing further "
+                                       "JUMP logs (>200)\n");
+                            }
+                        }
+                    }
+                }
             }
 
             /* Tick CIA-A (PORTS = level 2) and CIA-B (EXTER = level 6). */
@@ -246,6 +381,58 @@ void amiga_run_headless(int max_frames)
 
         /* End of frame: assert vertical blank interrupt (level 3). */
         paula_assert_intreq(&amiga_paula, INTREQ_VERTB);
+
+        /* ---- Boot trace: per-frame chip RAM inspection ---- */
+        if (trace_active) {
+            uint32_t execbase = amiga_bus_read32(0x000004);
+            uint32_t resmod   = 0;
+            int      resmod_valid = 0;
+
+            /* If ExecBase looks like a valid chip/slow RAM pointer, read
+             * ResModules at ExecBase + 0x12E. */
+            if ((execbase >= 0x000020 && execbase < 0x200000) ||
+                (execbase >= 0xC00000 && execbase < 0xC80000)) {
+                resmod = amiga_bus_read32(execbase + 0x012E);
+                resmod_valid = 1;
+            }
+
+            /* Log when values change, or every 5 frames, or first/last */
+            int should_log = (frame == 1 || frame == BOOT_TRACE_FRAMES ||
+                              (frame % 5) == 0 ||
+                              execbase != bt_last_execbase ||
+                              (resmod_valid && resmod != bt_last_resmod));
+
+            if (should_log) {
+                printf("[BOOT-TRACE F%02d] PC=%06X SR=%04X A7=%08X  "
+                       "[$4]ExecBase=%08X",
+                       frame, cpu.pc, cpu.sr, cpu.a[7], execbase);
+                if (resmod_valid)
+                    printf("  [EB+$12E]ResModules=%08X", resmod);
+                else
+                    printf("  (ExecBase invalid, no ResModules)");
+                printf("  steps=%u jumps=%d exc=%d resets=%d%s\n",
+                       bt_total_steps, bt_jump_count, bt_exc_count,
+                       bt_reset_count, cpu.halted ? " HALTED" : "");
+            }
+
+            bt_last_execbase = execbase;
+            if (resmod_valid) bt_last_resmod = resmod;
+
+            /* End of trace window summary */
+            if (frame == BOOT_TRACE_FRAMES) {
+                printf("[BOOT-TRACE] === summary after %d frames ===\n",
+                       BOOT_TRACE_FRAMES);
+                printf("[BOOT-TRACE]   total cpu_steps : %u\n", bt_total_steps);
+                printf("[BOOT-TRACE]   RESET instrs    : %d\n", bt_reset_count);
+                printf("[BOOT-TRACE]   exceptions      : %d\n", bt_exc_count);
+                printf("[BOOT-TRACE]   sig. PC jumps   : %d\n", bt_jump_count);
+                printf("[BOOT-TRACE]   final ExecBase  : %08X\n", bt_last_execbase);
+                printf("[BOOT-TRACE]   final ResModules: %08X%s\n",
+                       bt_last_resmod,
+                       bt_last_resmod ? "" : " (NEVER SET - boot stuck!)");
+                printf("[BOOT-TRACE] === end trace ===\n");
+            }
+        }
 
         if (frame <= 5 || (frame <= 120 && cpu.pc != prev_pc)) {
             printf("Amiga frame %3d: PC=%06X SR=%04X D0=%08X A7=%08X%s\n",

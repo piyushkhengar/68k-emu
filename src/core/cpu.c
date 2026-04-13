@@ -27,6 +27,7 @@ static int exception_cycles_result;
 static void (*trace_jsr_fn)(uint32_t addr);
 static void (*trace_branch_to_fn)(uint32_t from_pc, uint32_t to_pc);
 static void (*int_ack_fn)(int level);
+static void (*reset_cb_fn)(void);
 
 /* Top-nibble dispatch table — mutable so higher-model ISA installers can patch
  * entries at cpu_init() time without touching this file.  Populated in cpu_init(). */
@@ -62,6 +63,17 @@ void cpu_trace_branch_to(uint32_t from_pc, uint32_t to_pc)
 void cpu_set_int_ack(void (*fn)(int level))
 {
     int_ack_fn = fn;
+}
+
+void cpu_set_reset_cb(void (*fn)(void))
+{
+    reset_cb_fn = fn;
+}
+
+void cpu_fire_reset_cb(void)
+{
+    if (reset_cb_fn)
+        reset_cb_fn();
 }
 
 /* Derive the cpu_features_t bitfield from a cpu_model_t. */
@@ -137,6 +149,7 @@ void cpu_init(cpu_model_t model)
     trace_jsr_fn = NULL;
     trace_branch_to_fn = NULL;
     int_ack_fn = NULL;
+    reset_cb_fn = NULL;
 
     /* Build the mutable top-level dispatch table (68000 baseline). */
     dispatch_top[0x0] = dispatch_0xxx;

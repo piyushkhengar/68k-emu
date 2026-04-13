@@ -48,12 +48,15 @@
 #define CR_SRP  0x807  /* Supervisor Root Pointer       (68040+, 32-bit via MOVEC) */
 #define CR_PCR  0x808  /* Processor Control Register    (68040+) */
 
-/* RESET: 0x4E70. Privileged. Assert external RESET (no-op in emulator). */
+/* RESET: 0x4E70. Privileged. Assert external RESET line.
+ * Resets all external hardware (CIAs, custom chips, etc.) via the system
+ * callback.  The CPU itself is NOT reset — registers and PC are unchanged. */
 static int op_reset(uint16_t op)
 {
     (void)op;
     if (!require_supervisor())
         return 0;
+    cpu_fire_reset_cb();
     return CYCLES_RESET;
 }
 

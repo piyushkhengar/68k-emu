@@ -32,12 +32,20 @@ denise_t amiga_denise;
 static uint8_t chip_ram[CHIP_RAM_SIZE];
 
 /* ------------------------------------------------------------------ */
-/*  Slow RAM (512 KB trapdoor expansion at 0xC00000)                   */
+/*  Slow RAM (disabled: base A500 has only 512 KB chip RAM)            */
+/*                                                                      */
+/*  Kickstart's ExecBase validity check (FC303A: ANDI.L #$00FF0001)    */
+/*  requires ExecBase in the $000000-$00FFFF00 range.  If slow RAM at  */
+/*  $C00000 is present, the memory sizer may place ExecBase there,     */
+/*  which fails the check and sends boot into an infinite restart.     */
+/*  Disable slow RAM until the memory sizer is better understood.      */
 /* ------------------------------------------------------------------ */
 
+#if 0  /* slow RAM disabled for now */
 #define SLOW_RAM_SIZE  0x80000u
 #define SLOW_RAM_BASE  0xC00000u
 static uint8_t slow_ram[SLOW_RAM_SIZE];
+#endif
 
 /* ------------------------------------------------------------------ */
 /*  Kickstart ROM                                                       */
@@ -93,7 +101,7 @@ int amiga_bus_init(const uint8_t *rom_data, size_t size)
     rom_size = (uint32_t)size;
 
     memset(chip_ram, 0, sizeof(chip_ram));
-    memset(slow_ram, 0, sizeof(slow_ram));
+    /* slow_ram disabled — see comment at declaration */
     ovl_active = true;
 
     paula_init(&amiga_paula);
@@ -107,7 +115,7 @@ int amiga_bus_init(const uint8_t *rom_data, size_t size)
 void amiga_bus_reset(void)
 {
     memset(chip_ram, 0, sizeof(chip_ram));
-    memset(slow_ram, 0, sizeof(slow_ram));
+    /* slow_ram disabled — see comment at declaration */
     ovl_active = true;
 
     paula_reset(&amiga_paula);
@@ -231,11 +239,7 @@ uint8_t amiga_bus_read8(uint32_t addr)
     if (addr < 0xC00000u)
         return 0xFF;
 
-    /* Slow RAM: 0xC00000–0xC7FFFF */
-    if (addr < 0xC80000u)
-        return slow_ram[addr - SLOW_RAM_BASE];
-
-    /* Open bus gap: 0xC80000–0xDFEFFF */
+    /* Open bus: 0xC00000–0xDFEFFF (slow RAM disabled) */
     if (addr < 0xDFF000u)
         return 0xFF;
 
@@ -313,12 +317,7 @@ void amiga_bus_write8(uint32_t addr, uint8_t val)
 
     if (addr < 0xC00000u) return;
 
-    /* Slow RAM: 0xC00000–0xC7FFFF */
-    if (addr < 0xC80000u) {
-        slow_ram[addr - SLOW_RAM_BASE] = val;
-        return;
-    }
-
+    /* Open bus: slow RAM disabled */
     if (addr < 0xDFF000u) return;
 
     /* Custom chip registers: 0xDFF000–0xDFFFFF.

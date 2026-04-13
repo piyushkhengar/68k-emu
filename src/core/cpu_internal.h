@@ -70,6 +70,9 @@ void cpu_take_addr_err_data(uint32_t fault_addr, int is_read);
 /* Returns 0 if privilege violation (takes exception); 1 if OK to proceed. */
 int require_supervisor(void);
 
+/* Fire the external-RESET callback (if set) from the RESET instruction. */
+void cpu_fire_reset_cb(void);
+
 /* Stack pointer helpers: use active SP (ssp when supervisor, usp when user). Always keep a[7] in sync. */
 static inline uint32_t cpu_sp(void)
 {

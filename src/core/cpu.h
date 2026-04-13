@@ -124,4 +124,11 @@ int cpu_step(void);
  * Set to NULL (the default) if no acknowledge handling is needed. */
 void cpu_set_int_ack(void (*fn)(int level));
 
+/* RESET-instruction callback.  Called when the CPU executes the RESET
+ * instruction (0x4E70), which asserts the external RESET line.  The system
+ * layer should use this to reset all external hardware (CIAs, custom chips,
+ * etc.).  The CPU itself is NOT reset — only peripherals.
+ * Set to NULL (the default) for no-op RESET behaviour. */
+void cpu_set_reset_cb(void (*fn)(void));
+
 #endif /* CPU_H */

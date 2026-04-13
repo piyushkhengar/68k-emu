@@ -90,20 +90,31 @@ uint16_t paula_read_reg(const paula_t *p, uint16_t offset)
     case 0x002: return p->dmacon;
     case 0x010: return p->adkcon;
 
-    case 0x018: { /* SERDATR — serial port status + data.
-                   * First reads return 0x7FFF: data=0xFF (keyboard init-done
-                   * 0x7F after Kickstart's ANDI #$7F), RXD=1, RBF=1.
-                   * After the keyboard handshake completes, return 0x7000:
-                   * RXD=1 (idle), RBF=0 (no data), TBE=1 (transmitter ready).
-                   * This prevents the keyboard driver from looping on phantom
-                   * data that would block the Exec init from continuing. */
-        static int serdatr_reads = 0;
-        if (serdatr_reads < 16) {
-            serdatr_reads++;
-            return 0x7FFF;  /* keyboard data available */
-        }
-        return 0x7000;      /* idle: RXD=1, TBE=1, no data */
-    }
+    case 0x018: /* SERDATR — serial port status + data.
+                   *
+                   * Bit layout:
+                   *   15: OVRUN   14: RBF   13: TBE   12: TSRE   11: RXD
+                   *   10:9: (unused)   8:0: data (9-bit, keyboard uses low 8)
+                   *
+                   * Return 0x7FFD: RBF=1, TBE=1, TSRE=1, RXD=1, data=0xFD.
+                   * Kickstart masks data with ANDI.B #$7F → keycode 0x7D.
+                   *
+                   * Two different ROM routines read SERDATR during boot:
+                   *
+                   *   FC30C0 (blink handler): reads data, checks for keycode
+                   *     0x7F (init-done).  Keycode 0x7D != 0x7F, so its DBEQ
+                   *     loops until D1 exhausts (6 retries), then BMI takes
+                   *     the correct boot-continuation path at FC05F0.
+                   *     Returning 0x7F would cause an infinite restart loop
+                   *     because 0x7F triggers JMP FC237E (re-enter cold init).
+                   *
+                   *   FC223E (poll handler): checks RBF (bit 14), returns -1
+                   *     if RBF=0.  RBF=1 here lets it read the keycode and
+                   *     return immediately (positive D0 exits the caller loop).
+                   *
+                   * 0xFD simulates the Amiga keyboard self-test-OK code.
+                   */
+        return 0x7FFD;
 
     case 0x01C: return p->intena;
     case 0x01E: return p->intreq;
