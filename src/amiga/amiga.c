@@ -80,6 +80,16 @@ static int amiga_init(const uint8_t *rom, size_t size)
         return -1;
     mem_set_bus(&amiga_bus_vtable);
     cpu_set_int_ack(amiga_int_ack);
+    /*
+     * Force 68010 model so Kickstart's Exec ColdStart can execute MOVEC
+     * (VBR/SFC).  On a real 68000 these trigger an illegal-instruction
+     * exception that aborts the ResidentTag ROM scan; with 68010 the
+     * MOVEC succeeds and ColdStart builds the ResModules list that
+     * graphics.library, intuition.library, etc. need.  The 68010 is
+     * instruction-compatible with the 68000 — the only additions are
+     * MOVEC, MOVES, and RTD, none of which break 68000 software.
+     */
+    cpu_init(CPU_MODEL_68010);
     return 0;
 }
 
@@ -193,12 +203,12 @@ void amiga_run(void)
                 last_dmacon  = dmacon;
                 last_color00 = color00;
             }
-            /* Periodic PC dump every 10 frames after initial burst */
-            if (dbg_f >= 20 && dbg_f % 10 == 0 && dbg_f <= 120)
-                fprintf(stderr, "[F%03d-PC] cpu.pc=%06X SR=%04X D0=%08X A7=%08X\n",
-                        dbg_f, cpu.pc, cpu.sr, cpu.d[0], cpu.a[7]);
-            /* Stop printing after 120 frames (≈2.4 seconds) */
-            if (dbg_f == 120)
+            /* Periodic PC dump every 20 frames */
+            if (dbg_f >= 20 && dbg_f % 20 == 0 && dbg_f <= 500)
+                fprintf(stderr, "[F%03d-PC] cpu.pc=%06X SR=%04X DMACON=%04X COP1LC=%06X A7=%08X\n",
+                        dbg_f, cpu.pc, cpu.sr, amiga_agnus.dmacon,
+                        amiga_agnus.cop1lc, cpu.a[7]);
+            if (dbg_f == 500)
                 fprintf(stderr, "[diagnostic complete]\n");
         }
     }

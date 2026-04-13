@@ -90,12 +90,20 @@ uint16_t paula_read_reg(const paula_t *p, uint16_t offset)
     case 0x002: return p->dmacon;
     case 0x010: return p->adkcon;
 
-    case 0x018: /* SERDATR — serial port status + data.
-                 * Bit 14 RXD=1 (idle), bit 13 TSRE=1, bit 12 TBE=1,
-                 * bit 11 RBF=1, data=0xFF → low 7 bits = 0x7F (keyboard
-                 * init-done code) after Kickstart's ANDI #$7F masking.
-                 * Satisfies both the FC30DC handshake and FC223E reader. */
-        return 0x7FFF;
+    case 0x018: { /* SERDATR — serial port status + data.
+                   * First reads return 0x7FFF: data=0xFF (keyboard init-done
+                   * 0x7F after Kickstart's ANDI #$7F), RXD=1, RBF=1.
+                   * After the keyboard handshake completes, return 0x7000:
+                   * RXD=1 (idle), RBF=0 (no data), TBE=1 (transmitter ready).
+                   * This prevents the keyboard driver from looping on phantom
+                   * data that would block the Exec init from continuing. */
+        static int serdatr_reads = 0;
+        if (serdatr_reads < 16) {
+            serdatr_reads++;
+            return 0x7FFF;  /* keyboard data available */
+        }
+        return 0x7000;      /* idle: RXD=1, TBE=1, no data */
+    }
 
     case 0x01C: return p->intena;
     case 0x01E: return p->intreq;
