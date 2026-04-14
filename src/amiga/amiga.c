@@ -216,6 +216,15 @@ void amiga_run(void)
                 /* Force expansion init continue (not RESET) */
                 if (cpu.pc == 0xFC3078)
                     cpu.d[0] = 0;
+                /* Workaround: clear AttnResched before user-mode drop.
+                 * Even with ORI to SR privilege fix, the scheduler dispatch
+                 * during Permit() switches away from the init code prematurely.
+                 * Clear AttnResched so Permit() just returns without dispatching. */
+                if (cpu.pc == 0xFC04BE) {
+                    uint32_t eb = amiga_bus_read32(0x04);
+                    if (eb >= 0x20 && eb < 0x80000)
+                        amiga_bus_write8(eb + 0x124, 0x00);
+                }
                 /* Workaround: skip strap's DoIO(CMD_READ) for disk boot. */
                 if (cpu.pc == 0xFE859C) {
                     cpu.d[0] = 0xFFFFFFFF;
@@ -400,6 +409,12 @@ void amiga_run_headless(int max_frames)
                 /* Workaround: skip trackdisk motor polling (same as gfx) */
                 if (cpu.pc == 0xFE8F8E)
                     cpu.pc = 0xFE8FB6;
+                /* Clear AttnResched (same as gfx) */
+                if (cpu.pc == 0xFC04BE) {
+                    uint32_t eb = amiga_bus_read32(0x04);
+                    if (eb >= 0x20 && eb < 0x80000)
+                        amiga_bus_write8(eb + 0x124, 0x00);
+                }
                 /* Boot workarounds (same as gfx) */
                 if (cpu.pc == 0xFC302C)
                     amiga_bus_write32(0x000000, 0x00000000);
