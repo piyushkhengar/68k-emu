@@ -135,6 +135,24 @@ void cia_write(cia_t *c, uint8_t reg, uint8_t val)
 
 void cia_tick(cia_t *c, int eclocks, paula_t *paula, uint16_t intreq_bit)
 {
+    /* ---- FLAG pin simulation --------------------------------------- */
+    /* For CIA-B (INTREQ_EXTER), simulate a periodic FLAG edge.
+     * On real hardware the FLAG pin is connected to the disk index/ready
+     * signal.  Without a floppy disk, DSKRDY pulses periodically causing
+     * FLAG interrupts.  This lets trackdisk.device detect "no disk" and
+     * return from DoIO, allowing the strap module to display the hand. */
+    if (c->flag_count > 0) {
+        c->flag_count -= eclocks;
+        if (c->flag_count <= 0) {
+            c->flag_count = c->flag_period;
+            c->icr_data |= CIA_ICR_FLG;
+            if (c->icr_mask & CIA_ICR_FLG) {
+                c->icr_data |= CIA_ICR_IR;
+                paula_assert_intreq(paula, intreq_bit);
+            }
+        }
+    }
+
     /* ---- Timer A -------------------------------------------------- */
     if ((c->cra & CIA_CR_START) && c->ta_latch > 0) {
         int rem = eclocks;

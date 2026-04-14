@@ -121,6 +121,19 @@ static int amiga_init(const uint8_t *rom, size_t size)
     /* Set callbacks AFTER cpu_init (which clears them). */
     cpu_set_int_ack(amiga_int_ack);
     cpu_set_reset_cb(amiga_reset_external);
+    /* CIA-B FLAG pin: simulate periodic disk-index/ready signal.
+     * Without this, trackdisk.device polls forever waiting for a disk
+     * change event, preventing the strap module from displaying the
+     * "insert disk" hand animation.  Period ~200ms in E-clocks. */
+    amiga_cia_b.flag_period = 14000;
+    amiga_cia_b.flag_count  = 14000;
+    /* CIA-B PRB: set disk signals for "no disk present".
+     * Bit 5 (DSKRDY)   = 1 → not ready (no disk)
+     * Bit 2 (DSKCHANGE) = 0 → disk has been removed/changed
+     * All other bits default high (no disk in any drive).
+     * Set DDRB bit 2 as output so the port read returns our PRB value. */
+    amiga_cia_b.prb  = 0xFB;  /* bit 2 clear = disk changed */
+    amiga_cia_b.ddrb = 0x04;  /* bit 2 output */
     return 0;
 }
 
@@ -180,6 +193,17 @@ void amiga_run(void)
             /* Run the 68000 for one scanline worth of CPU cycles. */
             int cycles = 0;
             while (cycles < CPU_CYCLES_PER_LINE) {
+                /* Debug: one-shot trace of trackdisk polling state */
+                { static int td_once = 0;
+                  if (!td_once && cpu.pc == 0xFE8F92) {
+                    td_once = 1;
+                    fprintf(stderr, "[TD-POLL] A0=%06X CIA-B: ICR=%02X "
+                            "TBHI=%02X TB=%04X CRB=%02X PRB=%02X\n",
+                            cpu.a[0], amiga_cia_b.icr_data,
+                            (uint8_t)(amiga_cia_b.tb_cnt >> 8),
+                            amiga_cia_b.tb_cnt,
+                            amiga_cia_b.crb, amiga_cia_b.prb);
+                }}
                 /* Workaround: clear AttnResched before user-mode drop.
                  * See comment in amiga_run_headless() for full explanation. */
                 if (cpu.pc == 0xFC04BE) {
@@ -498,6 +522,60 @@ void amiga_run_headless(int max_frames)
                         printf("[BOOT-TRACE F%02d L%03d] TAG-FOUND: "
                                "A5=%06X (ResidentTag addr)\n",
                                frame, line, cpu.a[5]);
+                    }
+                    /* Trace trackdisk polling state */
+                    { static int td_trc = 0;
+                    if (pc_after == 0xFE8F92 && ++td_trc == 1) {
+                        printf("[BOOT-TRACE F%02d] td-poll: A0=%06X "
+                               "CIA-B ICR=%02X TBHI=%02X CRB=%02X "
+                               "PRB=%02X DDRB=%02X\n",
+                               frame,
+                               cpu.a[0],
+                               amiga_cia_b.icr_data,
+                               (uint8_t)(amiga_cia_b.tb_cnt >> 8),
+                               amiga_cia_b.crb,
+                               amiga_cia_b.prb,
+                               amiga_cia_b.ddrb);
+                    }}
+                    /* Trace strap boot flow and display setup decision */
+                    if (pc_after == 0xFE8600) {
+                        printf("[BOOT-TRACE F%02d L%03d] strap@FE8600: A2=%08X A5=%08X "
+                               "[A5+4]=%08X\n",
+                               frame, line, cpu.a[2], cpu.a[5],
+                               amiga_bus_read32(cpu.a[5]+4));
+                    }
+                    if (pc_after == 0xFE8610) {
+                        printf("[BOOT-TRACE F%02d L%03d] strap@FE8610: D0=[A5+4]=%08X "
+                               "(0=setup, !0=skip)\n",
+                               frame, line,
+                               amiga_bus_read32(cpu.a[5]+4));
+                    }
+                    if (pc_after == 0xFE860C) {
+                        printf("[BOOT-TRACE F%02d L%03d] strap@FE860C: BLE check A2=%08X "
+                               "(<=0=retry)\n",
+                               frame, line, cpu.a[2]);
+                    }
+                    /* Trace strap display setup calls */
+                    if (pc_after == 0xFE8732) {
+                        printf("[BOOT-TRACE F%02d L%03d] strap::display_setup ENTER\n",
+                               frame, line);
+                    }
+                    if (pc_after == 0xFE887E || pc_after == 0xFE8884 ||
+                        pc_after == 0xFE888A || pc_after == 0xFE8898) {
+                        static const char *names[] = {"MakeVPort","MrgCop","LoadView","LoadRGB4"};
+                        int idx = pc_after == 0xFE887E ? 0 : pc_after == 0xFE8884 ? 1 :
+                                  pc_after == 0xFE888A ? 2 : 3;
+                        printf("[BOOT-TRACE F%02d L%03d] strap::%s D0=%08X "
+                               "COP1LC=%06X COP2LC=%06X\n",
+                               frame, line, names[idx], cpu.d[0],
+                               amiga_agnus.cop1lc, amiga_agnus.cop2lc);
+                    }
+                    if (pc_after == 0xFE8982) {
+                        printf("[BOOT-TRACE F%02d L%03d] strap::display_setup DONE "
+                               "COP1LC=%06X DMACON=%04X BPLCON0=%04X\n",
+                               frame, line,
+                               amiga_agnus.cop1lc, amiga_agnus.dmacon,
+                               amiga_denise.bplcon0);
                     }
                     if (pc_after == 0xFC3180) {
                         printf("[BOOT-TRACE F%02d L%03d] RawDoFmt: "

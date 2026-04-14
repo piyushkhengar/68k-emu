@@ -65,9 +65,12 @@
 #define CIA_CR_LOAD     0x10u   /* bit 4: force latch → counter (strobe) */
 
 /* ---- ICR bit masks --------------------------------------------------- */
-#define CIA_ICR_TA  0x01u   /* Timer A underflow */
-#define CIA_ICR_TB  0x02u   /* Timer B underflow */
-#define CIA_ICR_IR  0x80u   /* IR: any enabled interrupt pending (read-only) */
+#define CIA_ICR_TA   0x01u   /* Timer A underflow */
+#define CIA_ICR_TB   0x02u   /* Timer B underflow */
+#define CIA_ICR_ALRM 0x04u   /* TOD alarm match */
+#define CIA_ICR_SP   0x08u   /* Serial port completion */
+#define CIA_ICR_FLG  0x10u   /* FLAG pin edge (CIA-B: disk index/ready) */
+#define CIA_ICR_IR   0x80u   /* IR: any enabled interrupt pending (read-only) */
 
 /* ------------------------------------------------------------------ */
 /*  Data type                                                           */
@@ -88,6 +91,11 @@ typedef struct {
     uint8_t  sdr;           /* Serial Data Register */
     uint8_t  cra;           /* Control Register A */
     uint8_t  crb;           /* Control Register B */
+
+    /* FLAG pin simulation: counts down in E-clocks; fires ICR_FLG on zero.
+     * Set flag_period > 0 to enable (e.g. for CIA-B disk-ready). */
+    int      flag_count;    /* E-clocks until next FLAG edge */
+    int      flag_period;   /* reload value (0 = disabled) */
 } cia_t;
 
 /* ------------------------------------------------------------------ */
