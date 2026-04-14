@@ -342,7 +342,42 @@ void amiga_run_headless(int max_frames)
                                ir, sr_before, cpu.sr,
                                cpu.d[0], cpu.a[7]);
                     }
-                    /* 2c-pre. Trace RawDoFmt call at FC3180 */
+                    /* 2c-pre. Trace ROM scan path */
+                    if (pc_after == 0xFC04BA) {
+                        printf("[BOOT-TRACE F%02d L%03d] FC04BA: A0=%08X A1=%08X "
+                               "A6=%08X [A1]=%08X [A1+4]=%08X\n",
+                               frame, line, cpu.a[0], cpu.a[1], cpu.a[6],
+                               amiga_bus_read32(cpu.a[1]),
+                               amiga_bus_read32(cpu.a[1]+4));
+                    }
+                    if (pc_after >= 0xFC04BE && pc_after <= 0xFC04CE) {
+                        printf("[BOOT-TRACE F%02d L%03d] SCAN-PATH @%06X "
+                               "ir=%04X SR=%04X D0=%08X\n",
+                               frame, line, pc_after, ir, cpu.sr, cpu.d[0]);
+                    }
+                    if (pc_after == 0xFC0500) {
+                        printf("[BOOT-TRACE F%02d L%03d] ROM-SCAN-ENTRY: "
+                               "A0=%06X A6=%06X\n",
+                               frame, line, cpu.a[0], cpu.a[6]);
+                    }
+                    if (pc_after == 0xFC093C) {
+                        printf("[BOOT-TRACE F%02d L%03d] BuildResModules: "
+                               "A0=%06X [A0]=%08X [A0+4]=%08X A6=%06X\n",
+                               frame, line, cpu.a[0],
+                               amiga_bus_read32(cpu.a[0]),
+                               amiga_bus_read32(cpu.a[0]+4),
+                               cpu.a[6]);
+                    }
+                    if (pc_after == 0xFC0508) {
+                        printf("[BOOT-TRACE F%02d L%03d] ROM-SCAN-DONE: "
+                               "D0=%08X (ResModules ptr) A6=%06X\n",
+                               frame, line, cpu.d[0], cpu.a[6]);
+                    }
+                    if (pc_after == 0xFC09B0) {
+                        printf("[BOOT-TRACE F%02d L%03d] TAG-FOUND: "
+                               "A5=%06X (ResidentTag addr)\n",
+                               frame, line, cpu.a[5]);
+                    }
                     if (pc_after == 0xFC3180) {
                         printf("[BOOT-TRACE F%02d L%03d] RawDoFmt: "
                                "A0(fmt)=%06X A1(data)=%06X "
@@ -419,13 +454,18 @@ void amiga_run_headless(int max_frames)
                 resmod_valid = 1;
             }
 
-            /* Dump ResModules list when ExecBase first appears */
-            if (execbase != bt_last_execbase && resmod_valid && resmod != 0) {
-                printf("[BOOT-TRACE F%02d] ResModules=%08X dump:", frame, resmod);
-                for (int rm = 0; rm < 8; rm++) {
-                    uint32_t entry = amiga_bus_read32(resmod + rm * 4);
-                    printf(" [%d]=%08X", rm, entry);
-                    if (entry == 0) break;
+            /* Dump ResModules list when ExecBase first appears.
+             * ResModules is at ExecBase+$012C (not $012E). */
+            if (execbase != bt_last_execbase && resmod_valid) {
+                uint32_t rm12c = amiga_bus_read32(execbase + 0x012C);
+                printf("[BOOT-TRACE F%02d] EB+$12C(ResModules)=%08X", frame, rm12c);
+                if (rm12c >= 0x20 && rm12c < 0x80000) {
+                    printf(" dump:");
+                    for (int rm = 0; rm < 8; rm++) {
+                        uint32_t entry = amiga_bus_read32(rm12c + rm * 4);
+                        printf(" [%d]=%08X", rm, entry);
+                        if (entry == 0) break;
+                    }
                 }
                 printf("\n");
             }
