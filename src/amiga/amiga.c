@@ -221,13 +221,6 @@ void amiga_run(void)
                     cpu.d[0] = 0xFFFFFFFF;
                     cpu.pc = 0xFE85A0;
                 }
-                /* Workaround: clear AttnResched before user-mode drop.
-                 * See comment in amiga_run_headless() for full explanation. */
-                if (cpu.pc == 0xFC04BE) {
-                    uint32_t eb = amiga_bus_read32(0x04);
-                    if (eb >= 0x20 && eb < 0x80000)
-                        amiga_bus_write8(eb + 0x124, 0x00);
-                }
                 int c = cpu_step();
                 if (c == 0) {
                     cycles = CPU_CYCLES_PER_LINE;  /* CPU halted */
@@ -427,13 +420,6 @@ void amiga_run_headless(int max_frames)
                     cpu.d[0] = 0xFFFFFFFF;
                     cpu.pc = 0xFE85A0;
                 }
-                /* Workaround: clear AttnResched before user-mode transition. */
-                if (cpu.pc == 0xFC04BE) {
-                    uint32_t eb = amiga_bus_read32(0x04);
-                    if (eb >= 0x20 && eb < 0x80000)
-                        amiga_bus_write8(eb + 0x124, 0x00);
-                }
-
                 if (trace_active) {
                     bt_total_steps++;
                     uint32_t pc_after = cpu.pc;
