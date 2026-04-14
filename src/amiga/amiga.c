@@ -288,6 +288,18 @@ void amiga_run_headless(int max_frames)
                 cpu.cycles += (uint32_t)c;
                 cycles += c;
 
+                /* Workaround: clear AttnResched before user-mode transition.
+                 * The init code at FC04BE does ANDI #0,SR (drops to user mode)
+                 * then calls Permit() which crashes if AttnResched is set.
+                 * On real hardware, the deferred task switch clears AttnResched
+                 * before this point, but our simplified scheduler doesn't.
+                 * Clear it here to let the ROM scan run. */
+                if (cpu.pc == 0xFC04BE) {
+                    uint32_t eb = amiga_bus_read32(0x04);
+                    if (eb >= 0x20 && eb < 0x80000)
+                        amiga_bus_write8(eb + 0x124, 0x00);
+                }
+
                 if (trace_active) {
                     bt_total_steps++;
                     uint32_t pc_after = cpu.pc;
@@ -351,9 +363,43 @@ void amiga_run_headless(int max_frames)
                                amiga_bus_read32(cpu.a[1]+4));
                     }
                     if (pc_after >= 0xFC04BE && pc_after <= 0xFC04CE) {
+                        uint32_t eb = cpu.a[6];
                         printf("[BOOT-TRACE F%02d L%03d] SCAN-PATH @%06X "
-                               "ir=%04X SR=%04X D0=%08X\n",
-                               frame, line, pc_after, ir, cpu.sr, cpu.d[0]);
+                               "ir=%04X SR=%04X EB+$124=%02X EB+$126=%02X EB+$127=%02X\n",
+                               frame, line, pc_after, ir, cpu.sr,
+                               amiga_bus_read8(eb+0x124),
+                               amiga_bus_read8(eb+0x126),
+                               amiga_bus_read8(eb+0x127));
+                    }
+                    /* Trace Reschedule (sets AttnResched) */
+                    if (pc_after == 0xFC1F74) {
+                        printf("[BOOT-TRACE F%02d L%03d] Reschedule(): "
+                               "SR=%04X ret=%08X A6=%06X\n",
+                               frame, line, cpu.sr,
+                               amiga_bus_read32(cpu.a[7]),
+                               cpu.a[6]);
+                    }
+                    /* Trace AddTask CMP before Reschedule */
+                    if (pc_after == 0xFC1D1E) {
+                        printf("[BOOT-TRACE F%02d L%03d] AddTask-CMP: "
+                               "D0=%08X A1=%08X (equal=%d)\n",
+                               frame, line, cpu.d[0], cpu.a[1],
+                               cpu.d[0] == cpu.a[1]);
+                    }
+                    /* Trace Permit → Supervisor chain */
+                    if (pc_after == 0xFC1F9C) { /* Permit entry */
+                        printf("[BOOT-TRACE F%02d L%03d] Permit(): "
+                               "SR=%04X IDNest=%02X TDNest=%02X Resched=%02X\n",
+                               frame, line, cpu.sr,
+                               amiga_bus_read8(cpu.a[6]+0x127),
+                               amiga_bus_read8(cpu.a[6]+0x126),
+                               amiga_bus_read8(cpu.a[6]+0x124));
+                    }
+                    if (pc_after == 0xFC1FB6) { /* Permit calls Supervisor */
+                        uint32_t vec = amiga_bus_read32(cpu.a[6] - 0x1E + 2);
+                        printf("[BOOT-TRACE F%02d L%03d] Permit->Supervisor: "
+                               "A5=%06X vec_target=%06X SR=%04X\n",
+                               frame, line, cpu.a[5], vec, cpu.sr);
                     }
                     if (pc_after == 0xFC0500) {
                         printf("[BOOT-TRACE F%02d L%03d] ROM-SCAN-ENTRY: "
