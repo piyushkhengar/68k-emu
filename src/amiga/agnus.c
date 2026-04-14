@@ -194,11 +194,21 @@ void agnus_copper_scanline(agnus_t *ag,
             /* MOVE instruction: write val to custom register at offset */
             uint16_t reg = (uint16_t)(ir1 & 0x01FEu);
             /*
-             * Safety: block Copper from writing to its own jump strobes
-             * (COPJMP1/COPJMP2) to prevent run-away copper execution.
+             * COPJMP1/COPJMP2 strobes: instead of dispatching through
+             * write_reg, handle them locally to jump the Copper PC.
+             * COPJMP2 ($08A) is commonly used by graphics.library to
+             * chain from the system Copper list (COP1LC) to the display
+             * Copper list (COP2LC) that sets up BPLxPT, colors, etc.
              */
-            if (reg != 0x088u && reg != 0x08Au)
+            if (reg == 0x088u) {
+                ag->copper_pc = ag->cop1lc;   /* restart from COP1LC */
+                return;  /* process new list on next scanline */
+            } else if (reg == 0x08Au) {
+                ag->copper_pc = ag->cop2lc;   /* jump to COP2LC */
+                continue; /* process COP2LC list immediately */
+            } else {
                 write_reg(reg, ir2);
+            }
         }
     }
 }

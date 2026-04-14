@@ -226,19 +226,23 @@ void amiga_run(void)
             ++dbg_f;
 
             /* Print when something changes OR for the first 20 frames */
+            static int last_bpl1pt = -1;
+            int bpl1pt = amiga_denise.bplpt[0];
             if (dbg_f <= 20 ||
                 dmacon  != last_dmacon  ||
-                color00 != last_color00) {
+                color00 != last_color00 ||
+                bpl1pt  != last_bpl1pt) {
+                last_bpl1pt = bpl1pt;
 
                 fprintf(stderr,
                     "[F%03d] PC=%06X COLOR00=%04X COLOR01=%04X BPLCON0=%04X(BPU=%d)"
-                    " BPL1PT=%06X DMACON=%04X COP1LC=%06X midpx=%08X\n",
+                    " BPL1PT=%06X DMACON=%04X COP1LC=%06X COP2LC=%06X midpx=%08X\n",
                     dbg_f, cpu.pc,
                     amiga_denise.color[0], amiga_denise.color[1],
                     amiga_denise.bplcon0,  (amiga_denise.bplcon0 >> 12) & 7,
                     amiga_denise.bplpt[0],
                     amiga_agnus.dmacon, amiga_agnus.cop1lc,
-                    mid_px);
+                    amiga_agnus.cop2lc, mid_px);
                 last_dmacon  = dmacon;
                 last_color00 = color00;
             }
