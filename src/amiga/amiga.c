@@ -243,10 +243,39 @@ void amiga_run(void)
                     if (eb >= 0x20 && eb < 0x80000)
                         amiga_bus_write8(eb + 0x124, 0x00);
                 }
-                /* Workaround: skip strap's DoIO(CMD_READ) for disk boot. */
-                if (cpu.pc == 0xFE859C) {
-                    cpu.d[0] = 0xFFFFFFFF;
-                    cpu.pc = 0xFE85A0;
+                /* Trace strap flow in detail */
+                { static int st = 0;
+                  if (st < 30 && cpu.pc >= 0xFE8444 && cpu.pc < 0xFE8700) {
+                    /* Only trace first entry into this range */
+                    static int in_strap = 0;
+                    if (!in_strap) {
+                        in_strap = 1;
+                        fprintf(stderr, "[STRAP-FLOW] entered @%06X\n", cpu.pc);
+                    }
+                    /* Trace key decision points */
+                    if (cpu.pc == 0xFE8506) { st++; fprintf(stderr, "[STRAP] FE8506 after OpenDev D0=%d\n", cpu.d[0]); }
+                    if (cpu.pc == 0xFE8524) { st++; fprintf(stderr, "[STRAP] FE8524 A2=%08X\n", cpu.a[2]); }
+                    if (cpu.pc == 0xFE854A) { st++; fprintf(stderr, "[STRAP] FE854A disk path\n"); }
+                    if (cpu.pc == 0xFE855C) { st++; fprintf(stderr, "[STRAP] FE855C DoIO #1\n"); }
+                    if (cpu.pc == 0xFE8570) { st++; fprintf(stderr, "[STRAP] FE8570 DoIO #2\n"); }
+                    if (cpu.pc == 0xFE8600) { st++; fprintf(stderr, "[STRAP] FE8600 DISPLAY PATH!\n"); }
+                    if (cpu.pc == 0xFE8616) { st++; fprintf(stderr, "[STRAP] FE8616 BSR display_setup\n"); }
+                    if (cpu.pc == 0xFE86C8) { st++; fprintf(stderr, "[STRAP] FE86C8 exit/cleanup\n"); }
+                  }
+                }
+                /* Workaround: skip ALL strap disk operations.
+                 * FE8502: OpenDevice("trackdisk.device") — hangs in motor ctrl
+                 * FE855C, FE8570, FE859C: DoIO calls for disk read
+                 * Skip OpenDevice and jump to FE8600 (display setup path). */
+                /* Skip strap's OpenDevice + all DoIO calls for disk access.
+                 * OpenDevice at FE8502 returns success (D0=0).
+                 * DoIO calls at FE855C, FE8570, FE859C return error (D0=-1)
+                 * so strap takes the FE8600 → FE8732 display setup path. */
+                if (cpu.pc == 0xFE8502) {
+                    cpu.d[0] = 0; cpu.pc = 0xFE8506;  /* OpenDevice ok */
+                }
+                if (cpu.pc == 0xFE855C || cpu.pc == 0xFE8570 || cpu.pc == 0xFE859C) {
+                    cpu.d[0] = 0; cpu.pc += 4;  /* DoIO "success" with empty buffer */
                 }
                 int c = cpu_step();
                 if (c == 0) {
@@ -449,10 +478,10 @@ void amiga_run_headless(int max_frames)
                     cpu.d[0] = 0;
                     cpu.pc = 0xFC0B5C;
                 }
-                /* Workaround: skip DoIO disk read (same as graphical loop) */
-                if (cpu.pc == 0xFE859C) {
+                /* Skip strap OpenDevice("trackdisk.device") (same as gfx) */
+                if (cpu.pc == 0xFE8502) {
                     cpu.d[0] = 0xFFFFFFFF;
-                    cpu.pc = 0xFE85A0;
+                    cpu.pc = 0xFE8506;
                 }
                 if (trace_active) {
                     bt_total_steps++;
