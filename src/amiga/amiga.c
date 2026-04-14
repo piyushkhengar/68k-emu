@@ -246,6 +246,52 @@ void amiga_run(void)
                 last_dmacon  = dmacon;
                 last_color00 = color00;
             }
+            /* Dump Copper list and scan for display Copper lists */
+            if ((dbg_f == 86 || dbg_f == 200) && amiga_agnus.cop1lc) {
+                /* Search chip RAM for COLOR00 MOVE ($0180 xxxx) patterns */
+                fprintf(stderr, "[F%03d-SCAN] Searching chip RAM for COLOR00 MOVEs:\n", dbg_f);
+                const uint8_t *cram = amiga_bus_chip_ram();
+                for (uint32_t a = 0; a < 0x10000; a += 2) {
+                    uint16_t w0 = (cram[a] << 8) | cram[a+1];
+                    uint16_t w1 = (cram[a+2] << 8) | cram[a+3];
+                    if (w0 == 0x0180 && w1 != 0x0FFF && w1 != 0x0000) {
+                        /* Found a Copper MOVE COLOR00 with non-white value */
+                        fprintf(stderr, "  $%04X: MOVE COLOR00, $%04X", a, w1);
+                        /* Show context: next 4 instructions */
+                        for (int ci = 1; ci < 5; ci++) {
+                            uint16_t r = (cram[a+ci*4] << 8) | cram[a+ci*4+1];
+                            uint16_t v = (cram[a+ci*4+2] << 8) | cram[a+ci*4+3];
+                            fprintf(stderr, " | %04X %04X", r, v);
+                        }
+                        fprintf(stderr, "\n");
+                    }
+                }
+            }
+            if ((dbg_f == 86 || dbg_f == 200) && amiga_agnus.cop1lc) {
+                uint32_t c1 = amiga_agnus.cop1lc;
+                fprintf(stderr, "[F%03d-DUMP] COP1LC=%06X (64 words):", dbg_f, c1);
+                for (int ci = 0; ci < 64; ci++) {
+                    uint16_t w = amiga_bus_read16(c1 + ci * 2);
+                    if (ci % 16 == 0) fprintf(stderr, "\n  +%02X:", ci*2);
+                    fprintf(stderr, " %04X", w);
+                }
+                fprintf(stderr, "\n");
+                /* Check bitmap at $2800 for any content */
+                int nonzero = 0;
+                for (uint32_t bi = 0; bi < 40 * 256; bi++)
+                    if (amiga_bus_read8(0x2800 + bi)) nonzero++;
+                fprintf(stderr, "[F%03d-DUMP] RAM@$2800 nonzero=%d/%d\n",
+                        dbg_f, nonzero, 40*256);
+                /* Check a wider area for any bitplane-like data */
+                for (uint32_t base = 0x1000; base < 0x8000; base += 0x1000) {
+                    nonzero = 0;
+                    for (uint32_t bi = 0; bi < 40 * 10; bi++)
+                        if (amiga_bus_read8(base + bi)) nonzero++;
+                    if (nonzero > 0)
+                        fprintf(stderr, "[F%03d-DUMP] RAM@$%04X nonzero=%d/400\n",
+                                dbg_f, base, nonzero);
+                }
+            }
             /* Periodic PC dump every 20 frames */
             if (dbg_f >= 20 && dbg_f % 20 == 0 && dbg_f <= 500)
                 fprintf(stderr, "[F%03d-PC] cpu.pc=%06X SR=%04X DMACON=%04X COP1LC=%06X A7=%08X\n",
