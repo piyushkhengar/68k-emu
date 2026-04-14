@@ -53,7 +53,7 @@ uint8_t cia_read(cia_t *c, uint8_t reg)
     case CIA_TAHI:   return (uint8_t)(c->ta_cnt >> 8);
     case CIA_TBLO:   return (uint8_t)(c->tb_cnt & 0xFFu);
     case CIA_TBHI:   return (uint8_t)(c->tb_cnt >> 8);
-    case CIA_TODLO:  return 0;
+    case CIA_TODLO:  return 0; /* TODO: proper TOD clock */
     case CIA_TODMID: return 0;
     case CIA_TODHI:  return 0;
     case CIA_SDR:    return c->sdr;
@@ -135,6 +135,15 @@ void cia_write(cia_t *c, uint8_t reg, uint8_t val)
 
 void cia_tick(cia_t *c, int eclocks, paula_t *paula, uint16_t intreq_bit)
 {
+    /* ---- TOD clock ------------------------------------------------- */
+    /* Real TOD ticks at 50 Hz (PAL VSYNC).  E-clock ≈ 70938 Hz.
+     * 70938 / 50 ≈ 1419 E-clocks per TOD tick. */
+    c->tod_eclocks += eclocks;
+    if (c->tod_eclocks >= 1419) {
+        c->tod_eclocks -= 1419;
+        c->tod_counter++;
+    }
+
     /* ---- FLAG pin simulation --------------------------------------- */
     /* For CIA-B (INTREQ_EXTER), simulate a periodic FLAG edge.
      * On real hardware the FLAG pin is connected to the disk index/ready

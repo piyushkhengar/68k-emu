@@ -193,16 +193,23 @@ void amiga_run(void)
             /* Run the 68000 for one scanline worth of CPU cycles. */
             int cycles = 0;
             while (cycles < CPU_CYCLES_PER_LINE) {
-                /* Debug: one-shot trace of trackdisk polling state */
-                { static int td_once = 0;
-                  if (!td_once && cpu.pc == 0xFE8F92) {
-                    td_once = 1;
-                    fprintf(stderr, "[TD-POLL] A0=%06X CIA-B: ICR=%02X "
-                            "TBHI=%02X TB=%04X CRB=%02X PRB=%02X\n",
-                            cpu.a[0], amiga_cia_b.icr_data,
-                            (uint8_t)(amiga_cia_b.tb_cnt >> 8),
-                            amiga_cia_b.tb_cnt,
-                            amiga_cia_b.crb, amiga_cia_b.prb);
+                /* Debug: one-shot traces for trackdisk and strap */
+                { static int gfx_trc = 0;
+                  if (gfx_trc < 10) {
+                    if (cpu.pc == 0xFE8600) {
+                        gfx_trc++;
+                        fprintf(stderr, "[STRAP] FE8600 boot-retry: A2=%08X [A5+4]=%08X\n",
+                                cpu.a[2], amiga_bus_read32(cpu.a[5]+4));
+                    }
+                    if (cpu.pc == 0xFE8732) {
+                        gfx_trc++;
+                        fprintf(stderr, "[STRAP] FE8732 display_setup ENTER!\n");
+                    }
+                    if (cpu.pc == 0xFE8982) {
+                        gfx_trc++;
+                        fprintf(stderr, "[STRAP] FE8982 display_setup DONE! COP1LC=%06X\n",
+                                amiga_agnus.cop1lc);
+                    }
                 }}
                 /* Workaround: clear AttnResched before user-mode drop.
                  * See comment in amiga_run_headless() for full explanation. */

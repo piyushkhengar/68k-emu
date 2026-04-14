@@ -96,6 +96,12 @@ typedef struct {
      * Set flag_period > 0 to enable (e.g. for CIA-B disk-ready). */
     int      flag_count;    /* E-clocks until next FLAG edge */
     int      flag_period;   /* reload value (0 = disabled) */
+
+    /* TOD (Time of Day) counter: incremented by E-clocks in cia_tick.
+     * Real hardware ticks at 50/60 Hz (VSYNC). We approximate by counting
+     * E-clocks and incrementing TOD at ~50 Hz rate. */
+    uint32_t tod_counter;   /* 24-bit TOD value (only low byte exposed so far) */
+    int      tod_eclocks;   /* E-clock accumulator for TOD tick rate */
 } cia_t;
 
 /* ------------------------------------------------------------------ */
