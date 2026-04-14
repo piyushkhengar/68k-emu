@@ -193,12 +193,30 @@ void amiga_run(void)
             /* Run the 68000 for one scanline worth of CPU cycles. */
             int cycles = 0;
             while (cycles < CPU_CYCLES_PER_LINE) {
-                /* Workaround: skip input.device's OpenDevice("keyboard.device"). */
-                if (cpu.pc == 0xFE5B4E) {
-                    static int kb_skip = 0;
-                    if (kb_skip++ < 3) fprintf(stderr, "[SKIP] kb.device open #%d\n", kb_skip);
+                /* Workaround: skip input.device init entirely.
+                 * input.device at FE5AEA opens keyboard.device (hangs without
+                 * keyboard hardware) and timer.device. Even with the keyboard
+                 * open skipped, input.device's init never returns — it hangs
+                 * on timer/interrupt operations. Skip the entire InitResident
+                 * call for input.device (A1=FE4C26) at the InitCode call site. */
+                /* Skip input.device and intuition.library inits.
+                 * input.device hangs on keyboard.device open (no keyboard hw).
+                 * intuition.library hangs on input.device (which we skipped).
+                 * Both block all lower-priority module inits including strap. */
+                if (cpu.pc == 0xFC0B58 &&
+                    (cpu.a[1] == 0xFE4C26 || cpu.a[1] == 0xFD3D8C)) {
                     cpu.d[0] = 0;
-                    cpu.pc = 0xFE5B52;
+                    cpu.pc = 0xFC0B5C;
+                }
+                /* Debug: trace InitResident calls AND returns */
+                { static int mi = 0;
+                  if (mi < 80) {
+                    if (cpu.pc == 0xFC0B58) { mi++; fprintf(stderr, "[IR] call A1=%06X\n", cpu.a[1]); }
+                    if (cpu.pc == 0xFC0B5C) { fprintf(stderr, "[IR] returned\n"); }
+                    if (cpu.pc == 0xFC0B3A) { /* BEQ end of list */
+                        fprintf(stderr, "[IR] list-end D0=%08X\n", cpu.d[0]);
+                    }
+                  }
                 }
                 /* Workaround: skip trackdisk motor polling loop. */
                 if (cpu.pc == 0xFE8F8E)
@@ -425,10 +443,11 @@ void amiga_run_headless(int max_frames)
                 }
                 if (cpu.pc == 0xFC3078)
                     cpu.d[0] = 0;
-                /* Workaround: skip keyboard.device open (same as gfx loop) */
-                if (cpu.pc == 0xFE5B4E) {
+                /* Skip input.device + intuition.library (same as gfx) */
+                if (cpu.pc == 0xFC0B58 &&
+                    (cpu.a[1] == 0xFE4C26 || cpu.a[1] == 0xFD3D8C)) {
                     cpu.d[0] = 0;
-                    cpu.pc = 0xFE5B52;
+                    cpu.pc = 0xFC0B5C;
                 }
                 /* Workaround: skip DoIO disk read (same as graphical loop) */
                 if (cpu.pc == 0xFE859C) {
