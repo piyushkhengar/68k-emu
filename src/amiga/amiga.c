@@ -107,15 +107,17 @@ static int amiga_init(const uint8_t *rom, size_t size)
         return -1;
     mem_set_bus(&amiga_bus_vtable);
     /*
-     * Force 68010 model so Kickstart's Exec ColdStart can execute MOVEC
-     * (VBR/SFC).  On a real 68000 these trigger an illegal-instruction
-     * exception that aborts the ResidentTag ROM scan; with 68010 the
-     * MOVEC succeeds and ColdStart builds the ResModules list that
-     * graphics.library, intuition.library, etc. need.  The 68010 is
-     * instruction-compatible with the 68000 — the only additions are
-     * MOVEC, MOVES, and RTD, none of which break 68000 software.
+     * Use 68000 model.  ColdStart tries MOVEC VBR/CACR which trigger
+     * illegal-instruction exceptions (vector 4); the recovery handler
+     * at FC0582 catches them and sets D0 flags accordingly.  VBR stays
+     * at 0 (vectors at $000000) which is correct for A500.
+     *
+     * Previously used 68010 to let MOVEC VBR succeed, but the 68010's
+     * RTE format word requirement conflicts with Kickstart 1.3's
+     * interrupt dispatcher (FC0FE2) which pushes 68000-style 6-byte
+     * frames — causing Format Error (vector 14) on every RTE.
      */
-    cpu_init(CPU_MODEL_68010);
+    cpu_init(CPU_MODEL_68000);
     /* Set callbacks AFTER cpu_init (which clears them). */
     cpu_set_int_ack(amiga_int_ack);
     cpu_set_reset_cb(amiga_reset_external);
@@ -340,6 +342,27 @@ void amiga_run_headless(int max_frames)
                                ir, sr_before, cpu.sr,
                                cpu.d[0], cpu.a[7]);
                     }
+                    /* 2c-pre. Trace RawDoFmt call at FC3180 */
+                    if (pc_after == 0xFC3180) {
+                        printf("[BOOT-TRACE F%02d L%03d] RawDoFmt: "
+                               "A0(fmt)=%06X A1(data)=%06X "
+                               "A2(putch)=%06X A3(putdat)=%06X\n",
+                               frame, line,
+                               cpu.a[0], cpu.a[1], cpu.a[2], cpu.a[3]);
+                    }
+                    /* Trace JSR (A2) inside RawDoFmt */
+                    if (pc_before >= 0xFC2124 && pc_before <= 0xFC2146 &&
+                        ir == 0x4E92) {
+                        static int jsr_a2_count = 0;
+                        if (jsr_a2_count < 5) {
+                            printf("[BOOT-TRACE F%02d L%03d] JSR(A2): "
+                                   "A2=%06X D0=%02X('%c')\n",
+                                   frame, line, cpu.a[2],
+                                   cpu.d[0] & 0xFF,
+                                   (cpu.d[0] & 0xFF) >= 0x20 ? (char)(cpu.d[0] & 0xFF) : '.');
+                            jsr_a2_count++;
+                        }
+                    }
                     /* 2c. Detect code reaching FC3018-FC3028 (HELP check area) */
                     if (pc_after >= 0xFC3018 && pc_after <= 0xFC3028 &&
                         (pc_before < 0xFC3018 || pc_before > 0xFC3028)) {
@@ -394,6 +417,17 @@ void amiga_run_headless(int max_frames)
                 (execbase >= 0xC00000 && execbase < 0xC80000)) {
                 resmod = amiga_bus_read32(execbase + 0x012E);
                 resmod_valid = 1;
+            }
+
+            /* Dump ResModules list when ExecBase first appears */
+            if (execbase != bt_last_execbase && resmod_valid && resmod != 0) {
+                printf("[BOOT-TRACE F%02d] ResModules=%08X dump:", frame, resmod);
+                for (int rm = 0; rm < 8; rm++) {
+                    uint32_t entry = amiga_bus_read32(resmod + rm * 4);
+                    printf(" [%d]=%08X", rm, entry);
+                    if (entry == 0) break;
+                }
+                printf("\n");
             }
 
             /* Log when values change, or every 5 frames, or first/last */
