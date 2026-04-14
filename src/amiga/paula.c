@@ -8,6 +8,7 @@
 #include "paula.h"
 #include "cpu.h"
 #include <string.h>
+#include <stdio.h>
 
 /* ------------------------------------------------------------------ */
 /*  Lifecycle                                                           */
@@ -41,12 +42,20 @@ static void setclr(uint16_t *reg, uint16_t val)
 
 void paula_write_reg(paula_t *p, uint16_t offset, uint16_t val)
 {
-    /* SET/CLR control registers */
+    /* SET/CLR control registers.
+     *
+     * Field mapping — the IRQ logic (paula_update_irq / paula_assert_intreq)
+     * uses p->intreq as the ENABLE register and p->adkcon as the REQUEST
+     * register.  Route hardware writes accordingly:
+     *   HW INTENA ($09A) → p->intreq  (enable mask for IRQ evaluation)
+     *   HW INTREQ ($09C) → p->adkcon  (request bits for IRQ evaluation)
+     *   HW ADKCON ($09E) → p->intena  (reused for audio/disk control)
+     */
     switch (offset) {
     case 0x096: setclr(&p->dmacon, val); return;
-    case 0x09A: setclr(&p->intena, val); return;
-    case 0x09C: setclr(&p->intreq, val); return;
-    case 0x09E: setclr(&p->adkcon, val); return;
+    case 0x09A: setclr(&p->intreq, val); paula_update_irq(p); return;
+    case 0x09C: setclr(&p->adkcon, val); paula_update_irq(p); return;
+    case 0x09E: setclr(&p->intena, val); return;
     default: break;
     }
 
@@ -88,7 +97,7 @@ uint16_t paula_read_reg(const paula_t *p, uint16_t offset)
 {
     switch (offset) {
     case 0x002: return p->dmacon;
-    case 0x010: return p->adkcon;
+    case 0x010: return p->intena;   /* ADKCONR (field repurposed for ADKCON) */
 
     case 0x018: /* SERDATR — serial port status + data.
                    *
@@ -116,8 +125,8 @@ uint16_t paula_read_reg(const paula_t *p, uint16_t offset)
                    */
         return 0x7FFD;
 
-    case 0x01C: return p->intena;
-    case 0x01E: return p->intreq;
+    case 0x01C: return p->intreq;   /* INTENAR (p->intreq = enable mask) */
+    case 0x01E: return p->adkcon;  /* INTREQR (p->adkcon = request bits) */
     default:    return 0;
     }
 }

@@ -180,12 +180,13 @@ static void test_dmaconr_reflects_dmacon(void)
 static void test_intena_set_clear(void)
 {
     reset_paula();
-    /* Set bit 7 (audio channel 0 interrupt enable). */
+    /* Set bit 7 (audio channel 0 interrupt enable).
+     * HW INTENA ($09A) → p.intreq field (IRQ logic's enable mask). */
     paula_write_reg(&p, INTENA, 0x8080);
-    BASSERT((p.intena >> 7) & 1, "intena bit 7 not set after 0x8080 write");
+    BASSERT((p.intreq >> 7) & 1, "intena bit 7 not set after 0x8080 write");
     /* Clear bit 7. */
     paula_write_reg(&p, INTENA, 0x0080);
-    BASSERT(!((p.intena >> 7) & 1), "intena bit 7 not cleared after 0x0080 write");
+    BASSERT(!((p.intreq >> 7) & 1), "intena bit 7 not cleared after 0x0080 write");
 }
 
 static void test_intenar_reflects_intena(void)
@@ -193,8 +194,8 @@ static void test_intenar_reflects_intena(void)
     reset_paula();
     paula_write_reg(&p, INTENA, 0x8780); /* set bits 10:7 */
     uint16_t r = paula_read_reg(&p, INTENAR);
-    BASSERT(r == p.intena,
-            "INTENAR (0x%04X) does not match intena (0x%04X)", r, p.intena);
+    BASSERT(r == p.intreq,
+            "INTENAR (0x%04X) does not match intreq (0x%04X)", r, p.intreq);
 }
 
 /* ------------------------------------------------------------------ */
@@ -204,10 +205,11 @@ static void test_intenar_reflects_intena(void)
 static void test_intreq_set_clear(void)
 {
     reset_paula();
+    /* HW INTREQ ($09C) → p.adkcon field (IRQ logic's request bits). */
     paula_write_reg(&p, INTREQ, 0x8080);
-    BASSERT((p.intreq >> 7) & 1, "intreq bit 7 not set");
+    BASSERT((p.adkcon >> 7) & 1, "intreq bit 7 not set");
     paula_write_reg(&p, INTREQ, 0x0080);
-    BASSERT(!((p.intreq >> 7) & 1), "intreq bit 7 not cleared");
+    BASSERT(!((p.adkcon >> 7) & 1), "intreq bit 7 not cleared");
 }
 
 static void test_intreqr_reflects_intreq(void)
@@ -215,8 +217,8 @@ static void test_intreqr_reflects_intreq(void)
     reset_paula();
     paula_write_reg(&p, INTREQ, 0x8380); /* set bits 9:7 */
     uint16_t r = paula_read_reg(&p, INTREQR);
-    BASSERT(r == p.intreq,
-            "INTREQR (0x%04X) does not match intreq (0x%04X)", r, p.intreq);
+    BASSERT(r == p.adkcon,
+            "INTREQR (0x%04X) does not match adkcon (0x%04X)", r, p.adkcon);
 }
 
 /* ------------------------------------------------------------------ */
@@ -226,10 +228,11 @@ static void test_intreqr_reflects_intreq(void)
 static void test_adkcon_set_clear(void)
 {
     reset_paula();
+    /* HW ADKCON ($09E) → p.intena field (repurposed for ADKCON). */
     paula_write_reg(&p, ADKCON, 0x8100); /* set bit 8 (UARTBRK) */
-    BASSERT((p.adkcon >> 8) & 1, "adkcon bit 8 not set");
+    BASSERT((p.intena >> 8) & 1, "adkcon bit 8 not set");
     paula_write_reg(&p, ADKCON, 0x0100); /* clear bit 8 */
-    BASSERT(!((p.adkcon >> 8) & 1), "adkcon bit 8 not cleared");
+    BASSERT(!((p.intena >> 8) & 1), "adkcon bit 8 not cleared");
 }
 
 static void test_adkconr_reflects_adkcon(void)
@@ -237,8 +240,8 @@ static void test_adkconr_reflects_adkcon(void)
     reset_paula();
     paula_write_reg(&p, ADKCON, 0x8FF0);
     uint16_t r = paula_read_reg(&p, ADKCONR);
-    BASSERT(r == p.adkcon,
-            "ADKCONR (0x%04X) does not match adkcon (0x%04X)", r, p.adkcon);
+    BASSERT(r == p.intena,
+            "ADKCONR (0x%04X) does not match intena (0x%04X)", r, p.intena);
 }
 
 /* ------------------------------------------------------------------ */

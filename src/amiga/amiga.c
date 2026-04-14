@@ -292,11 +292,15 @@ void amiga_run(void)
                                 dbg_f, base, nonzero);
                 }
             }
-            /* Periodic PC dump every 20 frames */
-            if (dbg_f >= 20 && dbg_f % 20 == 0 && dbg_f <= 500)
-                fprintf(stderr, "[F%03d-PC] cpu.pc=%06X SR=%04X DMACON=%04X COP1LC=%06X A7=%08X\n",
+            /* Periodic PC dump every 20 frames — includes interrupt state */
+            if (dbg_f >= 20 && dbg_f % 20 == 0 && dbg_f <= 500) {
+                /* Paula naming: intreq=INTENA, adkcon=INTREQ (swapped) */
+                fprintf(stderr, "[F%03d-PC] cpu.pc=%06X SR=%04X DMACON=%04X"
+                        " INTENA=%04X INTREQ=%04X IPL=%d A7=%08X\n",
                         dbg_f, cpu.pc, cpu.sr, amiga_agnus.dmacon,
-                        amiga_agnus.cop1lc, cpu.a[7]);
+                        amiga_paula.intreq, amiga_paula.adkcon,
+                        cpu_ipl, cpu.a[7]);
+            }
             if (dbg_f == 500)
                 fprintf(stderr, "[diagnostic complete]\n");
         }
