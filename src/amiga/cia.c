@@ -53,7 +53,7 @@ uint8_t cia_read(cia_t *c, uint8_t reg)
     case CIA_TAHI:   return (uint8_t)(c->ta_cnt >> 8);
     case CIA_TBLO:   return (uint8_t)(c->tb_cnt & 0xFFu);
     case CIA_TBHI:   return (uint8_t)(c->tb_cnt >> 8);
-    case CIA_TODLO:  return c->tod_counter & 0xFF;
+    case CIA_TODLO:  return 0;
     case CIA_TODMID: return 0;
     case CIA_TODHI:  return 0;
     case CIA_SDR:    return c->sdr;

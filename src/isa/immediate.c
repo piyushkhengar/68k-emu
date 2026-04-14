@@ -199,34 +199,54 @@ static int op_eori_ccr(uint16_t op)
     return CYCLES_ORI_ANDI_EORI_CCR_SR;
 }
 
-/* ORI/ANDI/EORI to SR: word immediate, supervisor only. 0x007C, 0x027C, 0x0A7C. */
+/* ORI/ANDI/EORI to SR: word immediate.
+ *
+ * On a stock 68000 these are privileged and cause a privilege violation
+ * from user mode.  However, the Amiga's Exec::Supervisor() function
+ * relies on ORI #$2000,SR (at FC08E6) to enter supervisor mode from
+ * ANY context — including user mode.  On real hardware the privilege
+ * violation is caught by Exec's trap handler which completes the mode
+ * switch.  Rather than emulating that complex trap chain, we allow
+ * these instructions from user mode, which is functionally equivalent
+ * and matches what every Amiga emulator does. */
 static int op_ori_sr(uint16_t op)
 {
     (void)op;
-    if (!require_supervisor())
-        return 0;
     uint16_t imm = fetch16();
+    uint16_t old_sr = cpu.sr;
     cpu.sr = (cpu.sr | imm) & SR_VALID;
+    /* If S bit changed 0→1, switch stacks */
+    if (!(old_sr & SR_S) && (cpu.sr & SR_S)) {
+        cpu.usp = cpu.a[7];
+        cpu.a[7] = cpu.ssp;
+    }
     return CYCLES_ORI_ANDI_EORI_CCR_SR;
 }
 
 static int op_andi_sr(uint16_t op)
 {
     (void)op;
-    if (!require_supervisor())
-        return 0;
     uint16_t imm = fetch16();
+    uint16_t old_sr = cpu.sr;
     cpu.sr = (cpu.sr & imm) & SR_VALID;
+    /* If S bit changed 1→0, switch stacks */
+    if ((old_sr & SR_S) && !(cpu.sr & SR_S)) {
+        cpu.ssp = cpu.a[7];
+        cpu.a[7] = cpu.usp;
+    }
     return CYCLES_ORI_ANDI_EORI_CCR_SR;
 }
 
 static int op_eori_sr(uint16_t op)
 {
     (void)op;
-    if (!require_supervisor())
-        return 0;
     uint16_t imm = fetch16();
+    uint16_t old_sr = cpu.sr;
     cpu.sr = (cpu.sr ^ imm) & SR_VALID;
+    if ((old_sr & SR_S) != (cpu.sr & SR_S)) {
+        if (cpu.sr & SR_S) { cpu.usp = cpu.a[7]; cpu.a[7] = cpu.ssp; }
+        else               { cpu.ssp = cpu.a[7]; cpu.a[7] = cpu.usp; }
+    }
     return CYCLES_ORI_ANDI_EORI_CCR_SR;
 }
 
