@@ -193,24 +193,85 @@ void amiga_run(void)
             /* Run the 68000 for one scanline worth of CPU cycles. */
             int cycles = 0;
             while (cycles < CPU_CYCLES_PER_LINE) {
-                /* Debug: one-shot traces for trackdisk and strap */
+                /* Debug: trace trackdisk/strap flow + crash detection */
                 { static int gfx_trc = 0;
-                  if (gfx_trc < 10) {
-                    if (cpu.pc == 0xFE8600) {
+                  if (gfx_trc < 40) {
+                    /* Trackdisk polling exit */
+                    if (cpu.pc == 0xFE8FB6) {
                         gfx_trc++;
-                        fprintf(stderr, "[STRAP] FE8600 boot-retry: A2=%08X [A5+4]=%08X\n",
-                                cpu.a[2], amiga_bus_read32(cpu.a[5]+4));
+                        fprintf(stderr, "[TRACE] FE8FB6 td-poll RTS  SP=%06X [SP]=%06X SR=%04X\n",
+                                cpu.a[7], amiga_bus_read32(cpu.a[7]), cpu.sr);
                     }
-                    if (cpu.pc == 0xFE8732) {
+                    /* Strap module key points */
+                    if (cpu.pc == 0xFE8600 || cpu.pc == 0xFE8610 ||
+                        cpu.pc == 0xFE8616 || cpu.pc == 0xFE8732) {
                         gfx_trc++;
-                        fprintf(stderr, "[STRAP] FE8732 display_setup ENTER!\n");
+                        fprintf(stderr, "[TRACE] strap @%06X  A2=%08X D0=%08X SR=%04X\n",
+                                cpu.pc, cpu.a[2], cpu.d[0], cpu.sr);
                     }
-                    if (cpu.pc == 0xFE8982) {
+                    /* RESET instruction */
+                    if (cpu.ir == 0x4E70 && cpu.pc >= 0xFC05F8 && cpu.pc <= 0xFC05FC) {
                         gfx_trc++;
-                        fprintf(stderr, "[STRAP] FE8982 display_setup DONE! COP1LC=%06X\n",
-                                amiga_agnus.cop1lc);
+                        fprintf(stderr, "[TRACE] RESET @%06X SR=%04X A7=%08X\n",
+                                cpu.pc, cpu.sr, cpu.a[7]);
+                    }
+                    /* Exec Alert call */
+                    if (cpu.pc == 0xFE8FAC) {
+                        gfx_trc++;
+                        fprintf(stderr, "[TRACE] FE8FAC Alert D7=%08X\n", cpu.d[7]);
+                    }
+                    /* Trackdisk DoIO call + return */
+                    if (cpu.pc == 0xFE8F84) {
+                        gfx_trc++;
+                        fprintf(stderr, "[TRACE] FE8F84 DoIO call\n");
+                    }
+                    if (cpu.pc == 0xFE8F88) {
+                        gfx_trc++;
+                        fprintf(stderr, "[TRACE] FE8F88 DoIO returned D0=%08X\n", cpu.d[0]);
                     }
                 }}
+                /* Workaround: skip strap's DoIO(CMD_READ) for disk boot.
+                 * At FE859C, strap calls JSR -$01C8(A6) = Exec::DoIO to read
+                 * the floppy boot block.  Without disk emulation, trackdisk
+                 * crashes internally and never returns.  Skip the call entirely
+                 * and set D0=-1 (error) so strap goes to the display setup
+                 * path at FE8600 → FE8732 (hand animation). */
+                /* Trace InitCode and module inits */
+                { static int mod_trc = 0;
+                  if (mod_trc < 20) {
+                    if (cpu.pc == 0xFC0522) { mod_trc++; fprintf(stderr, "[INIT] FC0522 BSR InitCode D0=%d D1=%d\n", cpu.d[0], cpu.d[1]); }
+                    if (cpu.pc == 0xFC0B2C) {
+                        mod_trc++;
+                        uint32_t eb = cpu.a[6];
+                        uint32_t rm = amiga_bus_read32(eb + 0x12C);
+                        fprintf(stderr, "[INIT] FC0B2C InitCode D0=%d ResModules=%06X entries:",
+                                cpu.d[0], rm);
+                        if (rm >= 0x20 && rm < 0x80000) {
+                            for (int ri = 0; ri < 8; ri++) {
+                                uint32_t e = amiga_bus_read32(rm + ri * 4);
+                                fprintf(stderr, " %08X", e);
+                                if (e == 0) break;
+                            }
+                        }
+                        fprintf(stderr, "\n");
+                    }
+                    /* Trace InitResident call AND return */
+                    if (cpu.pc == 0xFC0B58) {
+                        mod_trc++;
+                        fprintf(stderr, "[INIT] FC0B58 InitResident A1=%06X →", cpu.a[1]);
+                    }
+                    if (cpu.pc == 0xFC0B5C) { /* BRA after InitResident returns */
+                        fprintf(stderr, " OK\n");
+                    }
+                    if (cpu.pc == 0xFE97BE) { mod_trc++; fprintf(stderr, "[INIT] trackdisk init FE97BE\n"); }
+                    if (cpu.pc == 0xFE8444) { mod_trc++; fprintf(stderr, "[INIT] strap init FE8444\n"); }
+                  }
+                }
+                /* Skip strap's DoIO */
+                if (cpu.pc == 0xFE859C) {
+                    cpu.d[0] = 0xFFFFFFFF;
+                    cpu.pc = 0xFE85A0;
+                }
                 /* Workaround: clear AttnResched before user-mode drop.
                  * See comment in amiga_run_headless() for full explanation. */
                 if (cpu.pc == 0xFC04BE) {
@@ -394,12 +455,12 @@ void amiga_run_headless(int max_frames)
                 cpu.cycles += (uint32_t)c;
                 cycles += c;
 
-                /* Workaround: clear AttnResched before user-mode transition.
-                 * The init code at FC04BE does ANDI #0,SR (drops to user mode)
-                 * then calls Permit() which crashes if AttnResched is set.
-                 * On real hardware, the deferred task switch clears AttnResched
-                 * before this point, but our simplified scheduler doesn't.
-                 * Clear it here to let the ROM scan run. */
+                /* Workaround: skip DoIO disk read (same as graphical loop) */
+                if (cpu.pc == 0xFE859C) {
+                    cpu.d[0] = 0xFFFFFFFF;
+                    cpu.pc = 0xFE85A0;
+                }
+                /* Workaround: clear AttnResched before user-mode transition. */
                 if (cpu.pc == 0xFC04BE) {
                     uint32_t eb = amiga_bus_read32(0x04);
                     if (eb >= 0x20 && eb < 0x80000)
