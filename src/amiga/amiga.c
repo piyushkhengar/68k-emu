@@ -163,6 +163,14 @@ void amiga_run(void)
             if (line == 0)
                 amiga_agnus.copper_pc = amiga_agnus.cop1lc;
 
+            /* Assert VBLANK interrupt at the start of vertical blank.
+             * On real hardware this fires around line 0 of vblank (line 256
+             * in PAL).  Asserting it HERE rather than at the end of the
+             * frame ensures the request is pending during the CPU execution
+             * of vblank lines, so brief Enable() windows can deliver it. */
+            if (line == AMIGA_HEIGHT)
+                paula_assert_intreq(&amiga_paula, INTREQ_VERTB);
+
             /* Run the Copper — executes MOVEs and WAITs up to this line. */
             agnus_copper_scanline(&amiga_agnus,
                                   amiga_bus_chip_ram(),
@@ -211,8 +219,7 @@ void amiga_run(void)
             }
         }
 
-        /* End of frame: fire vertical blank interrupt and present. */
-        paula_assert_intreq(&amiga_paula, INTREQ_VERTB);
+        /* End of frame: present. (VBLANK interrupt fires at line AMIGA_HEIGHT above.) */
         renderer_present(framebuffer);
 
         /* ---- Diagnostic: print key chip state until stable ---- */
@@ -335,6 +342,13 @@ void amiga_run_headless(int max_frames)
                    BOOT_TRACE_FRAMES);
 
         for (int line = 0; line < PAL_LINES; line++) {
+            /* Advance Agnus beam counter (needed for VBeamPos polling). */
+            agnus_tick_scanline(&amiga_agnus, line);
+
+            /* Assert VBLANK at start of vertical blank region (PAL line 256). */
+            if (line == 256)
+                paula_assert_intreq(&amiga_paula, INTREQ_VERTB);
+
             /* Run CPU for one scanline worth of cycles. */
             int cycles = 0;
             while (cycles < CPU_CYCLES_PER_LINE) {
@@ -544,8 +558,7 @@ void amiga_run_headless(int max_frames)
             cia_tick(&amiga_cia_b, E_CLOCKS_PER_LINE, &amiga_paula, INTREQ_EXTER);
         }
 
-        /* End of frame: assert vertical blank interrupt (level 3). */
-        paula_assert_intreq(&amiga_paula, INTREQ_VERTB);
+        /* (VBLANK interrupt fires at line AMIGA_HEIGHT above.) */
 
         /* ---- Boot trace: per-frame chip RAM inspection ---- */
         if (trace_active) {
