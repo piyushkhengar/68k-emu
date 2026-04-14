@@ -160,8 +160,9 @@ static uint16_t custom_read_reg(uint16_t off)
 
 static void custom_write_reg(uint16_t off, uint16_t val)
 {
-    /* ---- Agnus: Blitter registers (0x040–0x066) ------------------- */
-    if (off >= 0x040u && off <= 0x066u) {
+    /* ---- Agnus: Blitter registers (0x040–0x074) ------------------- */
+    if ((off >= 0x040u && off <= 0x066u) ||
+        (off >= 0x070u && off <= 0x074u)) {
         if (off == 0x058u) {
             /* BLTSIZE write triggers synchronous blit then fires IRQ */
             agnus_blitter_execute(&amiga_agnus, chip_ram, CHIP_RAM_SIZE, val);

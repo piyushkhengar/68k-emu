@@ -208,16 +208,6 @@ void amiga_run(void)
                     cpu.d[0] = 0;
                     cpu.pc = 0xFC0B5C;
                 }
-                /* Debug: trace InitResident calls AND returns */
-                { static int mi = 0;
-                  if (mi < 80) {
-                    if (cpu.pc == 0xFC0B58) { mi++; fprintf(stderr, "[IR] call A1=%06X\n", cpu.a[1]); }
-                    if (cpu.pc == 0xFC0B5C) { fprintf(stderr, "[IR] returned\n"); }
-                    if (cpu.pc == 0xFC0B3A) { /* BEQ end of list */
-                        fprintf(stderr, "[IR] list-end D0=%08X\n", cpu.d[0]);
-                    }
-                  }
-                }
                 /* Workaround: skip trackdisk motor polling loop. */
                 if (cpu.pc == 0xFE8F8E)
                     cpu.pc = 0xFE8FB6;
@@ -243,25 +233,31 @@ void amiga_run(void)
                     if (eb >= 0x20 && eb < 0x80000)
                         amiga_bus_write8(eb + 0x124, 0x00);
                 }
-                /* Trace strap flow in detail */
-                { static int st = 0;
-                  if (st < 30 && cpu.pc >= 0xFE8444 && cpu.pc < 0xFE8700) {
-                    /* Only trace first entry into this range */
-                    static int in_strap = 0;
-                    if (!in_strap) {
-                        in_strap = 1;
-                        fprintf(stderr, "[STRAP-FLOW] entered @%06X\n", cpu.pc);
+                /* Workaround: strap's display_setup WaitTOF + LoadView.
+                 *
+                 * display_setup (FE8732) builds a Copper list via MakeVPort/MrgCop
+                 * and installs it with LoadView.  Two issues in our emulator:
+                 *   1. LoadView doesn't write COP1LC (graphics.library bug TBD).
+                 *   2. WaitTOF hangs because Exec's Wait() needs a working scheduler.
+                 *
+                 * Fix: at the WaitTOF call site (FE897A), read the View's
+                 * LOFCprList→start and force COP1LC to it.  Skip WaitTOF. */
+                if (cpu.pc == 0xFE897A) {
+                    static int ds_fix_done = 0;
+                    if (!ds_fix_done) {
+                        uint32_t view = 0x3AF8;
+                        uint32_t lofcpr = amiga_bus_read32(view + 4);
+                        if (lofcpr) {
+                            uint32_t cop_start = amiga_bus_read32(lofcpr + 4);
+                            if (cop_start && cop_start < amiga_bus_chip_ram_size()) {
+                                amiga_agnus.cop1lc = cop_start;
+                                amiga_agnus.copper_pc = cop_start;
+                                amiga_agnus.dmacon |= 0x0100u; /* BPLEN */
+                                ds_fix_done = 1;
+                            }
+                        }
+                        cpu.pc = 0xFE897E; /* skip WaitTOF JSR (4 bytes) */
                     }
-                    /* Trace key decision points */
-                    if (cpu.pc == 0xFE8506) { st++; fprintf(stderr, "[STRAP] FE8506 after OpenDev D0=%d\n", cpu.d[0]); }
-                    if (cpu.pc == 0xFE8524) { st++; fprintf(stderr, "[STRAP] FE8524 A2=%08X\n", cpu.a[2]); }
-                    if (cpu.pc == 0xFE854A) { st++; fprintf(stderr, "[STRAP] FE854A disk path\n"); }
-                    if (cpu.pc == 0xFE855C) { st++; fprintf(stderr, "[STRAP] FE855C DoIO #1\n"); }
-                    if (cpu.pc == 0xFE8570) { st++; fprintf(stderr, "[STRAP] FE8570 DoIO #2\n"); }
-                    if (cpu.pc == 0xFE8600) { st++; fprintf(stderr, "[STRAP] FE8600 DISPLAY PATH!\n"); }
-                    if (cpu.pc == 0xFE8616) { st++; fprintf(stderr, "[STRAP] FE8616 BSR display_setup\n"); }
-                    if (cpu.pc == 0xFE86C8) { st++; fprintf(stderr, "[STRAP] FE86C8 exit/cleanup\n"); }
-                  }
                 }
                 /* Workaround: skip ALL strap disk operations.
                  * FE8502: OpenDevice("trackdisk.device") — hangs in motor ctrl
@@ -309,98 +305,8 @@ void amiga_run(void)
             }
         }
 
-        /* End of frame: present. (VBLANK interrupt fires at line AMIGA_HEIGHT above.) */
+        /* End of frame: present. */
         renderer_present(framebuffer);
-
-        /* ---- Diagnostic: print key chip state until stable ---- */
-        {
-            static int  dbg_f           = 0;
-            static int  last_dmacon     = -1;
-            static int  last_color00    = -1;
-            uint32_t mid_px = framebuffer[(AMIGA_HEIGHT / 2) * AMIGA_WIDTH + AMIGA_WIDTH / 2];
-            int dmacon  = amiga_agnus.dmacon;
-            int color00 = amiga_denise.color[0];
-            ++dbg_f;
-
-            /* Print when something changes OR for the first 20 frames */
-            static int last_bpl1pt = -1;
-            int bpl1pt = amiga_denise.bplpt[0];
-            if (dbg_f <= 20 ||
-                dmacon  != last_dmacon  ||
-                color00 != last_color00 ||
-                bpl1pt  != last_bpl1pt) {
-                last_bpl1pt = bpl1pt;
-
-                fprintf(stderr,
-                    "[F%03d] PC=%06X COLOR00=%04X COLOR01=%04X BPLCON0=%04X(BPU=%d)"
-                    " BPL1PT=%06X DMACON=%04X COP1LC=%06X COP2LC=%06X midpx=%08X\n",
-                    dbg_f, cpu.pc,
-                    amiga_denise.color[0], amiga_denise.color[1],
-                    amiga_denise.bplcon0,  (amiga_denise.bplcon0 >> 12) & 7,
-                    amiga_denise.bplpt[0],
-                    amiga_agnus.dmacon, amiga_agnus.cop1lc,
-                    amiga_agnus.cop2lc, mid_px);
-                last_dmacon  = dmacon;
-                last_color00 = color00;
-            }
-            /* Dump Copper list and scan for display Copper lists */
-            if ((dbg_f == 86 || dbg_f == 200) && amiga_agnus.cop1lc) {
-                /* Search chip RAM for COLOR00 MOVE ($0180 xxxx) patterns */
-                fprintf(stderr, "[F%03d-SCAN] Searching chip RAM for COLOR00 MOVEs:\n", dbg_f);
-                const uint8_t *cram = amiga_bus_chip_ram();
-                for (uint32_t a = 0; a < 0x10000; a += 2) {
-                    uint16_t w0 = (cram[a] << 8) | cram[a+1];
-                    uint16_t w1 = (cram[a+2] << 8) | cram[a+3];
-                    if (w0 == 0x0180 && w1 != 0x0FFF && w1 != 0x0000) {
-                        /* Found a Copper MOVE COLOR00 with non-white value */
-                        fprintf(stderr, "  $%04X: MOVE COLOR00, $%04X", a, w1);
-                        /* Show context: next 4 instructions */
-                        for (int ci = 1; ci < 5; ci++) {
-                            uint16_t r = (cram[a+ci*4] << 8) | cram[a+ci*4+1];
-                            uint16_t v = (cram[a+ci*4+2] << 8) | cram[a+ci*4+3];
-                            fprintf(stderr, " | %04X %04X", r, v);
-                        }
-                        fprintf(stderr, "\n");
-                    }
-                }
-            }
-            if ((dbg_f == 86 || dbg_f == 200) && amiga_agnus.cop1lc) {
-                uint32_t c1 = amiga_agnus.cop1lc;
-                fprintf(stderr, "[F%03d-DUMP] COP1LC=%06X (64 words):", dbg_f, c1);
-                for (int ci = 0; ci < 64; ci++) {
-                    uint16_t w = amiga_bus_read16(c1 + ci * 2);
-                    if (ci % 16 == 0) fprintf(stderr, "\n  +%02X:", ci*2);
-                    fprintf(stderr, " %04X", w);
-                }
-                fprintf(stderr, "\n");
-                /* Check bitmap at $2800 for any content */
-                int nonzero = 0;
-                for (uint32_t bi = 0; bi < 40 * 256; bi++)
-                    if (amiga_bus_read8(0x2800 + bi)) nonzero++;
-                fprintf(stderr, "[F%03d-DUMP] RAM@$2800 nonzero=%d/%d\n",
-                        dbg_f, nonzero, 40*256);
-                /* Check a wider area for any bitplane-like data */
-                for (uint32_t base = 0x1000; base < 0x8000; base += 0x1000) {
-                    nonzero = 0;
-                    for (uint32_t bi = 0; bi < 40 * 10; bi++)
-                        if (amiga_bus_read8(base + bi)) nonzero++;
-                    if (nonzero > 0)
-                        fprintf(stderr, "[F%03d-DUMP] RAM@$%04X nonzero=%d/400\n",
-                                dbg_f, base, nonzero);
-                }
-            }
-            /* Periodic PC dump every 20 frames — includes interrupt state */
-            if (dbg_f >= 20 && dbg_f % 20 == 0 && dbg_f <= 500) {
-                /* Paula naming: intreq=INTENA, adkcon=INTREQ (swapped) */
-                fprintf(stderr, "[F%03d-PC] cpu.pc=%06X SR=%04X DMACON=%04X"
-                        " INTENA=%04X INTREQ=%04X IPL=%d A7=%08X\n",
-                        dbg_f, cpu.pc, cpu.sr, amiga_agnus.dmacon,
-                        amiga_paula.intreq, amiga_paula.adkcon,
-                        cpu_ipl, cpu.a[7]);
-            }
-            if (dbg_f == 500)
-                fprintf(stderr, "[diagnostic complete]\n");
-        }
     }
 
     renderer_shutdown();

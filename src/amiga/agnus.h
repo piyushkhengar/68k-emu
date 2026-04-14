@@ -6,7 +6,7 @@
  *
  * Register ownership (offsets from 0xDFF000 base):
  *   Read:
- *     0x002  DMACONR   DMA control (read mirror); bit 14 = BLTDONE (1=idle)
+ *     0x002  DMACONR   DMA control (read mirror); bit 14 = BBUSY (0=idle, 1=busy)
  *     0x004  VPOSR     Beam high: bit 0 = line[8]
  *     0x006  VHPOSR    Beam low:  bits 15:8 = line[7:0], bits 7:0 = hpos[7:0]
  *   Write (SET/CLR: bit 15 = 1 → set, 0 → clear):
@@ -97,6 +97,9 @@ typedef struct {
     int16_t  bltbmod;    /* row modulo for B                              */
     int16_t  bltcmod;    /* row modulo for C                              */
     int16_t  bltdmod;    /* row modulo for D                              */
+    uint16_t bltadat;    /* A data register (line mode texture)           */
+    uint16_t bltbdat;    /* B data register (line mode pattern)           */
+    uint16_t bltcdat;    /* C data register                               */
 } agnus_t;
 
 /* Lifecycle */
