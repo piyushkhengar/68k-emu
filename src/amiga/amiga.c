@@ -51,23 +51,22 @@ static const mem_bus_t amiga_bus_vtable = {
 static void amiga_int_ack(int level)
 {
     /*
-     * Called when the CPU takes an autovector interrupt.
-     * Clear the corresponding INTREQ bit(s) and re-evaluate.
+     * On the Amiga, INTREQ bits are cleared by the interrupt handler
+     * writing to INTREQ (0xDFF09C), NOT by the CPU acknowledge.
+     * The handler reads INTREQR to identify which source(s) fired,
+     * processes them, then clears the specific bit(s) via INTREQ.
      *
-     * Naming note: hardware INTREQ is stored in amiga_paula.adkcon
-     * (see paula.c for the full explanation of the offset mapping).
+     * If we cleared bits here, the handler would see no pending source
+     * in INTREQR and skip processing — breaking VBLANK Signal() delivery,
+     * CIA interrupt handling, and everything that depends on the server
+     * chain being called.
+     *
+     * Re-triggering is prevented by the CPU's SR IPL mask, which is set
+     * to the acknowledged level during the handler.  When the handler
+     * clears the INTREQ bit and RTEs, the mask is restored and the
+     * now-cleared source won't re-trigger.
      */
-    paula_t *p = &amiga_paula;
-    switch (level) {
-    case 1: p->adkcon &= (uint16_t)~(INTREQ_TBE | INTREQ_DSKBLK | INTREQ_SOFT); break;
-    case 2: p->adkcon &= (uint16_t)~INTREQ_PORTS; break;
-    case 3: p->adkcon &= (uint16_t)~(INTREQ_COPER | INTREQ_VERTB | INTREQ_BLIT); break;
-    case 4: p->adkcon &= (uint16_t)~(INTREQ_AUD0 | INTREQ_AUD1 | INTREQ_AUD2 | INTREQ_AUD3); break;
-    case 5: p->adkcon &= (uint16_t)~(INTREQ_RBF | INTREQ_DSKSYN); break;
-    case 6: p->adkcon &= (uint16_t)~INTREQ_EXTER; break;
-    default: break;
-    }
-    paula_update_irq(p);
+    (void)level;
 }
 
 /* ------------------------------------------------------------------ */
