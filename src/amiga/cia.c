@@ -13,7 +13,9 @@
 void cia_init(cia_t *c)
 {
     memset(c, 0, sizeof(*c));
-    c->sdr = 0xFF;   /* idle serial line */
+    c->sdr = 0xFF;         /* idle serial line */
+    c->pra_input = 0xFF;   /* all input pins float high by default */
+    c->prb_input = 0xFF;
 }
 
 void cia_reset(cia_t *c)
@@ -43,10 +45,10 @@ uint8_t cia_read(cia_t *c, uint8_t reg)
 {
     switch (reg) {
     case CIA_PRA:
-        /* Output bits from register; input pins float high. */
-        return (c->pra & c->ddra) | (~c->ddra & 0xFFu);
+        /* Output bits from register; input bits from external pin state. */
+        return (c->pra & c->ddra) | (c->pra_input & ~c->ddra);
     case CIA_PRB:
-        return (c->prb & c->ddrb) | (~c->ddrb & 0xFFu);
+        return (c->prb & c->ddrb) | (c->prb_input & ~c->ddrb);
     case CIA_DDRA:   return c->ddra;
     case CIA_DDRB:   return c->ddrb;
     case CIA_TALO:   return (uint8_t)(c->ta_cnt & 0xFFu);

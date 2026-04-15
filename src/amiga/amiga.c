@@ -100,9 +100,23 @@ static void cia_restore_simulation(void)
     /* CIA-B FLAG pin: simulate periodic disk-index/ready signal. */
     amiga_cia_b.flag_period = 14000;
     amiga_cia_b.flag_count  = 14000;
-    /* CIA-B PRB: disk signals for "no disk present". */
-    amiga_cia_b.prb  = 0xFB;
-    amiga_cia_b.ddrb = 0x04;
+    /* CIA-A PRA input pins: disk drive signals.
+     * On a real A500 with no disk inserted:
+     *   Bit 5 (/RDY)  = 0 (drive mechanism ready — motor spins freely)
+     *   Bit 4 (/TK0)  = 0 (head at track 0 — initial position)
+     *   Bit 3 (/WPRO) = 1 (not write-protected)
+     *   Bit 2 (/CHNG) = 0 (disk changed — no disk present!)
+     *   Other bits default to 1 (inactive).
+     * trackdisk reads bit 2 for disk presence, bit 5 for drive ready. */
+    /* CIA-A PRA input pins: disk drive signals.
+     *   Bit 5 (/RDY)  = 1 (not ready — no disk spinning)
+     *   Bit 4 (/TK0)  = 1 (not at track 0)
+     *   Bit 3 (/WPRO) = 1 (not write-protected)
+     *   Bit 2 (/CHNG) = 1 (no change — prevents trackdisk blocking)
+     * /CHNG=1 tells trackdisk "disk hasn't changed" which avoids the
+     * drive-init sequence that blocks in Wait().  Strap detects "no disk"
+     * via a separate workaround on the TD_CHANGESTATE result. */
+    amiga_cia_a.pra_input = 0xFF;  /* all inactive (default) */
     /* CIA-A keyboard: queue power-up key stream ($FE init, $FD self-test). */
     amiga_cia_a.kbd_queue[0] = 0xFE;
     amiga_cia_a.kbd_queue[1] = 0xFD;
@@ -547,6 +561,16 @@ void amiga_run_headless(int max_frames)
                     cpu.pc = 0xFE8506;
                 }
                 } /* end if (is_ks13) */
+                /* ---- KS 2.04 workaround: fix TD_CHANGESTATE result ---- */
+                /* After strap calls DoIO(TD_CHANGESTATE), it checks io_Actual
+                 * at the IORequest+$20: 0=disk present, !0=no disk.  Our
+                 * trackdisk returns 0 ("disk present") because CIA-A /CHNG
+                 * reads as inactive.  Patch io_Actual to 1 ("no disk") so
+                 * strap takes the "insert disk" display path. */
+                if (!is_ks13 && cpu.pc == 0xFCE416) {
+                    amiga_bus_write32(cpu.a[3] + 0x20, 1); /* io_Actual = 1 */
+                }
+
                 if (trace_active) {
                     bt_total_steps++;
                     uint32_t pc_after = cpu.pc;
@@ -785,6 +809,7 @@ void amiga_run_headless(int max_frames)
         }
 
         /* (VBLANK interrupt fires at line AMIGA_HEIGHT above.) */
+
 
         /* ---- Boot trace: per-frame chip RAM inspection ---- */
         if (trace_active) {

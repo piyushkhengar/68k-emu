@@ -77,8 +77,10 @@
 /* ------------------------------------------------------------------ */
 
 typedef struct {
-    uint8_t  pra, prb;      /* Port data registers */
+    uint8_t  pra, prb;      /* Port data registers (output latch) */
     uint8_t  ddra, ddrb;    /* Port data-direction (1=output) */
+    uint8_t  pra_input;     /* External input pin state for Port A (default 0xFF) */
+    uint8_t  prb_input;     /* External input pin state for Port B (default 0xFF) */
 
     uint16_t ta_latch;      /* Timer A write latch */
     uint16_t ta_cnt;        /* Timer A running count */
