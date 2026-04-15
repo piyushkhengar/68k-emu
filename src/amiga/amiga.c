@@ -233,6 +233,112 @@ void amiga_run(void)
                     if (eb >= 0x20 && eb < 0x80000)
                         amiga_bus_write8(eb + 0x124, 0x00);
                 }
+                /* Workaround: ROM Flood() doesn't work on a bare RastPort
+                 * (no Layer). The NULL-Layer path in graphics.library
+                 * skips scan-stack initialization, so the fill loop does
+                 * nothing. Intercept the JSR Flood at FE8904 and perform
+                 * a simple C scan-line flood fill directly on the bitmap. */
+                if (cpu.pc == 0xFE8904) {
+                    uint32_t rp = cpu.a[1];
+                    uint32_t bm = amiga_bus_read32(rp + 4);
+                    int apen = amiga_bus_read8(rp + 0x19);
+                    int sx = cpu.d[0], sy = cpu.d[1];
+                    if (bm) {
+                        int bpr = amiga_bus_read16(bm);
+                        int depth = amiga_bus_read8(bm + 5);
+                        int rows = amiga_bus_read16(bm + 2);
+                        uint32_t planes[6];
+                        for (int p = 0; p < depth && p < 6; p++)
+                            planes[p] = amiga_bus_read32(bm + 8 + p * 4);
+
+                        /* Read pixel color from all planes */
+                        #define FREAD_PX(x,y) ({ \
+                            int _c = 0; \
+                            int _bo = (y)*bpr + (x)/8; \
+                            int _bi = 7 - ((x)&7); \
+                            for (int _p=0; _p<depth; _p++) \
+                                _c |= ((amiga_bus_read8(planes[_p]+_bo) >> _bi) & 1) << _p; \
+                            _c; })
+                        #define FWRITE_PX(x,y,color) do { \
+                            int _bo = (y)*bpr + (x)/8; \
+                            int _bi = 7 - ((x)&7); \
+                            for (int _p=0; _p<depth; _p++) { \
+                                uint8_t _v = amiga_bus_read8(planes[_p]+_bo); \
+                                if ((color >> _p) & 1) _v |= (1 << _bi); \
+                                else                    _v &= ~(1 << _bi); \
+                                amiga_bus_write8(planes[_p]+_bo, _v); \
+                            } } while(0)
+
+                        int seed_color = FREAD_PX(sx, sy);
+                        if (seed_color != apen && sx >= 0 && sy >= 0 &&
+                            sx < bpr * 8 && sy < rows) {
+                            /* Scan-line flood fill with pixel count limit.
+                             * The strap's polygons have intentional openings
+                             * (e.g. the disk label slot).  Limit fill to
+                             * prevent leaking into the background. */
+                            static int16_t stack[4096][2];
+                            int sp_top = 0;
+                            stack[sp_top][0] = (int16_t)sx;
+                            stack[sp_top][1] = (int16_t)sy;
+                            sp_top++;
+                            int width = bpr * 8;
+                            int px_count = 0;
+                            int px_limit = 12000;  /* ~60% of 200-line bitmap */
+
+                            while (sp_top > 0 && sp_top < 4090 && px_count < px_limit) {
+                                sp_top--;
+                                int cx = stack[sp_top][0];
+                                int cy = stack[sp_top][1];
+                                if (cx < 0 || cx >= width || cy < 0 || cy >= rows)
+                                    continue;
+                                if (FREAD_PX(cx, cy) != seed_color)
+                                    continue;
+                                /* Scan left */
+                                int lx = cx;
+                                while (lx > 0 && FREAD_PX(lx - 1, cy) == seed_color)
+                                    lx--;
+                                /* Scan right */
+                                int rx = cx;
+                                while (rx < width - 1 && FREAD_PX(rx + 1, cy) == seed_color)
+                                    rx++;
+                                /* Fill the span and push neighbors */
+                                int above = 0, below = 0;
+                                for (int x = lx; x <= rx; x++) {
+                                    FWRITE_PX(x, cy, apen);
+                                    px_count++;
+                                    /* Check row above */
+                                    if (cy > 0) {
+                                        int c = FREAD_PX(x, cy - 1);
+                                        if (c == seed_color && !above) {
+                                            stack[sp_top][0] = (int16_t)x;
+                                            stack[sp_top][1] = (int16_t)(cy - 1);
+                                            sp_top++;
+                                            above = 1;
+                                        } else if (c != seed_color) {
+                                            above = 0;
+                                        }
+                                    }
+                                    /* Check row below */
+                                    if (cy < rows - 1) {
+                                        int c = FREAD_PX(x, cy + 1);
+                                        if (c == seed_color && !below) {
+                                            stack[sp_top][0] = (int16_t)x;
+                                            stack[sp_top][1] = (int16_t)(cy + 1);
+                                            sp_top++;
+                                            below = 1;
+                                        } else if (c != seed_color) {
+                                            below = 0;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        #undef FREAD_PX
+                        #undef FWRITE_PX
+                    }
+                    /* Skip the JSR Flood: 4 bytes (4EAE + displacement) */
+                    cpu.pc = 0xFE8908;
+                }
                 /* Workaround: strap's display_setup WaitTOF + LoadView.
                  *
                  * display_setup (FE8732) builds a Copper list via MakeVPort/MrgCop
