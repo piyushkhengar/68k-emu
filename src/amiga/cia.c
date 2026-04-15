@@ -175,15 +175,7 @@ void cia_tick(cia_t *c, int eclocks, paula_t *paula, uint16_t intreq_bit)
         }
     }
 
-    /* ---- Deferred ICR mask→data check ------------------------------- */
-    /* If any ICR data bits match the mask but IR hasn't been set yet,
-     * fire the interrupt now.  This handles the case where data arrives
-     * (e.g. keyboard SP) before the mask is enabled, and the mask is
-     * set later — the interrupt must fire retroactively. */
-    if ((c->icr_data & c->icr_mask & 0x1F) && !(c->icr_data & CIA_ICR_IR)) {
-        c->icr_data |= CIA_ICR_IR;
-        paula_assert_intreq(paula, intreq_bit);
-    }
+    /* Deferred ICR check disabled — immediate check in cia_write handles it */
 
     /* ---- Keyboard serial simulation (CIA-A only) ------------------- */
     /* Delivers power-up key stream ($FE init, $FD self-test OK) via
