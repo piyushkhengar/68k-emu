@@ -48,11 +48,8 @@ static const mem_bus_t amiga_bus_vtable = {
 /*  Interrupt-acknowledge callback                                      */
 /* ------------------------------------------------------------------ */
 
-static int int_counts[8];  /* interrupt delivery counter per level */
-
 static void amiga_int_ack(int level)
 {
-    if (level >= 1 && level <= 6) int_counts[level]++;
     /*
      * Called when the CPU takes an autovector interrupt.
      * Clear the corresponding INTREQ bit(s) and re-evaluate.
@@ -251,16 +248,6 @@ void amiga_run(void)
                     if (eb >= 0x20 && eb < 0x80000)
                         amiga_bus_write8(eb + 0x124, 0x00);
                 }
-                /* Generic boot diagnostic: trace ALL Supervisor calls */
-                if (cpu.pc == 0xF80AD2 || cpu.pc == 0xFC0AD2) {
-                    static int vd = 0;
-                    if (vd < 20) {
-                        vd++;
-                        fprintf(stderr, "[SUPER#%d] PC=%06X SR=%04X A5=%08X user=%d\n",
-                                vd, cpu.pc, cpu.sr, cpu.a[5],
-                                (cpu.sr & 0x2000) ? 0 : 1);
-                    }
-                }
                 /* Track Draw bounding box for Flood containment.
                  * The strap's polygons have intentional openings (disk label
                  * slot).  We constrain our flood fill to the bounding box
@@ -457,14 +444,6 @@ void amiga_run(void)
         }
 
         /* End of frame: present. */
-        { static int fc = 0; fc++;
-          if (fc == 300) {
-            fprintf(stderr, "[INT-STATS@F%d] L1=%d L2=%d L3=%d L4=%d L5=%d L6=%d INTENA=%04X INTREQ=%04X\n",
-                    fc, int_counts[1], int_counts[2], int_counts[3],
-                    int_counts[4], int_counts[5], int_counts[6],
-                    amiga_paula.intreq, amiga_paula.adkcon);
-          }
-        }
         renderer_present(framebuffer);
     }
 

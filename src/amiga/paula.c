@@ -53,16 +53,7 @@ void paula_write_reg(paula_t *p, uint16_t offset, uint16_t val)
      */
     switch (offset) {
     case 0x096: setclr(&p->dmacon, val); return;
-    case 0x09A: /* INTENA */
-        { static int iec = 0;
-          if (iec < 20 && (val & 0x4000)) {
-            iec++;
-            fprintf(stderr, "[INTENA#%d] val=%04X %s master → intena=%04X\n",
-                    iec, val, (val & 0x8000) ? "SET" : "CLR",
-                    (val & 0x8000) ? (p->intreq | (val & 0x3FFF)) : (p->intreq & ~(val & 0x3FFF)));
-          }
-        }
-        setclr(&p->intreq, val); paula_update_irq(p); return;
+    case 0x09A: setclr(&p->intreq, val); paula_update_irq(p); return;
     case 0x09C: setclr(&p->adkcon, val); paula_update_irq(p); return;
     case 0x09E: setclr(&p->intena, val); return;
     default: break;
