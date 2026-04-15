@@ -248,6 +248,22 @@ void amiga_run(void)
                     if (eb >= 0x20 && eb < 0x80000)
                         amiga_bus_write8(eb + 0x124, 0x00);
                 }
+                /* KS 2.04 exec init bisect — find hang after vector loop */
+                { static uint32_t probes[] = {
+                    0xF80586, 0xF80600, 0xF80650, 0xF80700,
+                    0xF80750, 0xF80800, 0xF80850, 0xF80900,
+                    0xF80950, 0xF80A00, 0xF80A50, 0xF80AD2,
+                    0xF83FD4, 0
+                  };
+                  static uint32_t seen = 0;
+                  for (int i = 0; probes[i]; i++) {
+                    if (!(seen & (1u << i)) && cpu.pc == probes[i]) {
+                        seen |= (1u << i);
+                        fprintf(stderr, "[INIT] @%06X (+%03X)\n",
+                                probes[i], probes[i] - 0xF80420);
+                    }
+                  }
+                }
                 /* Track Draw bounding box for Flood containment.
                  * The strap's polygons have intentional openings (disk label
                  * slot).  We constrain our flood fill to the bounding box
