@@ -101,10 +101,14 @@ static void amiga_reset_external(void)
     amiga_bus_write32(0x000000, 0x00000000);
 }
 
+/* ROM version detection: KS 1.3 = 256KB, KS 2.0+ = 512KB */
+static int is_ks13;
+
 static int amiga_init(const uint8_t *rom, size_t size)
 {
     if (amiga_bus_init(rom, size) < 0)
         return -1;
+    is_ks13 = (size <= 262144);
     mem_set_bus(&amiga_bus_vtable);
     /*
      * Use 68000 model.  ColdStart tries MOVEC VBR/CACR which trigger
@@ -208,25 +212,20 @@ void amiga_run(void)
             /* Run the 68000 for one scanline worth of CPU cycles. */
             int cycles = 0;
             while (cycles < CPU_CYCLES_PER_LINE) {
-                /* Workaround: skip input.device init entirely.
-                 * input.device at FE5AEA opens keyboard.device (hangs without
-                 * keyboard hardware) and timer.device. Even with the keyboard
-                 * open skipped, input.device's init never returns — it hangs
-                 * on timer/interrupt operations. Skip the entire InitResident
-                 * call for input.device (A1=FE4C26) at the InitCode call site. */
-                /* Skip input.device and intuition.library inits.
-                 * input.device hangs on keyboard.device open (no keyboard hw).
-                 * intuition.library hangs on input.device (which we skipped).
-                 * Both block all lower-priority module inits including strap. */
+                /* ---- KS 1.3-specific workarounds (address-dependent) ---- */
+                /* These ONLY run for KS 1.3 (256KB ROM). Running them on
+                 * KS 2.0+ corrupts execution because the same addresses
+                 * contain different code in the larger ROM. */
+                if (is_ks13) {
+                /* Skip input.device and intuition.library inits. */
                 if (cpu.pc == 0xFC0B58 &&
                     (cpu.a[1] == 0xFE4C26 || cpu.a[1] == 0xFD3D8C)) {
                     cpu.d[0] = 0;
                     cpu.pc = 0xFC0B5C;
                 }
-                /* Workaround: skip trackdisk motor polling loop. */
+                /* Skip trackdisk motor polling loop. */
                 if (cpu.pc == 0xFE8F8E)
                     cpu.pc = 0xFE8FB6;
-                /* ---- Boot workarounds for missing hardware ---- */
                 /* Clear HELP watchdog after FC3028 writes it */
                 if (cpu.pc == 0xFC302C)
                     amiga_bus_write32(0x000000, 0x00000000);
@@ -239,30 +238,11 @@ void amiga_run(void)
                 /* Force expansion init continue (not RESET) */
                 if (cpu.pc == 0xFC3078)
                     cpu.d[0] = 0;
-                /* Workaround: clear AttnResched before user-mode drop.
-                 * Even with ORI to SR privilege fix, the scheduler dispatch
-                 * during Permit() switches away from the init code prematurely.
-                 * Clear AttnResched so Permit() just returns without dispatching. */
+                /* Clear AttnResched before user-mode drop. */
                 if (cpu.pc == 0xFC04BE) {
                     uint32_t eb = amiga_bus_read32(0x04);
                     if (eb >= 0x20 && eb < 0x80000)
                         amiga_bus_write8(eb + 0x124, 0x00);
-                }
-                /* KS 2.04 exec init bisect — find hang after vector loop */
-                { static uint32_t probes[] = {
-                    0xF80586, 0xF80600, 0xF80650, 0xF80700,
-                    0xF80750, 0xF80800, 0xF80850, 0xF80900,
-                    0xF80950, 0xF80A00, 0xF80A50, 0xF80AD2,
-                    0xF83FD4, 0
-                  };
-                  static uint32_t seen = 0;
-                  for (int i = 0; probes[i]; i++) {
-                    if (!(seen & (1u << i)) && cpu.pc == probes[i]) {
-                        seen |= (1u << i);
-                        fprintf(stderr, "[INIT] @%06X (+%03X)\n",
-                                probes[i], probes[i] - 0xF80420);
-                    }
-                  }
                 }
                 /* Track Draw bounding box for Flood containment.
                  * The strap's polygons have intentional openings (disk label
@@ -427,6 +407,7 @@ void amiga_run(void)
                 if (cpu.pc == 0xFE855C || cpu.pc == 0xFE8570 || cpu.pc == 0xFE859C) {
                     cpu.d[0] = 0; cpu.pc += 4;  /* DoIO "success" with empty buffer */
                 }
+                } /* end if (is_ks13) */
                 int c = cpu_step();
                 if (c == 0) {
                     cycles = CPU_CYCLES_PER_LINE;  /* CPU halted */
