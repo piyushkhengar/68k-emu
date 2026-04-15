@@ -239,13 +239,8 @@ void amiga_run(void)
                  * of the preceding Draw calls so it can't leak outside. */
                 { static int bbox_x0 = 9999, bbox_y0 = 9999;
                   static int bbox_x1 = -1, bbox_y1 = -1;
-                  /* Move resets the bounding box */
-                  if (cpu.pc == 0xFE88DC) {
-                      bbox_x0 = bbox_y0 = 9999;
-                      bbox_x1 = bbox_y1 = -1;
-                  }
-                  /* Draw extends the bounding box */
-                  if (cpu.pc == 0xFE8918) {
+                  /* Move and Draw both extend the bounding box */
+                  if (cpu.pc == 0xFE88DC || cpu.pc == 0xFE8918) {
                       int dx = cpu.d[0], dy = cpu.d[1];
                       if (dx < bbox_x0) bbox_x0 = dx;
                       if (dx > bbox_x1) bbox_x1 = dx;
@@ -263,7 +258,7 @@ void amiga_run(void)
                     uint32_t bm = amiga_bus_read32(rp + 4);
                     int apen = amiga_bus_read8(rp + 0x19);
                     int sx = cpu.d[0], sy = cpu.d[1];
-                    if (bm && bbox_x1 >= 0) {
+                    if (bm) {
                         int bpr = amiga_bus_read16(bm);
                         int depth = amiga_bus_read8(bm + 5);
                         int rows = amiga_bus_read16(bm + 2);
@@ -288,15 +283,25 @@ void amiga_run(void)
                                 amiga_bus_write8(planes[_p]+_bo, _v); \
                             } } while(0)
 
-                        /* Clamp bounding box to bitmap */
-                        int bx0 = bbox_x0 < 0 ? 0 : bbox_x0;
-                        int by0 = bbox_y0 < 0 ? 0 : bbox_y0;
-                        int bx1 = bbox_x1 >= bpr*8 ? bpr*8-1 : bbox_x1;
-                        int by1 = bbox_y1 >= rows ? rows-1 : bbox_y1;
+                        /* Use bbox if seed is inside it; otherwise use full
+                         * bitmap (border fills rely on previously-drawn outlines
+                         * from multiple polygons, not just the latest one). */
+                        int bx0, by0, bx1, by1;
+                        if (bbox_x1 >= 0 &&
+                            sx >= bbox_x0 && sx <= bbox_x1 &&
+                            sy >= bbox_y0 && sy <= bbox_y1) {
+                            bx0 = bbox_x0 < 0 ? 0 : bbox_x0;
+                            by0 = bbox_y0 < 0 ? 0 : bbox_y0;
+                            bx1 = bbox_x1 >= bpr*8 ? bpr*8-1 : bbox_x1;
+                            by1 = bbox_y1 >= rows ? rows-1 : bbox_y1;
+                        } else {
+                            bx0 = 0; by0 = 0;
+                            bx1 = bpr*8 - 1; by1 = rows - 1;
+                        }
 
                         int seed_color = FREAD_PX(sx, sy);
                         if (seed_color != apen &&
-                            sx >= bx0 && sx <= bx1 && sy >= by0 && sy <= by1) {
+                            sx >= 0 && sx < bpr*8 && sy >= 0 && sy < rows) {
                             /* Scan-line flood fill bounded by polygon bbox */
                             static int16_t stack[8192][2];
                             int sp_top = 0;
