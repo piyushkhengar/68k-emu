@@ -1,7 +1,7 @@
 /*
  * SDL2 renderer for the Amiga 500 emulator — Chapter 3.
  *
- * Creates a 640×512 window (2× native 320×256).  Each frame the full
+ * Creates a 640x512 window (2x native 320x256).  Each frame the full
  * ARGB8888 framebuffer is uploaded via SDL_UpdateTexture and presented
  * with SDL_RenderCopy + SDL_RenderPresent.
  *
@@ -44,7 +44,7 @@ int renderer_init(void)
         return -1;
     }
 
-    /* Logical size: SDL scales the 320×256 texture to fill the window. */
+    /* Logical size: SDL scales the 320x256 texture to fill the window. */
     SDL_RenderSetLogicalSize(sdl_renderer, AMIGA_WIDTH, AMIGA_HEIGHT);
 
     texture = SDL_CreateTexture(
@@ -93,14 +93,15 @@ int renderer_poll_events(void)
             return 1;
     }
 
-    /* Ctrl + Left Amiga + Right Amiga → system reset.
-     * On the host keyboard: Ctrl + Left GUI/Cmd + Right GUI/Cmd.
-     * On a real Amiga the keyboard controller detects this combination
-     * and pulls the KBRESET line, triggering a full hardware reset. */
+    /* Ctrl + Left Amiga + Right Amiga = system reset.
+     * Amiga keys are mapped to Alt/Option on the host because macOS and
+     * Windows intercept GUI/Cmd/Win key combinations at the OS level.
+     * This matches the convention used by FS-UAE and other Amiga emulators.
+     * Accept either Alt or GUI keys so it works on all platforms. */
     const Uint8 *keys = SDL_GetKeyboardState(NULL);
-    if (keys[SDL_SCANCODE_LCTRL] &&
-        keys[SDL_SCANCODE_LGUI]  &&
-        keys[SDL_SCANCODE_RGUI])
+    int la = keys[SDL_SCANCODE_LALT] || keys[SDL_SCANCODE_LGUI];
+    int ra = keys[SDL_SCANCODE_RALT] || keys[SDL_SCANCODE_RGUI];
+    if (keys[SDL_SCANCODE_LCTRL] && la && ra)
         return 2;
 
     return 0;
