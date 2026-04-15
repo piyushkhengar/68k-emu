@@ -64,12 +64,10 @@ static int op_reset(uint16_t op)
 static int op_stop(uint16_t op)
 {
     (void)op;
-    uint16_t imm = fetch16();
-    if (!(imm & SR_S)) {  /* S-bit clear = user mode */
-        cpu_take_exception(PRIVILEGE_VECTOR, 4);
+    if (!require_supervisor())
         return 0;
-    }
-    cpu.sr = imm;
+    uint16_t imm = fetch16();
+    cpu.sr = imm & SR_VALID;
     cpu.halted = 1;
     return CYCLES_STOP;
 }

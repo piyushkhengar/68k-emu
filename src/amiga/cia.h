@@ -13,9 +13,9 @@
  *   5  TAHI  — Timer A high byte
  *   6  TBLO  — Timer B low byte
  *   7  TBHI  — Timer B high byte
- *   8  TODLO  — TOD low  (Chapter 2: always returns 0)
- *   9  TODMID — TOD mid  (Chapter 2: always returns 0)
- *  10  TODHI  — TOD high (Chapter 2: always returns 0)
+ *   8  TODLO  — TOD/event counter low byte  (read unlatches)
+ *   9  TODMID — TOD/event counter mid byte
+ *  10  TODHI  — TOD/event counter high byte (read latches all 3)
  *  12  SDR   — Serial Data Register (Chapter 2: returns 0xFF)
  *  13  ICR   — Interrupt Control Register (SET/CLR mask on write, auto-clear on read)
  *  14  CRA   — Control Register A (timer A start/runmode/load)
@@ -111,11 +111,13 @@ typedef struct {
     paula_t *paula;         /* NULL if not wired */
     uint16_t intreq_bit;    /* INTREQ_PORTS for CIA-A, INTREQ_EXTER for CIA-B */
 
-    /* TOD (Time of Day) counter: incremented by E-clocks in cia_tick.
-     * Real hardware ticks at 50/60 Hz (VSYNC). We approximate by counting
-     * E-clocks and incrementing TOD at ~50 Hz rate. */
-    uint32_t tod_counter;   /* 24-bit TOD value (only low byte exposed so far) */
-    int      tod_eclocks;   /* E-clock accumulator for TOD tick rate */
+    /* TOD (Time of Day) / event counter: incremented at ~50 Hz (PAL).
+     * On the 8520 this is a 24-bit event counter (not BCD like the 6526).
+     * Reading TODHI latches all 3 bytes; reading TODLO unlatches. */
+    uint32_t tod_counter;   /* 24-bit running counter */
+    uint32_t tod_latch;     /* latched value (read atomically) */
+    int      tod_latched;   /* 1 = latched (reading TODHI latched it) */
+    int      tod_eclocks;   /* E-clock accumulator for ~50 Hz tick rate */
 } cia_t;
 
 /* ------------------------------------------------------------------ */

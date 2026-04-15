@@ -479,6 +479,12 @@ void cpu_take_exception(int vector_num, int cycles_before_fault)
 int require_supervisor(void)
 {
     if (!(cpu.sr & SR_S)) {
+        /* Back up PC to point at the faulting instruction's first word.
+         * cpu.pc has already been advanced past the opcode by fetch16()
+         * in cpu_step().  The M68000 PRM specifies that the stacked PC
+         * for a privilege violation is the address of the first word of
+         * the instruction that caused the violation. */
+        cpu.pc -= 2;
         cpu_take_exception(PRIVILEGE_VECTOR, 4);
         return 0;
     }

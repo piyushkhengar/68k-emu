@@ -212,6 +212,12 @@ void amiga_run(void)
             /* Run the 68000 for one scanline worth of CPU cycles. */
             int cycles = 0;
             while (cycles < CPU_CYCLES_PER_LINE) {
+                /* Update Agnus horizontal beam position so VHPOSR reads
+                 * return a value that changes within the scanline.  Without
+                 * this, graphics.library init hangs on a VHPOSR change-detect
+                 * loop (see KS 2.04 gfx init at ~FA8D60). */
+                amiga_agnus.hpos = cycles / 2;  /* 1 color clock = 2 CPU cycles */
+
                 /* ---- KS 1.3-specific workarounds (address-dependent) ---- */
                 /* These ONLY run for KS 1.3 (256KB ROM). Running them on
                  * KS 2.0+ corrupts execution because the same addresses
@@ -483,6 +489,9 @@ void amiga_run_headless(int max_frames)
             /* Run CPU for one scanline worth of cycles. */
             int cycles = 0;
             while (cycles < CPU_CYCLES_PER_LINE) {
+                /* Track horizontal beam position within the scanline. */
+                amiga_agnus.hpos = cycles / 2;
+
                 uint32_t pc_before = cpu.pc;
                 uint16_t sr_before = cpu.sr;
 
@@ -494,16 +503,15 @@ void amiga_run_headless(int max_frames)
                 cpu.cycles += (uint32_t)c;
                 cycles += c;
 
-                /* Workaround: skip trackdisk motor polling (same as gfx) */
+                /* ---- KS 1.3-specific workarounds (same as gfx path) ---- */
+                if (is_ks13) {
                 if (cpu.pc == 0xFE8F8E)
                     cpu.pc = 0xFE8FB6;
-                /* Clear AttnResched (same as gfx) */
                 if (cpu.pc == 0xFC04BE) {
                     uint32_t eb = amiga_bus_read32(0x04);
                     if (eb >= 0x20 && eb < 0x80000)
                         amiga_bus_write8(eb + 0x124, 0x00);
                 }
-                /* Boot workarounds (same as gfx) */
                 if (cpu.pc == 0xFC302C)
                     amiga_bus_write32(0x000000, 0x00000000);
                 if (cpu.pc == 0xFC3138) {
@@ -513,17 +521,16 @@ void amiga_run_headless(int max_frames)
                 }
                 if (cpu.pc == 0xFC3078)
                     cpu.d[0] = 0;
-                /* Skip input.device + intuition.library (same as gfx) */
                 if (cpu.pc == 0xFC0B58 &&
                     (cpu.a[1] == 0xFE4C26 || cpu.a[1] == 0xFD3D8C)) {
                     cpu.d[0] = 0;
                     cpu.pc = 0xFC0B5C;
                 }
-                /* Skip strap OpenDevice("trackdisk.device") (same as gfx) */
                 if (cpu.pc == 0xFE8502) {
                     cpu.d[0] = 0xFFFFFFFF;
                     cpu.pc = 0xFE8506;
                 }
+                } /* end if (is_ks13) */
                 if (trace_active) {
                     bt_total_steps++;
                     uint32_t pc_after = cpu.pc;

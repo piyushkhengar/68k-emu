@@ -53,9 +53,22 @@ uint8_t cia_read(cia_t *c, uint8_t reg)
     case CIA_TAHI:   return (uint8_t)(c->ta_cnt >> 8);
     case CIA_TBLO:   return (uint8_t)(c->tb_cnt & 0xFFu);
     case CIA_TBHI:   return (uint8_t)(c->tb_cnt >> 8);
-    case CIA_TODLO:  return 0;
-    case CIA_TODMID: return 0;
-    case CIA_TODHI:  return 0;
+    case CIA_TODLO: {
+        /* Reading low byte unlatches the counter. */
+        uint32_t val = c->tod_latched ? c->tod_latch : c->tod_counter;
+        c->tod_latched = 0;
+        return (uint8_t)(val & 0xFFu);
+    }
+    case CIA_TODMID: {
+        uint32_t val = c->tod_latched ? c->tod_latch : c->tod_counter;
+        return (uint8_t)((val >> 8) & 0xFFu);
+    }
+    case CIA_TODHI: {
+        /* Reading high byte latches all 3 bytes for atomic read. */
+        c->tod_latch = c->tod_counter;
+        c->tod_latched = 1;
+        return (uint8_t)((c->tod_latch >> 16) & 0xFFu);
+    }
     case CIA_SDR:    return c->sdr;
     case CIA_ICR: {
         /* Return pending status including IR flag; auto-clear. */
@@ -98,6 +111,18 @@ void cia_write(cia_t *c, uint8_t reg, uint8_t val)
         c->tb_latch = ((uint16_t)val << 8) | (c->tb_latch & 0x00FFu);
         if (!(c->crb & CIA_CR_START))
             c->tb_cnt = c->tb_latch;
+        break;
+
+    case CIA_TODLO:
+        /* Writing low byte sets the counter (if CRB bit 7 = 0)
+         * or sets the alarm (if CRB bit 7 = 1).  For now: set counter. */
+        c->tod_counter = (c->tod_counter & 0xFFFF00u) | val;
+        break;
+    case CIA_TODMID:
+        c->tod_counter = (c->tod_counter & 0xFF00FFu) | ((uint32_t)val << 8);
+        break;
+    case CIA_TODHI:
+        c->tod_counter = (c->tod_counter & 0x00FFFFu) | ((uint32_t)val << 16);
         break;
 
     case CIA_SDR:
