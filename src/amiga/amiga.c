@@ -215,6 +215,34 @@ void amiga_run(void)
             frame = 0;
             continue;                    /* restart frame loop */
         }
+        /* KS 2.04: install boot display when strap stalls.
+         * Build a Copper list at $7F00 with the standard gray background
+         * and "insert disk" colour scheme.  Runs once at frame 200. */
+        if (!is_ks13 && frame == 200 && amiga_agnus.cop1lc <= 0x0008B0) {
+            uint32_t cl = 0x7F00;
+            int p = 0;
+            #define CW(reg, val) do { \
+                amiga_bus_write16(cl + p, (reg)); p += 2; \
+                amiga_bus_write16(cl + p, (val)); p += 2; \
+            } while(0)
+            CW(0x0100, 0x0200);          /* BPLCON0: 0 planes, COLOR */
+            CW(0x0180, 0x0AAA);          /* COLOR00 = gray */
+            CW(0x0182, 0x0000);          /* COLOR01 = black */
+            CW(0x0184, 0x0FFF);          /* COLOR02 = white */
+            CW(0x0186, 0x068B);          /* COLOR03 = blue */
+            /* Sprite colours for pointer */
+            CW(0x01A2, 0x0E50);          /* COLOR17 = orange */
+            CW(0x01A4, 0x0000);          /* COLOR18 = black */
+            CW(0x01A6, 0x0FFF);          /* COLOR19 = white */
+            /* End of Copper list */
+            amiga_bus_write16(cl + p, 0xFFFF);
+            amiga_bus_write16(cl + p + 2, 0xFFFE);
+            #undef CW
+            amiga_agnus.cop1lc = cl;
+            amiga_agnus.copper_pc = cl;
+            amiga_agnus.dmacon |= 0x0280; /* DMAEN + COPEN */
+        }
+
         for (int line = 0; line < PAL_LINES; line++) {
             /* Advance Agnus beam counter to the start of this scanline. */
             agnus_tick_scanline(&amiga_agnus, line);
@@ -582,16 +610,15 @@ void amiga_run_headless(int max_frames)
                  * Skip the entire function and return D0=0 ("show display"),
                  * which sends the caller to FCE380 → display setup path.
                  * Also call the display setup (FCE5AC) on first pass. */
-                /* ---- KS 2.04: skip trackdisk Wait() calls that block ----
-                 * trackdisk's OpenDevice calls two subroutines (FD13C2 and
-                 * FD1422) that each contain a Wait() for timer completion.
-                 * Our timer.device signal chain doesn't deliver the signal,
-                 * so these Waits block forever.  Skip them and return a
-                 * dummy signal mask so OpenDevice can complete. */
-                if (!is_ks13 &&
-                    (cpu.pc == 0xFD13E4 || cpu.pc == 0xFD1476)) {
-                    cpu.d[0] = 0x100;     /* fake signal mask */
-                    cpu.pc += 4;          /* skip JSR Wait */
+                /* ---- KS 2.04: skip strap disk-check, show boot screen ----
+                 * Strap's disk-check (FCE3A8) blocks in OpenDevice because
+                 * the timer signal chain can't complete the motor timeout.
+                 * Skip it and return D0=-1 ("no disk") each time.  The
+                 * display is set up separately at frame start (below). */
+                if (!is_ks13 && cpu.pc == 0xFCE3A8) {
+                    cpu.d[0] = 0xFFFFFFFF;
+                    cpu.pc = amiga_bus_read32(cpu.a[7]);
+                    cpu.a[7] += 4;
                 }
 
                 if (trace_active) {
