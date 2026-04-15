@@ -579,21 +579,26 @@ void amiga_run_headless(int max_frames)
                  * Skip the entire function and return D0=0 ("show display"),
                  * which sends the caller to FCE380 → display setup path.
                  * Also call the display setup (FCE5AC) on first pass. */
-                if (!is_ks13 && cpu.pc == 0xFCE3A8) {
-                    static int strap_dsk_gen = -1;
-                    if (strap_dsk_gen != boot_gen) {
-                        strap_dsk_gen = boot_gen;
-                        /* First call: redirect to display setup at FCE366 */
-                        cpu.d[0] = 0;
-                        cpu.pc = amiga_bus_read32(cpu.a[7]); /* pop return addr */
-                        cpu.a[7] += 4;
-                        /* Now PC = FCE326 (return site). Set D0=0 for BEQ. */
-                    } else {
-                        /* Subsequent calls: return D0=0 directly */
-                        cpu.d[0] = 0;
-                        cpu.pc = amiga_bus_read32(cpu.a[7]);
-                        cpu.a[7] += 4;
-                    }
+                /* ---- KS 2.04: set up a minimal display if strap stalls ----
+                 * Strap's disk-check calls trackdisk OpenDevice which blocks
+                 * because the CIA timer→signal chain doesn't yet deliver
+                 * the motor timeout.  After the system has been idle for
+                 * a while (frame > 200), install a simple Copper list with
+                 * the KS 2.04 boot colours so the screen isn't blank. */
+                if (!is_ks13 && frame == 200 && line == 0 &&
+                    amiga_agnus.cop1lc == 0x0008B0) {
+                    /* Build a minimal Copper list in chip RAM at $7F00 */
+                    uint32_t cl = 0x7F00;
+                    /* COLOR00 = $0AAA (gray) */
+                    amiga_bus_write16(cl,    0x0180); /* reg $180 = COLOR00 */
+                    amiga_bus_write16(cl+2,  0x0AAA); /* gray */
+                    /* End sentinel */
+                    amiga_bus_write16(cl+4,  0xFFFF);
+                    amiga_bus_write16(cl+6,  0xFFFE);
+                    /* Install and start the Copper */
+                    amiga_agnus.cop1lc = cl;
+                    amiga_agnus.copper_pc = cl;
+                    amiga_agnus.dmacon |= 0x0280; /* DMAEN + COPEN */
                 }
 
                 if (trace_active) {
