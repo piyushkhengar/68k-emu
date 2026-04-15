@@ -18,6 +18,7 @@
 /*  Chip singletons (shared with amiga.c via bus.h externs)            */
 /* ------------------------------------------------------------------ */
 
+int blt_op_count;  /* blitter operation counter (for diagnostics) */
 paula_t  amiga_paula;
 cia_t    amiga_cia_a;
 cia_t    amiga_cia_b;
@@ -165,6 +166,8 @@ static void custom_write_reg(uint16_t off, uint16_t val)
         (off >= 0x070u && off <= 0x074u)) {
         if (off == 0x058u) {
             /* BLTSIZE write triggers synchronous blit then fires IRQ */
+            extern int blt_op_count;
+            blt_op_count++;
             agnus_blitter_execute(&amiga_agnus, chip_ram, CHIP_RAM_SIZE, val);
             paula_assert_intreq(&amiga_paula, INTREQ_BLIT);
         } else {

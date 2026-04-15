@@ -390,11 +390,16 @@ void agnus_blitter_execute(agnus_t *ag,
         int fill_carry = fci;  /* reset to FCI at start of each row */
 
         for (int col = 0; col < width; col++) {
-            uint16_t raw_a = 0, raw_b = 0, c = 0;
+            uint16_t raw_a, raw_b, c;
 
+            /* USEx=1: read from memory via pointer.
+             * USEx=0: use BLTxDAT register as constant (no DMA). */
             if (use_a) { raw_a = ram_read16(chip_ram, apt, chip_ram_size); apt += (desc ? -2 : 2); }
+            else        { raw_a = ag->bltadat; }
             if (use_b) { raw_b = ram_read16(chip_ram, bpt, chip_ram_size); bpt += (desc ? -2 : 2); }
+            else        { raw_b = ag->bltbdat; }
             if (use_c) { c     = ram_read16(chip_ram, cpt, chip_ram_size); cpt += (desc ? -2 : 2); }
+            else        { c     = ag->bltcdat; }
 
             /* Apply shift pipeline */
             uint16_t a = ash ? (uint16_t)((prev_a << (16 - ash)) | (raw_a >> ash)) : raw_a;
