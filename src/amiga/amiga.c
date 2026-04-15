@@ -215,18 +215,6 @@ void amiga_run(void)
             frame = 0;
             continue;                    /* restart frame loop */
         }
-        /* KS 2.04: install gray boot screen if strap stalls */
-        if (!is_ks13 && frame == 200 && amiga_agnus.cop1lc == 0x0008B0) {
-            uint32_t cl = 0x7F00;
-            amiga_bus_write16(cl,   0x0180);
-            amiga_bus_write16(cl+2, 0x0AAA);
-            amiga_bus_write16(cl+4, 0xFFFF);
-            amiga_bus_write16(cl+6, 0xFFFE);
-            amiga_agnus.cop1lc = cl;
-            amiga_agnus.copper_pc = cl;
-            amiga_agnus.dmacon |= 0x0280;
-        }
-
         for (int line = 0; line < PAL_LINES; line++) {
             /* Advance Agnus beam counter to the start of this scanline. */
             agnus_tick_scanline(&amiga_agnus, line);
@@ -594,26 +582,16 @@ void amiga_run_headless(int max_frames)
                  * Skip the entire function and return D0=0 ("show display"),
                  * which sends the caller to FCE380 → display setup path.
                  * Also call the display setup (FCE5AC) on first pass. */
-                /* ---- KS 2.04: set up a minimal display if strap stalls ----
-                 * Strap's disk-check calls trackdisk OpenDevice which blocks
-                 * because the CIA timer→signal chain doesn't yet deliver
-                 * the motor timeout.  After the system has been idle for
-                 * a while (frame > 200), install a simple Copper list with
-                 * the KS 2.04 boot colours so the screen isn't blank. */
-                if (!is_ks13 && frame == 200 && line == 0 &&
-                    amiga_agnus.cop1lc == 0x0008B0) {
-                    /* Build a minimal Copper list in chip RAM at $7F00 */
-                    uint32_t cl = 0x7F00;
-                    /* COLOR00 = $0AAA (gray) */
-                    amiga_bus_write16(cl,    0x0180); /* reg $180 = COLOR00 */
-                    amiga_bus_write16(cl+2,  0x0AAA); /* gray */
-                    /* End sentinel */
-                    amiga_bus_write16(cl+4,  0xFFFF);
-                    amiga_bus_write16(cl+6,  0xFFFE);
-                    /* Install and start the Copper */
-                    amiga_agnus.cop1lc = cl;
-                    amiga_agnus.copper_pc = cl;
-                    amiga_agnus.dmacon |= 0x0280; /* DMAEN + COPEN */
+                /* ---- KS 2.04: skip trackdisk Wait() calls that block ----
+                 * trackdisk's OpenDevice calls two subroutines (FD13C2 and
+                 * FD1422) that each contain a Wait() for timer completion.
+                 * Our timer.device signal chain doesn't deliver the signal,
+                 * so these Waits block forever.  Skip them and return a
+                 * dummy signal mask so OpenDevice can complete. */
+                if (!is_ks13 &&
+                    (cpu.pc == 0xFD13E4 || cpu.pc == 0xFD1476)) {
+                    cpu.d[0] = 0x100;     /* fake signal mask */
+                    cpu.pc += 4;          /* skip JSR Wait */
                 }
 
                 if (trace_active) {
