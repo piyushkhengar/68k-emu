@@ -186,7 +186,17 @@ void amiga_run(void)
      */
     static uint32_t framebuffer[AMIGA_HEIGHT * AMIGA_WIDTH];
 
-    while (!renderer_poll_events()) {
+    for (;;) {
+        int ev = renderer_poll_events();
+        if (ev == 1) break;              /* quit */
+        if (ev == 2) {                   /* Ctrl+Amiga+Amiga reset */
+            amiga_reset_external();
+            cpu_reset();
+            /* Re-queue keyboard power-up bytes for the new boot. */
+            amiga_cia_a.kbd_queue_pos = 0;
+            amiga_cia_a.kbd_countdown = 500;
+            continue;                    /* restart frame loop */
+        }
         for (int line = 0; line < PAL_LINES; line++) {
             /* Advance Agnus beam counter to the start of this scanline. */
             agnus_tick_scanline(&amiga_agnus, line);

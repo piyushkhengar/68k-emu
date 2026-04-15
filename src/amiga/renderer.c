@@ -92,5 +92,16 @@ int renderer_poll_events(void)
         if (ev.type == SDL_KEYDOWN && ev.key.keysym.sym == SDLK_ESCAPE)
             return 1;
     }
+
+    /* Ctrl + Left Amiga + Right Amiga → system reset.
+     * On the host keyboard: Ctrl + Left GUI/Cmd + Right GUI/Cmd.
+     * On a real Amiga the keyboard controller detects this combination
+     * and pulls the KBRESET line, triggering a full hardware reset. */
+    const Uint8 *keys = SDL_GetKeyboardState(NULL);
+    if (keys[SDL_SCANCODE_LCTRL] &&
+        keys[SDL_SCANCODE_LGUI]  &&
+        keys[SDL_SCANCODE_RGUI])
+        return 2;
+
     return 0;
 }

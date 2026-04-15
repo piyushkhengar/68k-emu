@@ -29,7 +29,9 @@ void renderer_present(const uint32_t *framebuffer);
 
 /*
  * Drain the SDL event queue.
- * Returns 1 if the user requested quit (close button or Escape), 0 otherwise.
+ * Returns: 0 = continue, 1 = quit requested, 2 = Amiga reset requested.
+ * Reset is triggered by Ctrl + Left Amiga + Right Amiga
+ * (mapped to Ctrl + Left GUI/Cmd + Right GUI/Cmd on the host keyboard).
  */
 int  renderer_poll_events(void);
 
