@@ -48,8 +48,11 @@ static const mem_bus_t amiga_bus_vtable = {
 /*  Interrupt-acknowledge callback                                      */
 /* ------------------------------------------------------------------ */
 
+static int int_counts[8];  /* interrupt delivery counter per level */
+
 static void amiga_int_ack(int level)
 {
+    if (level >= 1 && level <= 6) int_counts[level]++;
     /*
      * Called when the CPU takes an autovector interrupt.
      * Clear the corresponding INTREQ bit(s) and re-evaluate.
@@ -121,6 +124,11 @@ static int amiga_init(const uint8_t *rom, size_t size)
     /* Set callbacks AFTER cpu_init (which clears them). */
     cpu_set_int_ack(amiga_int_ack);
     cpu_set_reset_cb(amiga_reset_external);
+    /* Wire CIA→Paula references so ICR writes can immediately fire IRQs. */
+    amiga_cia_a.paula = &amiga_paula;
+    amiga_cia_a.intreq_bit = INTREQ_PORTS;
+    amiga_cia_b.paula = &amiga_paula;
+    amiga_cia_b.intreq_bit = INTREQ_EXTER;
     /* CIA-B FLAG pin: simulate periodic disk-index/ready signal.
      * Without this, trackdisk.device polls forever waiting for a disk
      * change event, preventing the strap module from displaying the
@@ -134,6 +142,16 @@ static int amiga_init(const uint8_t *rom, size_t size)
      * Set DDRB bit 2 as output so the port read returns our PRB value. */
     amiga_cia_b.prb  = 0xFB;  /* bit 2 clear = disk changed */
     amiga_cia_b.ddrb = 0x04;  /* bit 2 output */
+    /* CIA-A keyboard: queue power-up key stream.
+     * The keyboard controller sends $FE (init) then $FD (self-test OK)
+     * via the serial data register.  keyboard.device waits for these
+     * during init.  Delay ~500ms (35000 E-clocks) to simulate
+     * keyboard boot time, then deliver the two bytes. */
+    amiga_cia_a.kbd_queue[0] = 0xFE;  /* power-up stream begin */
+    amiga_cia_a.kbd_queue[1] = 0xFD;  /* self-test passed */
+    amiga_cia_a.kbd_queue_len = 2;
+    amiga_cia_a.kbd_queue_pos = 0;
+    amiga_cia_a.kbd_countdown = 500; /* very early — data ready before init chain */
     return 0;
 }
 
@@ -439,6 +457,14 @@ void amiga_run(void)
         }
 
         /* End of frame: present. */
+        { static int fc = 0; fc++;
+          if (fc == 300) {
+            fprintf(stderr, "[INT-STATS@F%d] L1=%d L2=%d L3=%d L4=%d L5=%d L6=%d INTENA=%04X INTREQ=%04X\n",
+                    fc, int_counts[1], int_counts[2], int_counts[3],
+                    int_counts[4], int_counts[5], int_counts[6],
+                    amiga_paula.intreq, amiga_paula.adkcon);
+          }
+        }
         renderer_present(framebuffer);
     }
 

@@ -105,11 +105,24 @@ void cia_write(cia_t *c, uint8_t reg, uint8_t val)
         break;
 
     case CIA_ICR:
-        /* Bit 7 = SET(1) or CLR(0) for lower 7 bits of mask. */
+        /* Bit 7 = SET(1) or CLR(0) for lower 7 bits of mask.
+         * On real hardware, if a pending ICR data bit now matches a
+         * newly enabled mask bit, the interrupt fires immediately.
+         * We set a flag so the next cia_tick delivers it.  This is
+         * critical for keyboard init: data arrives before the mask
+         * is enabled, then keyboard.device enables the mask and the
+         * pending data triggers the interrupt retroactively. */
         if (val & 0x80u)
             c->icr_mask |=  (val & 0x7Fu);
         else
             c->icr_mask &= ~(val & 0x7Fu);
+        /* Immediate match: if any data bits now match the mask,
+         * fire the interrupt via Paula right away. */
+        if ((c->icr_data & c->icr_mask & 0x1Fu) && !(c->icr_data & CIA_ICR_IR)) {
+            c->icr_data |= CIA_ICR_IR;
+            if (c->paula)
+                paula_assert_intreq(c->paula, c->intreq_bit);
+        }
         break;
 
     case CIA_CRA:
@@ -156,6 +169,36 @@ void cia_tick(cia_t *c, int eclocks, paula_t *paula, uint16_t intreq_bit)
             c->flag_count = c->flag_period;
             c->icr_data |= CIA_ICR_FLG;
             if (c->icr_mask & CIA_ICR_FLG) {
+                c->icr_data |= CIA_ICR_IR;
+                paula_assert_intreq(paula, intreq_bit);
+            }
+        }
+    }
+
+    /* ---- Deferred ICR mask→data check ------------------------------- */
+    /* If any ICR data bits match the mask but IR hasn't been set yet,
+     * fire the interrupt now.  This handles the case where data arrives
+     * (e.g. keyboard SP) before the mask is enabled, and the mask is
+     * set later — the interrupt must fire retroactively. */
+    if ((c->icr_data & c->icr_mask & 0x1F) && !(c->icr_data & CIA_ICR_IR)) {
+        c->icr_data |= CIA_ICR_IR;
+        paula_assert_intreq(paula, intreq_bit);
+    }
+
+    /* ---- Keyboard serial simulation (CIA-A only) ------------------- */
+    /* Delivers power-up key stream ($FE init, $FD self-test OK) via
+     * SDR + SP interrupt.  keyboard.device reads SDR on the SP interrupt
+     * and recognises the self-test-OK code, completing its init.
+     * Without this, keyboard.device hangs waiting for keyboard data,
+     * blocking the entire InitResident chain. */
+    if (c->kbd_queue_pos < c->kbd_queue_len) {
+        c->kbd_countdown -= eclocks;
+        if (c->kbd_countdown <= 0) {
+            c->sdr = c->kbd_queue[c->kbd_queue_pos++];
+            c->kbd_countdown = 7000;  /* ~100ms between bytes */
+            /* Fire SP interrupt */
+            c->icr_data |= CIA_ICR_SP;
+            if (c->icr_mask & CIA_ICR_SP) {
                 c->icr_data |= CIA_ICR_IR;
                 paula_assert_intreq(paula, intreq_bit);
             }

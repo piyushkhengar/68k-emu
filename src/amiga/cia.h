@@ -97,6 +97,20 @@ typedef struct {
     int      flag_count;    /* E-clocks until next FLAG edge */
     int      flag_period;   /* reload value (0 = disabled) */
 
+    /* Keyboard simulation (CIA-A only): delivers power-up key stream
+     * ($FE = init, $FD = self-test OK) via SDR + SP interrupt.
+     * Set kbd_pending > 0 after init; cia_tick counts down and fires. */
+    int      kbd_countdown; /* E-clocks until next keyboard byte */
+    uint8_t  kbd_queue[4];  /* bytes to send (keyboard codes) */
+    int      kbd_queue_len; /* number of pending bytes */
+    int      kbd_queue_pos; /* next byte to send */
+
+    /* Back-reference to Paula + INTREQ bit for immediate ICR→IRQ firing.
+     * Set during init so cia_write can deliver interrupts without
+     * waiting for the next cia_tick. */
+    paula_t *paula;         /* NULL if not wired */
+    uint16_t intreq_bit;    /* INTREQ_PORTS for CIA-A, INTREQ_EXTER for CIA-B */
+
     /* TOD (Time of Day) counter: incremented by E-clocks in cia_tick.
      * Real hardware ticks at 50/60 Hz (VSYNC). We approximate by counting
      * E-clocks and incrementing TOD at ~50 Hz rate. */
