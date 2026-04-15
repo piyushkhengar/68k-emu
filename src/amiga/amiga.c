@@ -561,14 +561,39 @@ void amiga_run_headless(int max_frames)
                     cpu.pc = 0xFE8506;
                 }
                 } /* end if (is_ks13) */
-                /* ---- KS 2.04 workaround: fix TD_CHANGESTATE result ---- */
-                /* After strap calls DoIO(TD_CHANGESTATE), it checks io_Actual
-                 * at the IORequest+$20: 0=disk present, !0=no disk.  Our
-                 * trackdisk returns 0 ("disk present") because CIA-A /CHNG
-                 * reads as inactive.  Patch io_Actual to 1 ("no disk") so
-                 * strap takes the "insert disk" display path. */
-                if (!is_ks13 && cpu.pc == 0xFCE416) {
-                    amiga_bus_write32(cpu.a[3] + 0x20, 1); /* io_Actual = 1 */
+                /* ---- KS 2.04 workaround: strap display setup ----
+                 * Strap's display setup function is at FCE5AC, normally
+                 * called from the expansion-board polling loop at FCE368.
+                 * Without expansion boards, that loop is never entered.
+                 * The disk-check at FCE3A8 returns D0=-1 ("no disk") to
+                 * FCE326, which loops back via FCE34C without ever calling
+                 * the display setup.
+                 *
+                 * Fix: on the first "no disk" return from disk-check,
+                 * redirect to FCE366 which sets D5 and calls BSR FCE5AC
+                 * (the display setup).  D5=0 at this point (first pass). */
+                /* ---- KS 2.04 workaround: skip strap disk-check ----
+                 * The disk-check function at FCE3A8 calls OpenDevice for
+                 * trackdisk.device which blocks forever in Wait() because
+                 * our CIA timer→Paula→scheduler signal chain doesn't complete.
+                 * Skip the entire function and return D0=0 ("show display"),
+                 * which sends the caller to FCE380 → display setup path.
+                 * Also call the display setup (FCE5AC) on first pass. */
+                if (!is_ks13 && cpu.pc == 0xFCE3A8) {
+                    static int strap_dsk_gen = -1;
+                    if (strap_dsk_gen != boot_gen) {
+                        strap_dsk_gen = boot_gen;
+                        /* First call: redirect to display setup at FCE366 */
+                        cpu.d[0] = 0;
+                        cpu.pc = amiga_bus_read32(cpu.a[7]); /* pop return addr */
+                        cpu.a[7] += 4;
+                        /* Now PC = FCE326 (return site). Set D0=0 for BEQ. */
+                    } else {
+                        /* Subsequent calls: return D0=0 directly */
+                        cpu.d[0] = 0;
+                        cpu.pc = amiga_bus_read32(cpu.a[7]);
+                        cpu.a[7] += 4;
+                    }
                 }
 
                 if (trace_active) {
