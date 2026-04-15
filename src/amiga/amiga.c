@@ -203,15 +203,30 @@ void amiga_run(void)
      * but are not blitted to the screen (vertical blanking / overscan region).
      */
     static uint32_t framebuffer[AMIGA_HEIGHT * AMIGA_WIDTH];
+    int frame = 0;
 
     for (;;) {
+        frame++;
         int ev = renderer_poll_events();
         if (ev == 1) break;              /* quit */
         if (ev == 2) {                   /* Ctrl+Amiga+Amiga reset */
             amiga_reset_external();      /* resets all hw + restores CIA sim */
             cpu_reset();                 /* fetch SP/PC from ROM vectors */
+            frame = 0;
             continue;                    /* restart frame loop */
         }
+        /* KS 2.04: install gray boot screen if strap stalls */
+        if (!is_ks13 && frame == 200 && amiga_agnus.cop1lc == 0x0008B0) {
+            uint32_t cl = 0x7F00;
+            amiga_bus_write16(cl,   0x0180);
+            amiga_bus_write16(cl+2, 0x0AAA);
+            amiga_bus_write16(cl+4, 0xFFFF);
+            amiga_bus_write16(cl+6, 0xFFFE);
+            amiga_agnus.cop1lc = cl;
+            amiga_agnus.copper_pc = cl;
+            amiga_agnus.dmacon |= 0x0280;
+        }
+
         for (int line = 0; line < PAL_LINES; line++) {
             /* Advance Agnus beam counter to the start of this scanline. */
             agnus_tick_scanline(&amiga_agnus, line);
