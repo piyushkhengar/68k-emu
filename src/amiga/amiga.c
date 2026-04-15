@@ -233,17 +233,37 @@ void amiga_run(void)
                     if (eb >= 0x20 && eb < 0x80000)
                         amiga_bus_write8(eb + 0x124, 0x00);
                 }
+                /* Track Draw bounding box for Flood containment.
+                 * The strap's polygons have intentional openings (disk label
+                 * slot).  We constrain our flood fill to the bounding box
+                 * of the preceding Draw calls so it can't leak outside. */
+                { static int bbox_x0 = 9999, bbox_y0 = 9999;
+                  static int bbox_x1 = -1, bbox_y1 = -1;
+                  /* Move resets the bounding box */
+                  if (cpu.pc == 0xFE88DC) {
+                      bbox_x0 = bbox_y0 = 9999;
+                      bbox_x1 = bbox_y1 = -1;
+                  }
+                  /* Draw extends the bounding box */
+                  if (cpu.pc == 0xFE8918) {
+                      int dx = cpu.d[0], dy = cpu.d[1];
+                      if (dx < bbox_x0) bbox_x0 = dx;
+                      if (dx > bbox_x1) bbox_x1 = dx;
+                      if (dy < bbox_y0) bbox_y0 = dy;
+                      if (dy > bbox_y1) bbox_y1 = dy;
+                  }
+
                 /* Workaround: ROM Flood() doesn't work on a bare RastPort
                  * (no Layer). The NULL-Layer path in graphics.library
                  * skips scan-stack initialization, so the fill loop does
-                 * nothing. Intercept the JSR Flood at FE8904 and perform
-                 * a simple C scan-line flood fill directly on the bitmap. */
+                 * nothing. Intercept JSR Flood and do a C scan-line fill
+                 * constrained to the polygon's bounding box. */
                 if (cpu.pc == 0xFE8904) {
                     uint32_t rp = cpu.a[1];
                     uint32_t bm = amiga_bus_read32(rp + 4);
                     int apen = amiga_bus_read8(rp + 0x19);
                     int sx = cpu.d[0], sy = cpu.d[1];
-                    if (bm) {
+                    if (bm && bbox_x1 >= 0) {
                         int bpr = amiga_bus_read16(bm);
                         int depth = amiga_bus_read8(bm + 5);
                         int rows = amiga_bus_read16(bm + 2);
@@ -251,7 +271,6 @@ void amiga_run(void)
                         for (int p = 0; p < depth && p < 6; p++)
                             planes[p] = amiga_bus_read32(bm + 8 + p * 4);
 
-                        /* Read pixel color from all planes */
                         #define FREAD_PX(x,y) ({ \
                             int _c = 0; \
                             int _bo = (y)*bpr + (x)/8; \
@@ -269,66 +288,59 @@ void amiga_run(void)
                                 amiga_bus_write8(planes[_p]+_bo, _v); \
                             } } while(0)
 
+                        /* Clamp bounding box to bitmap */
+                        int bx0 = bbox_x0 < 0 ? 0 : bbox_x0;
+                        int by0 = bbox_y0 < 0 ? 0 : bbox_y0;
+                        int bx1 = bbox_x1 >= bpr*8 ? bpr*8-1 : bbox_x1;
+                        int by1 = bbox_y1 >= rows ? rows-1 : bbox_y1;
+
                         int seed_color = FREAD_PX(sx, sy);
-                        if (seed_color != apen && sx >= 0 && sy >= 0 &&
-                            sx < bpr * 8 && sy < rows) {
-                            /* Scan-line flood fill with pixel count limit.
-                             * The strap's polygons have intentional openings
-                             * (e.g. the disk label slot).  Limit fill to
-                             * prevent leaking into the background. */
-                            static int16_t stack[4096][2];
+                        if (seed_color != apen &&
+                            sx >= bx0 && sx <= bx1 && sy >= by0 && sy <= by1) {
+                            /* Scan-line flood fill bounded by polygon bbox */
+                            static int16_t stack[8192][2];
                             int sp_top = 0;
                             stack[sp_top][0] = (int16_t)sx;
                             stack[sp_top][1] = (int16_t)sy;
                             sp_top++;
-                            int width = bpr * 8;
-                            int px_count = 0;
-                            int px_limit = 12000;  /* ~60% of 200-line bitmap */
 
-                            while (sp_top > 0 && sp_top < 4090 && px_count < px_limit) {
+                            while (sp_top > 0 && sp_top < 8180) {
                                 sp_top--;
                                 int cx = stack[sp_top][0];
                                 int cy = stack[sp_top][1];
-                                if (cx < 0 || cx >= width || cy < 0 || cy >= rows)
+                                if (cx < bx0 || cx > bx1 || cy < by0 || cy > by1)
                                     continue;
                                 if (FREAD_PX(cx, cy) != seed_color)
                                     continue;
-                                /* Scan left */
+                                /* Scan left within bbox */
                                 int lx = cx;
-                                while (lx > 0 && FREAD_PX(lx - 1, cy) == seed_color)
+                                while (lx > bx0 && FREAD_PX(lx - 1, cy) == seed_color)
                                     lx--;
-                                /* Scan right */
+                                /* Scan right within bbox */
                                 int rx = cx;
-                                while (rx < width - 1 && FREAD_PX(rx + 1, cy) == seed_color)
+                                while (rx < bx1 && FREAD_PX(rx + 1, cy) == seed_color)
                                     rx++;
-                                /* Fill the span and push neighbors */
+                                /* Fill span and push neighbors */
                                 int above = 0, below = 0;
                                 for (int x = lx; x <= rx; x++) {
                                     FWRITE_PX(x, cy, apen);
-                                    px_count++;
-                                    /* Check row above */
-                                    if (cy > 0) {
+                                    if (cy > by0) {
                                         int c = FREAD_PX(x, cy - 1);
                                         if (c == seed_color && !above) {
                                             stack[sp_top][0] = (int16_t)x;
                                             stack[sp_top][1] = (int16_t)(cy - 1);
                                             sp_top++;
                                             above = 1;
-                                        } else if (c != seed_color) {
-                                            above = 0;
-                                        }
+                                        } else if (c != seed_color) above = 0;
                                     }
-                                    /* Check row below */
-                                    if (cy < rows - 1) {
+                                    if (cy < by1) {
                                         int c = FREAD_PX(x, cy + 1);
                                         if (c == seed_color && !below) {
                                             stack[sp_top][0] = (int16_t)x;
                                             stack[sp_top][1] = (int16_t)(cy + 1);
                                             sp_top++;
                                             below = 1;
-                                        } else if (c != seed_color) {
-                                            below = 0;
-                                        }
+                                        } else if (c != seed_color) below = 0;
                                     }
                                 }
                             }
@@ -336,8 +348,8 @@ void amiga_run(void)
                         #undef FREAD_PX
                         #undef FWRITE_PX
                     }
-                    /* Skip the JSR Flood: 4 bytes (4EAE + displacement) */
-                    cpu.pc = 0xFE8908;
+                    cpu.pc = 0xFE8908; /* skip JSR Flood */
+                }
                 }
                 /* Workaround: strap's display_setup WaitTOF + LoadView.
                  *
