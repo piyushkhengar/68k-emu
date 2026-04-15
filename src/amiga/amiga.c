@@ -82,6 +82,36 @@ static void amiga_int_ack(int level)
  * After RESET, Kickstart reads the vector table from ROM (via OVL) and
  * uses it for the warm-start JMP ($4).W sequence.
  */
+/* Boot generation counter — incremented on every reset so that one-shot
+ * workarounds (ds_fix_done, etc.) re-arm for the new boot cycle. */
+static int boot_gen;
+
+/*
+ * Restore CIA simulation parameters that cia_reset() zeroes.
+ * Called after every hardware reset so that keyboard init, disk
+ * signals, and the CIA→Paula interrupt wiring survive warm boots.
+ */
+static void cia_restore_simulation(void)
+{
+    /* Wire CIA→Paula references so ICR writes can immediately fire IRQs. */
+    amiga_cia_a.paula = &amiga_paula;
+    amiga_cia_a.intreq_bit = INTREQ_PORTS;
+    amiga_cia_b.paula = &amiga_paula;
+    amiga_cia_b.intreq_bit = INTREQ_EXTER;
+    /* CIA-B FLAG pin: simulate periodic disk-index/ready signal. */
+    amiga_cia_b.flag_period = 14000;
+    amiga_cia_b.flag_count  = 14000;
+    /* CIA-B PRB: disk signals for "no disk present". */
+    amiga_cia_b.prb  = 0xFB;
+    amiga_cia_b.ddrb = 0x04;
+    /* CIA-A keyboard: queue power-up key stream ($FE init, $FD self-test). */
+    amiga_cia_a.kbd_queue[0] = 0xFE;
+    amiga_cia_a.kbd_queue[1] = 0xFD;
+    amiga_cia_a.kbd_queue_len = 2;
+    amiga_cia_a.kbd_queue_pos = 0;
+    amiga_cia_a.kbd_countdown = 500;
+}
+
 static void amiga_reset_external(void)
 {
     paula_reset(&amiga_paula);
@@ -89,6 +119,8 @@ static void amiga_reset_external(void)
     cia_reset(&amiga_cia_b);
     agnus_reset(&amiga_agnus);
     denise_reset(&amiga_denise);
+    cia_restore_simulation();
+    boot_gen++;                  /* re-arm one-shot workarounds */
     /* CIA-A reset clears DDRA/PRA → pin 0 = input → pull-up → OVL active */
     amiga_bus_set_ovl(true);
     /* Clear the 'HELP' watchdog magic at $0.  Kickstart writes 'HELP' to
@@ -125,34 +157,7 @@ static int amiga_init(const uint8_t *rom, size_t size)
     /* Set callbacks AFTER cpu_init (which clears them). */
     cpu_set_int_ack(amiga_int_ack);
     cpu_set_reset_cb(amiga_reset_external);
-    /* Wire CIA→Paula references so ICR writes can immediately fire IRQs. */
-    amiga_cia_a.paula = &amiga_paula;
-    amiga_cia_a.intreq_bit = INTREQ_PORTS;
-    amiga_cia_b.paula = &amiga_paula;
-    amiga_cia_b.intreq_bit = INTREQ_EXTER;
-    /* CIA-B FLAG pin: simulate periodic disk-index/ready signal.
-     * Without this, trackdisk.device polls forever waiting for a disk
-     * change event, preventing the strap module from displaying the
-     * "insert disk" hand animation.  Period ~200ms in E-clocks. */
-    amiga_cia_b.flag_period = 14000;
-    amiga_cia_b.flag_count  = 14000;
-    /* CIA-B PRB: set disk signals for "no disk present".
-     * Bit 5 (DSKRDY)   = 1 → not ready (no disk)
-     * Bit 2 (DSKCHANGE) = 0 → disk has been removed/changed
-     * All other bits default high (no disk in any drive).
-     * Set DDRB bit 2 as output so the port read returns our PRB value. */
-    amiga_cia_b.prb  = 0xFB;  /* bit 2 clear = disk changed */
-    amiga_cia_b.ddrb = 0x04;  /* bit 2 output */
-    /* CIA-A keyboard: queue power-up key stream.
-     * The keyboard controller sends $FE (init) then $FD (self-test OK)
-     * via the serial data register.  keyboard.device waits for these
-     * during init.  Delay ~500ms (35000 E-clocks) to simulate
-     * keyboard boot time, then deliver the two bytes. */
-    amiga_cia_a.kbd_queue[0] = 0xFE;  /* power-up stream begin */
-    amiga_cia_a.kbd_queue[1] = 0xFD;  /* self-test passed */
-    amiga_cia_a.kbd_queue_len = 2;
-    amiga_cia_a.kbd_queue_pos = 0;
-    amiga_cia_a.kbd_countdown = 500; /* very early — data ready before init chain */
+    cia_restore_simulation();
     return 0;
 }
 
@@ -190,11 +195,8 @@ void amiga_run(void)
         int ev = renderer_poll_events();
         if (ev == 1) break;              /* quit */
         if (ev == 2) {                   /* Ctrl+Amiga+Amiga reset */
-            amiga_reset_external();
-            cpu_reset();
-            /* Re-queue keyboard power-up bytes for the new boot. */
-            amiga_cia_a.kbd_queue_pos = 0;
-            amiga_cia_a.kbd_countdown = 500;
+            amiga_reset_external();      /* resets all hw + restores CIA sim */
+            cpu_reset();                 /* fetch SP/PC from ROM vectors */
             continue;                    /* restart frame loop */
         }
         for (int line = 0; line < PAL_LINES; line++) {
@@ -264,8 +266,13 @@ void amiga_run(void)
                  * The strap's polygons have intentional openings (disk label
                  * slot).  We constrain our flood fill to the bounding box
                  * of the preceding Draw calls so it can't leak outside. */
-                { static int bbox_x0 = 9999, bbox_y0 = 9999;
-                  static int bbox_x1 = -1, bbox_y1 = -1;
+                { static int bbox_x0, bbox_y0, bbox_x1, bbox_y1;
+                  static int bbox_gen = -1;
+                  if (bbox_gen != boot_gen) {
+                      bbox_x0 = 9999; bbox_y0 = 9999;
+                      bbox_x1 = -1;   bbox_y1 = -1;
+                      bbox_gen = boot_gen;
+                  }
                   /* Move and Draw both extend the bounding box */
                   if (cpu.pc == 0xFE88DC || cpu.pc == 0xFE8918) {
                       int dx = cpu.d[0], dy = cpu.d[1];
@@ -393,8 +400,8 @@ void amiga_run(void)
                  * Fix: at the WaitTOF call site (FE897A), read the View's
                  * LOFCprList→start and force COP1LC to it.  Skip WaitTOF. */
                 if (cpu.pc == 0xFE897A) {
-                    static int ds_fix_done = 0;
-                    if (!ds_fix_done) {
+                    static int ds_fix_gen = -1;
+                    if (ds_fix_gen != boot_gen) {
                         uint32_t view = 0x3AF8;
                         uint32_t lofcpr = amiga_bus_read32(view + 4);
                         if (lofcpr) {
@@ -403,7 +410,7 @@ void amiga_run(void)
                                 amiga_agnus.cop1lc = cop_start;
                                 amiga_agnus.copper_pc = cop_start;
                                 amiga_agnus.dmacon |= 0x0100u; /* BPLEN */
-                                ds_fix_done = 1;
+                                ds_fix_gen = boot_gen;
                             }
                         }
                         cpu.pc = 0xFE897E; /* skip WaitTOF JSR (4 bytes) */
