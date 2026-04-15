@@ -233,6 +233,16 @@ void amiga_run(void)
                     if (eb >= 0x20 && eb < 0x80000)
                         amiga_bus_write8(eb + 0x124, 0x00);
                 }
+                /* Generic boot diagnostic: trace ALL Supervisor calls */
+                if (cpu.pc == 0xF80AD2 || cpu.pc == 0xFC0AD2) {
+                    static int vd = 0;
+                    if (vd < 20) {
+                        vd++;
+                        fprintf(stderr, "[SUPER#%d] PC=%06X SR=%04X A5=%08X user=%d\n",
+                                vd, cpu.pc, cpu.sr, cpu.a[5],
+                                (cpu.sr & 0x2000) ? 0 : 1);
+                    }
+                }
                 /* Track Draw bounding box for Flood containment.
                  * The strap's polygons have intentional openings (disk label
                  * slot).  We constrain our flood fill to the bounding box
