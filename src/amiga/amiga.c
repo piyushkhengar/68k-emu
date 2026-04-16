@@ -466,6 +466,20 @@ void amiga_run(void)
                     cpu.d[0] = 0; cpu.pc += 4;  /* DoIO "success" with empty buffer */
                 }
                 } /* end if (is_ks13) */
+                /* ---- KS 2.04 workarounds ---- */
+                if (!is_ks13) {
+                    /* Skip strap disk-check (blocks in trackdisk OpenDevice) */
+                    if (cpu.pc == 0xFCE3A8) {
+                        cpu.d[0] = 0xFFFFFFFF;
+                        cpu.pc = amiga_bus_read32(cpu.a[7]);
+                        cpu.a[7] += 4;
+                    }
+                    /* Block ColdReboot (strap "no disk" timeout) */
+                    if (cpu.pc == 0xF80CD8) {
+                        cpu.sr = (cpu.sr & 0xFF00) | 0x2000;
+                        cpu.halted = 1;
+                    }
+                }
                 int c = cpu_step();
                 if (c == 0) {
                     cycles = CPU_CYCLES_PER_LINE;  /* CPU halted */
