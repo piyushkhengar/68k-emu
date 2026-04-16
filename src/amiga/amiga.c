@@ -221,14 +221,8 @@ void amiga_run(void)
             int p = 0;
             #define CW(r,v) do { amiga_bus_write16(cl+p,(r)); p+=2; \
                                  amiga_bus_write16(cl+p,(v)); p+=2; } while(0)
-            CW(0x0100, 0x0200);  /* BPLCON0: COLOR */
-            CW(0x0180, 0x0AAA);  /* COLOR00 = gray */
-            CW(0x0182, 0x0000);  /* COLOR01 = black */
-            CW(0x0184, 0x0FFF);  /* COLOR02 = white */
-            CW(0x0186, 0x068B);  /* COLOR03 = blue */
-            CW(0x01A2, 0x0E50);  /* COLOR17 = orange */
-            CW(0x01A4, 0x0000);  /* COLOR18 = black */
-            CW(0x01A6, 0x0FFF);  /* COLOR19 = white */
+            CW(0x0100, 0x0200); CW(0x0180, 0x0AAA); CW(0x0182, 0x0000);
+            CW(0x0184, 0x0FFF); CW(0x0186, 0x068B);
             amiga_bus_write16(cl + p, 0xFFFF);
             amiga_bus_write16(cl + p + 2, 0xFFFE);
             #undef CW
@@ -605,10 +599,11 @@ void amiga_run_headless(int max_frames)
                  * which sends the caller to FCE380 → display setup path.
                  * Also call the display setup (FCE5AC) on first pass. */
                 /* ---- KS 2.04: skip strap's disk-check ----
-                 * Strap's disk-check (FCE3A8) blocks in trackdisk OpenDevice
-                 * because the timer signal chain can't deliver the motor
-                 * timeout.  Skip the function, returning D0=-1 ("no disk").
-                 * The display is set up by a Copper list at frame start. */
+                 * Strap's disk-check (FCE3A8) blocks in trackdisk's
+                 * OpenDevice because timer.device's VBLANK-based timer
+                 * requests never complete (root cause still under
+                 * investigation — VERTB server fires, counter works,
+                 * but request processing at FCF8BA doesn't signal tasks). */
                 if (!is_ks13 && cpu.pc == 0xFCE3A8) {
                     cpu.d[0] = 0xFFFFFFFF;
                     cpu.pc = amiga_bus_read32(cpu.a[7]);

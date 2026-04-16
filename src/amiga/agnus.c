@@ -59,8 +59,13 @@ uint16_t agnus_read_reg(const agnus_t *ag, uint16_t offset)
                   * Our blitter executes synchronously so it's always idle. */
         return (uint16_t)(ag->dmacon & (uint16_t)~0x4000u);
 
-    case 0x004:  /* VPOSR — bit 0 = line[8] */
-        return (uint16_t)((ag->line >> 8) & 1u);
+    case 0x004:  /* VPOSR — beam position high + Agnus ID.
+                  * Bit 15:    LOF (Long Frame — toggled each field for interlace;
+                  *            set to 1 for non-interlaced PAL long frame)
+                  * Bits 14-8: Agnus ID — 0x20 = ECS PAL (A500+)
+                  * Bit 0:     line bit 8 (V8) */
+        return (uint16_t)(0xA000u | ((ag->line >> 8) & 1u));
+        /* 0xA000 = LOF(1) + Agnus ID 0x20 (ECS PAL) */
 
     case 0x006:  /* VHPOSR — bits 15:8 = line[7:0], bits 7:0 = hpos */
         return (uint16_t)(((ag->line & 0xFFu) << 8) | (ag->hpos & 0xFFu));
