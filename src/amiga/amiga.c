@@ -128,8 +128,19 @@ static void cia_restore_simulation(void)
     amiga_cia_a.kbd_countdown = 500;
 }
 
+/* Track whether the initial boot has completed (all modules init'd).
+ * After that, any RESET instruction is a ColdReboot from strap's
+ * "no disk" timeout — block it to prevent boot-looping. */
+static int boot_complete;
+
 static void amiga_reset_external(void)
 {
+    if (boot_complete) {
+        /* Block post-boot resets (KS 2.04 strap timeout ColdReboot).
+         * Halt the CPU instead of resetting hardware. */
+        cpu.halted = 1;
+        return;
+    }
     paula_reset(&amiga_paula);
     cia_reset(&amiga_cia_a);
     cia_reset(&amiga_cia_b);
@@ -169,6 +180,7 @@ static int amiga_init(const uint8_t *rom, size_t size)
      * interrupt dispatcher (FC0FE2) which pushes 68000-style 6-byte
      * frames — causing Format Error (vector 14) on every RTE.
      */
+    boot_complete = 0;
     cpu_init(CPU_MODEL_68000);
     /* Set callbacks AFTER cpu_init (which clears them). */
     cpu_set_int_ack(amiga_int_ack);
@@ -213,6 +225,7 @@ void amiga_run(void)
         int ev = renderer_poll_events();
         if (ev == 1) break;              /* quit */
         if (ev == 2) {                   /* Ctrl+Amiga+Amiga reset */
+            boot_complete = 0;           /* allow resets during fresh boot */
             amiga_reset_external();      /* resets all hw + restores CIA sim */
             cpu_reset();                 /* fetch SP/PC from ROM vectors */
             frame = 0;
@@ -470,15 +483,10 @@ void amiga_run(void)
                 if (!is_ks13) {
                     /* Skip strap disk-check (blocks in trackdisk OpenDevice) */
                     if (cpu.pc == 0xFCE3A8) {
+                        boot_complete = 1; /* mark boot done → block future RESETs */
                         cpu.d[0] = 0xFFFFFFFF;
                         cpu.pc = amiga_bus_read32(cpu.a[7]);
                         cpu.a[7] += 4;
-                    }
-                    /* Block ColdReboot (strap "no disk" timeout).
-                     * The reboot sequence is F80CD8 (RESET) → F800D0 (RESET).
-                     * Block both to prevent any reboot path. */
-                    if (cpu.pc == 0xF80CD8 || cpu.pc == 0xF800D0) {
-                        cpu.halted = 1;
                     }
                 }
                 int c = cpu_step();
@@ -626,17 +634,12 @@ void amiga_run_headless(int max_frames)
                  * Fix: on the first pass through FCE216, force Z=1 so the
                  * BEQ is taken regardless.  This enters the display path
                  * at FCE35A which calls FCE5AC (OpenScreen + animation). */
-                /* ---- KS 2.04: skip disk-check + prevent reboot ----
-                 * Skip strap's disk-check (returns D0=-1, "no disk").
-                 * Also block ColdReboot at F80CD8 which strap calls
-                 * after the "no disk found" timeout (~6 seconds). */
+                /* ---- KS 2.04: skip disk-check ---- */
                 if (!is_ks13 && cpu.pc == 0xFCE3A8) {
+                    boot_complete = 1;
                     cpu.d[0] = 0xFFFFFFFF;
                     cpu.pc = amiga_bus_read32(cpu.a[7]);
                     cpu.a[7] += 4;
-                }
-                if (!is_ks13 && (cpu.pc == 0xF80CD8 || cpu.pc == 0xF800D0)) {
-                    cpu.halted = 1;
                 }
 
                 if (trace_active) {
