@@ -477,7 +477,7 @@ void amiga_run(void)
                     /* Block ColdReboot (strap "no disk" timeout).
                      * The reboot sequence is F80CD8 (RESET) → F800D0 (RESET).
                      * Block both to prevent any reboot path. */
-                    if (cpu.pc == 0xF80CD8 || cpu.pc == 0xF80CD0) {
+                    if (cpu.pc == 0xF80CD8 || cpu.pc == 0xF800D0) {
                         cpu.halted = 1;
                     }
                 }
@@ -635,7 +635,7 @@ void amiga_run_headless(int max_frames)
                     cpu.pc = amiga_bus_read32(cpu.a[7]);
                     cpu.a[7] += 4;
                 }
-                if (!is_ks13 && (cpu.pc == 0xF80CD8 || cpu.pc == 0xF80CD0)) {
+                if (!is_ks13 && (cpu.pc == 0xF80CD8 || cpu.pc == 0xF800D0)) {
                     cpu.halted = 1;
                 }
 
