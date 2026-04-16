@@ -255,6 +255,13 @@ uint8_t amiga_bus_read8(uint32_t addr)
         return (addr & 1u) ? (uint8_t)(val & 0xFFu) : (uint8_t)(val >> 8);
     }
 
+    /* Autoconfig space: 0xE80000–0xE8FFFF.
+     * On real hardware, reading autoconfig when no board is present
+     * returns 0x00 (active-low signals, accent accent lines not driven).
+     * Returning 0xFF would look like a valid board to expansion.library. */
+    if (addr >= 0xE80000u && addr < 0xE90000u)
+        return 0x00;
+
     /* Open bus gap: 0xE00000–0xF7FFFF */
     if (addr < 0xF80000u)
         return 0xFF;

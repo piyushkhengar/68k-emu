@@ -585,7 +585,50 @@ void amiga_run_headless(int max_frames)
                  * Skip the entire function and return D0=0 ("show display"),
                  * which sends the caller to FCE380 → display setup path.
                  * Also call the display setup (FCE5AC) on first pass. */
-                /* No KS 2.04 workarounds — timer chain works with VPOSR fix */
+                /* ---- KS 2.04: force strap into display path ----
+                 * The strap main loop at FCE216 has BEQ.W $FCE35A which
+                 * enters the display setup path when the ConfigDev list is
+                 * exhausted.  The loop only runs ONCE because trackdisk's
+                 * OpenDevice blocks at the disk-check (FCE322), preventing
+                 * the second iteration where the list IS exhausted.
+                 *
+                 * Fix: on the first pass through FCE216, force Z=1 so the
+                 * BEQ is taken regardless.  This enters the display path
+                 * at FCE35A which calls FCE5AC (OpenScreen + animation). */
+                /* ---- KS 2.04: force strap display setup ----
+                 * The display setup at FCE5AC needs A6=Intuition base.
+                 * FCE204 is in the strap main loop, first pass.
+                 * Find Intuition base from exec library list, set A6,
+                 * then call FCE5AC directly. */
+                if (!is_ks13 && cpu.pc == 0xFCE204) {
+                    static int f204_gen = -1;
+                    if (f204_gen != boot_gen) {
+                        f204_gen = boot_gen;
+                        /* Find intuition.library in exec's LibList at EB+$17A */
+                        uint32_t eb = amiga_bus_read32(4);
+                        uint32_t node = amiga_bus_read32(eb + 0x17A);
+                        uint32_t intuition = 0;
+                        for (int i = 0; i < 30 && node > 0x20 && node < 0x80000; i++) {
+                            uint32_t succ = amiga_bus_read32(node);
+                            uint32_t name = amiga_bus_read32(node + 10);
+                            if (name > 0x20 && name < 0x100000) {
+                                /* Check first 4 chars for "intu" */
+                                uint32_t w = amiga_bus_read32(name);
+                                if (w == 0x696E7475) { /* "intu" */
+                                    intuition = node;
+                                    break;
+                                }
+                            }
+                            if (succ == 0 || succ == node) break;
+                            node = succ;
+                        }
+                        if (intuition) {
+                            cpu.a[6] = intuition;  /* A6 = Intuition base */
+                            cpu.d[5] = 0;          /* first-time flag */
+                            cpu.pc = 0xFCE5AC;     /* jump to display setup */
+                        }
+                    }
+                }
 
                 if (trace_active) {
                     bt_total_steps++;
