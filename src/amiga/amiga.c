@@ -611,13 +611,21 @@ void amiga_run_headless(int max_frames)
                  * Fix: on the first pass through FCE216, force Z=1 so the
                  * BEQ is taken regardless.  This enters the display path
                  * at FCE35A which calls FCE5AC (OpenScreen + animation). */
-                /* ---- KS 2.04: skip strap's disk-check ----
-                 * Strap's disk-check blocks in trackdisk OpenDevice.
-                 * The display is set up by a Copper list at frame start. */
+                /* ---- KS 2.04: skip disk-check + prevent reboot ----
+                 * Skip strap's disk-check (returns D0=-1, "no disk").
+                 * Also block ColdReboot at F80CD8 which strap calls
+                 * after the "no disk found" timeout (~6 seconds). */
                 if (!is_ks13 && cpu.pc == 0xFCE3A8) {
                     cpu.d[0] = 0xFFFFFFFF;
                     cpu.pc = amiga_bus_read32(cpu.a[7]);
                     cpu.a[7] += 4;
+                }
+                if (!is_ks13 && cpu.pc == 0xF80CD8) {
+                    /* Block ColdReboot — enter STOP instead.
+                     * The system stays in the idle loop with the gray
+                     * boot display until the user presses Ctrl+Amiga+Amiga. */
+                    cpu.sr = (cpu.sr & 0xFF00) | 0x2000;
+                    cpu.halted = 1;
                 }
 
                 if (trace_active) {
