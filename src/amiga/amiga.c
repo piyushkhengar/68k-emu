@@ -219,7 +219,7 @@ void amiga_run(void)
             continue;                    /* restart frame loop */
         }
         /* KS 2.04: install boot display when strap stalls */
-        if (!is_ks13 && frame == 200 && amiga_agnus.cop1lc <= 0x0008B0) {
+        if (!is_ks13 && frame == 150 && amiga_agnus.cop1lc <= 0x0008B0) {
             uint32_t cl = 0x7F00;
             int p = 0;
             #define CW(r,v) do { amiga_bus_write16(cl+p,(r)); p+=2; \
@@ -474,9 +474,10 @@ void amiga_run(void)
                         cpu.pc = amiga_bus_read32(cpu.a[7]);
                         cpu.a[7] += 4;
                     }
-                    /* Block ColdReboot (strap "no disk" timeout) */
-                    if (cpu.pc == 0xF80CD8) {
-                        cpu.sr = (cpu.sr & 0xFF00) | 0x2000;
+                    /* Block ColdReboot (strap "no disk" timeout).
+                     * The reboot sequence is F80CD8 (RESET) → F800D0 (RESET).
+                     * Block both to prevent any reboot path. */
+                    if (cpu.pc == 0xF80CD8 || cpu.pc == 0xF80CD0) {
                         cpu.halted = 1;
                     }
                 }
@@ -634,11 +635,7 @@ void amiga_run_headless(int max_frames)
                     cpu.pc = amiga_bus_read32(cpu.a[7]);
                     cpu.a[7] += 4;
                 }
-                if (!is_ks13 && cpu.pc == 0xF80CD8) {
-                    /* Block ColdReboot — enter STOP instead.
-                     * The system stays in the idle loop with the gray
-                     * boot display until the user presses Ctrl+Amiga+Amiga. */
-                    cpu.sr = (cpu.sr & 0xFF00) | 0x2000;
+                if (!is_ks13 && (cpu.pc == 0xF80CD8 || cpu.pc == 0xF80CD0)) {
                     cpu.halted = 1;
                 }
 
