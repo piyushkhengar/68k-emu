@@ -126,7 +126,7 @@ uint16_t paula_read_reg(const paula_t *p, uint16_t offset)
         return 0x7FFD;
 
     case 0x01C: return p->intreq;   /* INTENAR (p->intreq = enable mask) */
-    case 0x01E: return p->adkcon;  /* INTREQR (p->adkcon = request bits) */
+    case 0x01E: return p->adkcon;  /* INTREQR */
     default:    return 0;
     }
 }

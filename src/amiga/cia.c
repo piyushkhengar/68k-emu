@@ -5,6 +5,7 @@
 
 #include "cia.h"
 #include <string.h>
+#include <stdio.h>
 
 /* ------------------------------------------------------------------ */
 /*  Lifecycle                                                           */
@@ -152,12 +153,22 @@ void cia_write(cia_t *c, uint8_t reg, uint8_t val)
         }
         break;
 
-    case CIA_CRA:
+    case CIA_CRA: {
         /* LOAD bit is a strobe: immediately copy latch → counter. */
         if (val & CIA_CR_LOAD)
             c->ta_cnt = c->ta_latch;
+        uint8_t old = c->cra;
         c->cra = val & (uint8_t)~CIA_CR_LOAD;
+        /* Debug: trace START bit changes */
+        if ((old ^ c->cra) & CIA_CR_START) {
+            static int cra_trace = 0;
+            if (cra_trace++ < 10)
+                fprintf(stderr, "[CIA-%c CRA] %02X→%02X START=%d latch=%04X cnt=%04X\n",
+                        c->intreq_bit == 0x0008u ? 'A' : 'B',
+                        old, c->cra, c->cra & 1, c->ta_latch, c->ta_cnt);
+        }
         break;
+    }
 
     case CIA_CRB:
         if (val & CIA_CR_LOAD)
