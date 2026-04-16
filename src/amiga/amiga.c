@@ -215,22 +215,6 @@ void amiga_run(void)
             frame = 0;
             continue;                    /* restart frame loop */
         }
-        /* KS 2.04: install boot display when strap stalls */
-        if (!is_ks13 && frame == 200 && amiga_agnus.cop1lc <= 0x0008B0) {
-            uint32_t cl = 0x7F00;
-            int p = 0;
-            #define CW(r,v) do { amiga_bus_write16(cl+p,(r)); p+=2; \
-                                 amiga_bus_write16(cl+p,(v)); p+=2; } while(0)
-            CW(0x0100, 0x0200); CW(0x0180, 0x0AAA); CW(0x0182, 0x0000);
-            CW(0x0184, 0x0FFF); CW(0x0186, 0x068B);
-            amiga_bus_write16(cl + p, 0xFFFF);
-            amiga_bus_write16(cl + p + 2, 0xFFFE);
-            #undef CW
-            amiga_agnus.cop1lc = cl;
-            amiga_agnus.copper_pc = cl;
-            amiga_agnus.dmacon |= 0x0280;
-        }
-
         for (int line = 0; line < PAL_LINES; line++) {
             /* Advance Agnus beam counter to the start of this scanline. */
             agnus_tick_scanline(&amiga_agnus, line);
@@ -598,17 +582,7 @@ void amiga_run_headless(int max_frames)
                  * Skip the entire function and return D0=0 ("show display"),
                  * which sends the caller to FCE380 → display setup path.
                  * Also call the display setup (FCE5AC) on first pass. */
-                /* ---- KS 2.04: skip strap's disk-check ----
-                 * Strap's disk-check (FCE3A8) blocks in trackdisk's
-                 * OpenDevice because timer.device's VBLANK-based timer
-                 * requests never complete (root cause still under
-                 * investigation — VERTB server fires, counter works,
-                 * but request processing at FCF8BA doesn't signal tasks). */
-                if (!is_ks13 && cpu.pc == 0xFCE3A8) {
-                    cpu.d[0] = 0xFFFFFFFF;
-                    cpu.pc = amiga_bus_read32(cpu.a[7]);
-                    cpu.a[7] += 4;
-                }
+                /* No KS 2.04 workarounds — timer chain works with VPOSR fix */
 
                 if (trace_active) {
                     bt_total_steps++;
