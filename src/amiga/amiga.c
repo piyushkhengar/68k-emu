@@ -116,7 +116,10 @@ static void cia_restore_simulation(void)
      * /CHNG=1 tells trackdisk "disk hasn't changed" which avoids the
      * drive-init sequence that blocks in Wait().  Strap detects "no disk"
      * via a separate workaround on the TD_CHANGESTATE result. */
-    amiga_cia_a.pra_input = 0xFF;  /* all inactive (default) */
+    /* CIA-A PRA bit 2 (/CHNG) = 0 means "disk changed / no disk."
+     * With the VPOSR fix, timer.device works correctly, so trackdisk's
+     * motor spin-up timeout completes and OpenDevice doesn't block. */
+    amiga_cia_a.pra_input = 0xFB;  /* bit 2 clear = /CHNG active (no disk) */
     /* CIA-A keyboard: queue power-up key stream ($FE init, $FD self-test). */
     amiga_cia_a.kbd_queue[0] = 0xFE;
     amiga_cia_a.kbd_queue[1] = 0xFD;
