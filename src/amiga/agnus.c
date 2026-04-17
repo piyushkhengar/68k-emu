@@ -118,6 +118,8 @@ void agnus_write_reg(agnus_t *ag, uint16_t offset, uint16_t val)
     /* ---- Bitplane DMA control -------------------------------------- */
     case 0x092: ag->ddfstrt = val & 0xFCu; break;   /* DDFSTRT */
     case 0x094: ag->ddfstop = val & 0xFCu; break;   /* DDFSTOP */
+    case 0x08E: ag->diwstrt = val; break;              /* DIWSTRT */
+    case 0x090: ag->diwstop = val; break;              /* DIWSTOP */
     case 0x108: ag->bpl1mod = (int16_t)val; break;   /* BPL1MOD */
     case 0x10A: ag->bpl2mod = (int16_t)val; break;   /* BPL2MOD */
 

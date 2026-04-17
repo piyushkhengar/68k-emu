@@ -20,7 +20,10 @@
  *     0x180–0x1BE  COLOR00–31 readable for Copper MOVE verification
  *
  * Pixel pipeline (denise_render_line):
- *   For each pixel 0–319:
+ *   Output is always 640 pixels (DENISE_HIRES_W):
+ *     HIRES: 640 source pixels → 640 output pixels (1:1)
+ *     LORES: 320 source pixels → 640 output pixels (each doubled)
+ *   For each source pixel:
  *     1. word index  = px / 16
  *     2. bit position = 15 − (px % 16)        ← MSB is the leftmost pixel
  *     3. For each active plane n: sample bit from chip_ram[bplpt[n] + word*2]
@@ -37,7 +40,8 @@
 
 #include <stdint.h>
 
-#define DENISE_WIDTH   320   /* lores pixel width */
+#define DENISE_LORES_W 320   /* lores pixel width           */
+#define DENISE_HIRES_W 640   /* hires pixel width (output)  */
 #define DENISE_PLANES    6   /* maximum bitplanes */
 #define DENISE_COLORS   32   /* palette entries   */
 #define DENISE_SPRITES   8   /* hardware sprites  */
@@ -93,16 +97,20 @@ uint16_t denise_read_reg(const denise_t *d, uint16_t offset);
 uint32_t denise_expand_color(uint16_t rgb12);
 
 /*
- * denise_render_line — rasterise one 320-pixel lores scanline.
+ * denise_render_line — rasterise one scanline to 640 output pixels.
+ *
+ * HIRES (BPLCON0 bit 15 set): renders all 640 HIRES pixels 1:1.
+ * LORES (BPLCON0 bit 15 clear): renders 320 pixels, each doubled to 640.
  *
  * Reads bitplane data from chip_ram[] at the addresses stored in d->bplpt[].
- * Writes 320 ARGB8888 pixels to the pixels[] array.
+ * Writes DENISE_HIRES_W (640) ARGB8888 pixels to the pixels[] array.
  *
  * The caller (Agnus) is responsible for advancing bplpt[] between scanlines.
  * chip_ram_size is used for bounds checking; out-of-range reads yield 0.
  */
 void denise_render_line(denise_t *d,
                         const uint8_t *chip_ram, uint32_t chip_ram_size,
-                        uint32_t *pixels);
+                        uint32_t *pixels,
+                        int scroll_px, int diw_start, int diw_end);
 
 #endif /* AMIGA_DENISE_H */

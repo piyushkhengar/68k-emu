@@ -176,8 +176,9 @@ static void custom_write_reg(uint16_t off, uint16_t val)
         return;
     }
 
-    /* ---- Agnus: Copper (0x080–0x08A), DDFSTRT/STOP, BPLxMOD, DMACON */
+    /* ---- Agnus: Copper (0x080–0x08A), DIWSTRT/STOP, DDFSTRT/STOP, BPLxMOD, DMACON */
     if ((off >= 0x080u && off <= 0x08Au) ||
+        off == 0x08Eu || off == 0x090u ||
         off == 0x092u || off == 0x094u ||
         off == 0x108u || off == 0x10Au ||
         off == 0x096u) {

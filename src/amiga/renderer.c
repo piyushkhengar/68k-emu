@@ -26,7 +26,7 @@ int renderer_init(void)
     window = SDL_CreateWindow(
         "Amiga 500",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        AMIGA_WIDTH * 2, AMIGA_HEIGHT * 2,
+        AMIGA_WIDTH, AMIGA_HEIGHT * 2,
         SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
     if (!window) {
         fprintf(stderr, "amiga renderer: SDL_CreateWindow failed: %s\n", SDL_GetError());
@@ -44,8 +44,9 @@ int renderer_init(void)
         return -1;
     }
 
-    /* Logical size: SDL scales the 320x256 texture to fill the window. */
-    SDL_RenderSetLogicalSize(sdl_renderer, AMIGA_WIDTH, AMIGA_HEIGHT);
+    /* No logical size — let RenderCopy stretch the 640×256 texture to
+     * fill the window (1× horizontal, 2× vertical for the default
+     * 640×512 window, matching PAL pixel aspect ratio). */
 
     texture = SDL_CreateTexture(
         sdl_renderer,

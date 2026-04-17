@@ -11,7 +11,7 @@
 
 #include <stdint.h>
 
-#define AMIGA_WIDTH  320   /* lores pixel columns          */
+#define AMIGA_WIDTH  640   /* framebuffer pixel columns (HIRES native) */
 #define AMIGA_HEIGHT 256   /* visible PAL lines (of 312)   */
 
 /* Open the SDL2 window.  Returns 0 on success, -1 on failure. */

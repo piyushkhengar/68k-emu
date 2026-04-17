@@ -182,11 +182,11 @@ static void test_render_0_planes(void)
     d.bplcon0 = 0x0000;                      /* BPU = 0 */
     d.color[0] = 0x0AAA;                     /* background = grey */
 
-    uint32_t pixels[DENISE_WIDTH];
-    denise_render_line(&d, test_ram, TEST_RAM_SIZE, pixels);
+    uint32_t pixels[DENISE_HIRES_W];
+    denise_render_line(&d, test_ram, TEST_RAM_SIZE, pixels, 0, 0, DENISE_HIRES_W);
 
     uint32_t expected = denise_expand_color(0x0AAA);
-    for (int px = 0; px < DENISE_WIDTH; px++) {
+    for (int px = 0; px < DENISE_HIRES_W; px++) {
         BASSERT(pixels[px] == expected,
                 "px %d: expected 0x%08X (background), got 0x%08X",
                 px, expected, pixels[px]);
@@ -209,13 +209,13 @@ static void test_render_1_plane_all_set(void)
     d.color[1]  = 0x0F00;     /* foreground = red */
 
     /* Fill plane 0 with 0xFFFF (all bits set → all pixels colour[1]) */
-    fill_plane(0x0100, 0xFFFF, DENISE_WIDTH / 16);
+    fill_plane(0x0100, 0xFFFF, DENISE_LORES_W / 16);
 
-    uint32_t pixels[DENISE_WIDTH];
-    denise_render_line(&d, test_ram, TEST_RAM_SIZE, pixels);
+    uint32_t pixels[DENISE_HIRES_W];
+    denise_render_line(&d, test_ram, TEST_RAM_SIZE, pixels, 0, 0, DENISE_HIRES_W);
 
     uint32_t expected = denise_expand_color(0x0F00);
-    for (int px = 0; px < DENISE_WIDTH; px++) {
+    for (int px = 0; px < DENISE_HIRES_W; px++) {
         BASSERT(pixels[px] == expected,
                 "px %d: expected 0x%08X (red), got 0x%08X",
                 px, expected, pixels[px]);
@@ -243,19 +243,24 @@ static void test_render_1_plane_alternating(void)
      *           ^-- bit 14 = pixel 1 = 0 (background)
      * So pixels 0, 2, 4, … = colour[1]; pixels 1, 3, 5, … = colour[0].
      */
-    fill_plane(0x0200, 0xAAAA, DENISE_WIDTH / 16);
+    fill_plane(0x0200, 0xAAAA, DENISE_LORES_W / 16);
 
-    uint32_t pixels[DENISE_WIDTH];
-    denise_render_line(&d, test_ram, TEST_RAM_SIZE, pixels);
+    uint32_t pixels[DENISE_HIRES_W];
+    denise_render_line(&d, test_ram, TEST_RAM_SIZE, pixels, 0, 0, DENISE_HIRES_W);
 
     uint32_t fg = denise_expand_color(0x00F0);
     uint32_t bg = denise_expand_color(0x0000);
 
-    for (int px = 0; px < DENISE_WIDTH; px++) {
-        uint32_t expected = (px % 2 == 0) ? fg : bg;
+    /*
+     * LORES with doubled output: source pixel N → output pixels N*2, N*2+1.
+     * 0xAAAA: source pixels 0,2,4… = fg; 1,3,5… = bg.
+     * Output: fg,fg,bg,bg,fg,fg,bg,bg,…
+     */
+    for (int px = 0; px < DENISE_HIRES_W; px++) {
+        uint32_t expected = ((px / 2) % 2 == 0) ? fg : bg;
         BASSERT(pixels[px] == expected,
                 "px %d: expected 0x%08X (%s), got 0x%08X",
-                px, expected, (px % 2 == 0) ? "fg" : "bg", pixels[px]);
+                px, expected, ((px / 2) % 2 == 0) ? "fg" : "bg", pixels[px]);
         if (pixels[px] != expected) break;
     }
 }
@@ -279,16 +284,16 @@ static void test_render_2_planes(void)
     d.color[3] = 0x0FFF;   /* index 11 = white (both planes set) */
 
     /* Plane 0: all 1s → bit 0 of index always 1 */
-    fill_plane(0x0300, 0xFFFF, DENISE_WIDTH / 16);
+    fill_plane(0x0300, 0xFFFF, DENISE_LORES_W / 16);
     /* Plane 1: all 0s → bit 1 of index always 0 */
-    fill_plane(0x0340, 0x0000, DENISE_WIDTH / 16);
+    fill_plane(0x0340, 0x0000, DENISE_LORES_W / 16);
     /* Expected colour index everywhere = 0b01 = 1 = red */
 
-    uint32_t pixels[DENISE_WIDTH];
-    denise_render_line(&d, test_ram, TEST_RAM_SIZE, pixels);
+    uint32_t pixels[DENISE_HIRES_W];
+    denise_render_line(&d, test_ram, TEST_RAM_SIZE, pixels, 0, 0, DENISE_HIRES_W);
 
     uint32_t expected = denise_expand_color(0x0F00);
-    for (int px = 0; px < DENISE_WIDTH; px++) {
+    for (int px = 0; px < DENISE_HIRES_W; px++) {
         BASSERT(pixels[px] == expected,
                 "px %d: 2-plane index 01 should give red (0x%08X), got 0x%08X",
                 px, expected, pixels[px]);
@@ -308,15 +313,15 @@ static void test_render_4_planes_all_set(void)
     d.bplcon0 = 0x4000;   /* BPU = 4 */
     for (int n = 0; n < 4; n++) {
         d.bplpt[n] = (uint32_t)(0x0400 + n * 0x40);  /* 64 bytes apart */
-        fill_plane(d.bplpt[n], 0xFFFF, DENISE_WIDTH / 16);
+        fill_plane(d.bplpt[n], 0xFFFF, DENISE_LORES_W / 16);
     }
     d.color[15] = 0x0F8F;   /* index 1111 → this colour */
 
-    uint32_t pixels[DENISE_WIDTH];
-    denise_render_line(&d, test_ram, TEST_RAM_SIZE, pixels);
+    uint32_t pixels[DENISE_HIRES_W];
+    denise_render_line(&d, test_ram, TEST_RAM_SIZE, pixels, 0, 0, DENISE_HIRES_W);
 
     uint32_t expected = denise_expand_color(0x0F8F);
-    for (int px = 0; px < DENISE_WIDTH; px++) {
+    for (int px = 0; px < DENISE_HIRES_W; px++) {
         BASSERT(pixels[px] == expected,
                 "px %d: 4-plane all-set should give color[15] (0x%08X), got 0x%08X",
                 px, expected, pixels[px]);

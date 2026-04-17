@@ -140,7 +140,8 @@ uint16_t denise_read_reg(const denise_t *d, uint16_t offset)
 
 void denise_render_line(denise_t *d,
                         const uint8_t *chip_ram, uint32_t chip_ram_size,
-                        uint32_t *pixels)
+                        uint32_t *pixels,
+                        int scroll_px, int diw_start, int diw_end)
 {
     /*
      * Number of active bitplanes: BPLCON0 bits 14:12 (BPU field).
@@ -150,43 +151,65 @@ void denise_render_line(denise_t *d,
     if (num_planes > DENISE_PLANES)
         num_planes = DENISE_PLANES;
 
-    /*
-     * HIRES mode (BPLCON0 bit 15): each pixel is half the LORES width.
-     * We map 640 HIRES pixels onto the 320-pixel output by sampling
-     * every other HIRES pixel (even pixels: 0, 2, 4, …).
-     */
     int hires = (d->bplcon0 >> 15) & 1;
 
-    for (int px = 0; px < DENISE_WIDTH; px++) {
+    /* Fill entire output with background colour (COLOR00). */
+    uint32_t bg = denise_expand_color(d->color[0]);
+    for (int i = 0; i < DENISE_HIRES_W; i++)
+        pixels[i] = bg;
+
+    if (hires) {
         /*
-         * Locate the bit for this pixel within each bitplane.
-         *
-         * In LORES: source pixel = px (0–319), 20 words per line.
-         * In HIRES: source pixel = px*2 (0,2,4…638), 40 words per line.
+         * HIRES: 640 source pixels → 640 output pixels (1:1).
+         * DMA data starts at output pixel scroll_px.
          */
-        int src_px   = hires ? px * 2 : px;
-        int word_idx = src_px / 16;
-        int bit_pos  = 15 - (src_px % 16);
+        for (int px = 0; px < DENISE_HIRES_W; px++) {
+            int out_x = scroll_px + px;
+            if (out_x < diw_start || out_x >= diw_end)
+                continue;
 
-        uint8_t color_idx = 0;
+            int word_idx = px / 16;
+            int bit_pos  = 15 - (px % 16);
 
-        for (int n = 0; n < num_planes; n++) {
-            /*
-             * Each word is 2 bytes; the high byte comes first (big-endian,
-             * matching the 68000's native byte order).
-             */
-            uint32_t addr = d->bplpt[n] + (uint32_t)(word_idx * 2);
-            uint16_t word = 0;
-            if (addr + 1 < chip_ram_size) {
-                word = ((uint16_t)chip_ram[addr] << 8) | chip_ram[addr + 1];
+            uint8_t color_idx = 0;
+            for (int n = 0; n < num_planes; n++) {
+                uint32_t addr = d->bplpt[n] + (uint32_t)(word_idx * 2);
+                uint16_t word = 0;
+                if (addr + 1 < chip_ram_size)
+                    word = ((uint16_t)chip_ram[addr] << 8) | chip_ram[addr + 1];
+                if ((word >> bit_pos) & 1u)
+                    color_idx |= (uint8_t)(1u << n);
             }
-
-            /* Contribute this plane's bit to the colour index */
-            if ((word >> bit_pos) & 1u)
-                color_idx |= (uint8_t)(1u << n);
+            pixels[out_x] = denise_expand_color(d->color[color_idx]);
         }
+    } else {
+        /*
+         * LORES: 320 source pixels → 640 output pixels (each doubled).
+         * DMA data starts at output pixel scroll_px.
+         */
+        for (int px = 0; px < DENISE_LORES_W; px++) {
+            int out_x = scroll_px + px * 2;
+            if (out_x + 1 < diw_start || out_x >= diw_end)
+                continue;
 
-        pixels[px] = denise_expand_color(d->color[color_idx]);
+            int word_idx = px / 16;
+            int bit_pos  = 15 - (px % 16);
+
+            uint8_t color_idx = 0;
+            for (int n = 0; n < num_planes; n++) {
+                uint32_t addr = d->bplpt[n] + (uint32_t)(word_idx * 2);
+                uint16_t word = 0;
+                if (addr + 1 < chip_ram_size)
+                    word = ((uint16_t)chip_ram[addr] << 8) | chip_ram[addr + 1];
+                if ((word >> bit_pos) & 1u)
+                    color_idx |= (uint8_t)(1u << n);
+            }
+            uint32_t c = denise_expand_color(d->color[color_idx]);
+            if (out_x >= diw_start && out_x < DENISE_HIRES_W)
+                pixels[out_x] = c;
+            if (out_x + 1 >= diw_start && out_x + 1 < DENISE_HIRES_W)
+                pixels[out_x + 1] = c;
+        }
     }
 
     /*
@@ -197,8 +220,8 @@ void denise_render_line(denise_t *d,
      * (Iterating 7..0 means sprite 0 overwrites sprite 7 → sprite 0 wins.)
      *
      * Horizontal position: hstart = ((pos & 0xFF) << 1) | ((ctl >> 1) & 1).
-     * The 320-pixel display window starts at hstart = 0x81.
-     * screen_x = hstart - 0x81.
+     * The display window starts at hstart = 0x81 in LORES coordinates.
+     * Output uses HIRES (640px): screen_x = (hstart - 0x81) * 2.
      *
      * A sprite is considered inactive when both DATA and DATB are zero
      * (the Copper writes 0/0 at vstop on real hardware).
@@ -207,23 +230,26 @@ void denise_render_line(denise_t *d,
         if (!d->spr[n].data && !d->spr[n].datb)
             continue;
 
-        int hstart  = (int)(((d->spr[n].pos & 0xFFu) << 1) | ((d->spr[n].ctl >> 1) & 1u));
-        int screen_x = hstart - 0x81;
-        int pair    = n / 2;
-        int base    = 16 + pair * 4;   /* palette base for this sprite pair */
+        int hstart   = (int)(((d->spr[n].pos & 0xFFu) << 1) | ((d->spr[n].ctl >> 1) & 1u));
+        int screen_x = (hstart - 0x81) * 2;   /* LORES → HIRES coords */
+        int pair     = n / 2;
+        int base     = 16 + pair * 4;   /* palette base for this sprite pair */
 
         for (int bit = 0; bit < 16; bit++) {
-            int sx = screen_x + bit;
-            if (sx < 0 || sx >= DENISE_WIDTH)
+            /* Sprites are 16 LORES pixels wide → 32 HIRES pixels */
+            int sx = screen_x + bit * 2;
+            if (sx < 0 || sx + 1 >= DENISE_HIRES_W)
                 continue;
 
-            /* Bit 15 of DATA/DATB is the leftmost sprite pixel */
             int bit0 = (d->spr[n].data >> (15 - bit)) & 1;
             int bit1 = (d->spr[n].datb >> (15 - bit)) & 1;
             int cidx = (bit1 << 1) | bit0;
 
-            if (cidx != 0)
-                pixels[sx] = denise_expand_color(d->color[base + cidx]);
+            if (cidx != 0) {
+                uint32_t c = denise_expand_color(d->color[base + cidx]);
+                pixels[sx]     = c;
+                pixels[sx + 1] = c;
+            }
         }
     }
 }

@@ -106,6 +106,10 @@ typedef struct {
     uint16_t ddfstop;   /* data-fetch stop position  (0x094)             */
     int16_t  bpl1mod;   /* odd  bitplane modulo (0x108, signed)          */
     int16_t  bpl2mod;   /* even bitplane modulo (0x10A, signed)          */
+
+    /* Display window (viewport) */
+    uint16_t diwstrt;   /* display window start (0x08E): V[15:8] H[7:0] */
+    uint16_t diwstop;   /* display window stop  (0x090): V[15:8] H[7:0] */
 } agnus_t;
 
 /* Lifecycle */

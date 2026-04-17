@@ -202,6 +202,37 @@ static void amiga_shutdown(void)
 }
 
 /* ------------------------------------------------------------------ */
+/*  Display scroll offset                                               */
+/*                                                                      */
+/*  Compute the HIRES pixel offset of DMA bitplane data within the      */
+/*  640-pixel output buffer.  Standard values (DDFSTRT=$3C HIRES or     */
+/*  $38 LORES, DIWSTRT H=$81) produce 0.  Non-standard values shift     */
+/*  the content left or right.                                          */
+/* ------------------------------------------------------------------ */
+
+static void compute_display_params(int *scroll_px, int *diw_start, int *diw_end)
+{
+    int hires = (amiga_denise.bplcon0 >> 15) & 1;
+    int ddfstrt = (int)amiga_agnus.ddfstrt;
+    int diwstrt_h = (int)(amiga_agnus.diwstrt & 0xFF);
+    int diwstop_h = (int)(amiga_agnus.diwstop & 0xFF);
+    if (diwstrt_h == 0) diwstrt_h = 0x81;  /* default if not yet set */
+    if (diwstop_h == 0) diwstop_h = 0xC1;
+
+    /* Scroll: HIRES pixel offset of DMA pixel 0 in the 640px output. */
+    int delay = hires ? 9 : 17;
+    *scroll_px = (2 * ddfstrt + delay - 0x81) * 2;
+
+    /* DIW clipping range in the 640px output (HIRES pixels).
+     * Output pixel 0 corresponds to hardware position 0x81.
+     * OCS DIWSTOP has implicit bit 8 set (values > 0xFF wrap). */
+    *diw_start = (diwstrt_h - 0x81) * 2;
+    if (*diw_start < 0) *diw_start = 0;
+    *diw_end = ((diwstop_h | 0x100) - 0x81) * 2;
+    if (*diw_end > DENISE_HIRES_W) *diw_end = DENISE_HIRES_W;
+}
+
+/* ------------------------------------------------------------------ */
 /*  Run loop                                                            */
 /* ------------------------------------------------------------------ */
 
@@ -530,10 +561,14 @@ void amiga_run(void)
 
             /* Render visible lines into the framebuffer. */
             if (line < AMIGA_HEIGHT) {
-                denise_render_line(&amiga_denise,
-                                   amiga_bus_chip_ram(),
-                                   amiga_bus_chip_ram_size(),
-                                   &framebuffer[line * AMIGA_WIDTH]);
+                { int sp, ds, de;
+                  compute_display_params(&sp, &ds, &de);
+                  denise_render_line(&amiga_denise,
+                                     amiga_bus_chip_ram(),
+                                     amiga_bus_chip_ram_size(),
+                                     &framebuffer[line * AMIGA_WIDTH],
+                                     sp, ds, de);
+                }
 
                 /*
                  * Agnus auto-increments each active bitplane pointer after
@@ -555,7 +590,7 @@ void amiga_run(void)
                     int slots = ddf_diff / 8 + 1;
                     fetch_words = hires ? slots * 2 : slots;
                 } else {
-                    fetch_words = DENISE_WIDTH / 16; /* fallback: 20 words */
+                    fetch_words = DENISE_LORES_W / 16; /* fallback: 20 words */
                 }
                 int fetch_bytes = fetch_words * 2;
                 for (int n = 0; n < np; n++) {
@@ -924,6 +959,76 @@ void amiga_run_headless(int max_frames)
 
         /* (VBLANK interrupt fires at line AMIGA_HEIGHT above.) */
 
+        /* Render the last frame to a PPM for visual verification. */
+        if (frame == max_frames) {
+            #define HL_W DENISE_HIRES_W  /* 640 */
+            #define HL_H 256
+            static uint32_t fb[HL_W * HL_H];
+            /* Re-run Copper + render for all visible lines.
+             * Reset Copper PC to start of list, then render. */
+            uint32_t saved_cop = amiga_agnus.copper_pc;
+            uint32_t saved_bpl[DENISE_PLANES];
+            for (int n = 0; n < DENISE_PLANES; n++)
+                saved_bpl[n] = amiga_denise.bplpt[n];
+
+            amiga_agnus.copper_pc = amiga_agnus.cop1lc;
+            for (int sl = 0; sl < HL_H; sl++) {
+                agnus_tick_scanline(&amiga_agnus, sl);
+                agnus_copper_scanline(&amiga_agnus,
+                                      amiga_bus_chip_ram(),
+                                      amiga_bus_chip_ram_size(),
+                                      amiga_bus_write_custom);
+                { int sp, ds, de;
+                  compute_display_params(&sp, &ds, &de);
+                  denise_render_line(&amiga_denise,
+                                     amiga_bus_chip_ram(),
+                                     amiga_bus_chip_ram_size(),
+                                     &fb[sl * HL_W],
+                                     sp, ds, de);
+                }
+                /* Advance bitplane pointers (same as SDL path) */
+                int np = (amiga_denise.bplcon0 >> 12) & 7;
+                if (np > DENISE_PLANES) np = DENISE_PLANES;
+                int hi = (amiga_denise.bplcon0 >> 15) & 1;
+                int dd = (int)amiga_agnus.ddfstop - (int)amiga_agnus.ddfstrt;
+                int fw = (dd > 0) ? ((dd / 8 + 1) * (hi ? 2 : 1))
+                                  : (DENISE_LORES_W / 16);
+                for (int n = 0; n < np; n++) {
+                    int16_t mod = (n & 1) ? amiga_agnus.bpl2mod
+                                          : amiga_agnus.bpl1mod;
+                    amiga_denise.bplpt[n] += (uint32_t)(fw * 2 + mod);
+                }
+            }
+            /* Restore state */
+            amiga_agnus.copper_pc = saved_cop;
+            for (int n = 0; n < DENISE_PLANES; n++)
+                amiga_denise.bplpt[n] = saved_bpl[n];
+
+            /* Diagnostic: print display register state */
+            printf("[HEADLESS] BPLCON0=%04X DDFSTRT=%04X DDFSTOP=%04X "
+                   "DIWSTRT=%04X DIWSTOP=%04X BPL1MOD=%d BPL2MOD=%d\n",
+                   amiga_denise.bplcon0,
+                   amiga_agnus.ddfstrt, amiga_agnus.ddfstop,
+                   amiga_agnus.diwstrt, amiga_agnus.diwstop,
+                   amiga_agnus.bpl1mod, amiga_agnus.bpl2mod);
+
+            /* Write PPM */
+            FILE *ppm = fopen("ks204_headless.ppm", "wb");
+            if (ppm) {
+                fprintf(ppm, "P6\n%d %d\n255\n", HL_W, HL_H);
+                for (int i = 0; i < HL_W * HL_H; i++) {
+                    uint32_t c = fb[i];
+                    fputc((c >> 16) & 0xFF, ppm);
+                    fputc((c >>  8) & 0xFF, ppm);
+                    fputc( c        & 0xFF, ppm);
+                }
+                fclose(ppm);
+                printf("[HEADLESS] Wrote ks204_headless.ppm (%dx%d)\n",
+                       HL_W, HL_H);
+            }
+            #undef HL_W
+            #undef HL_H
+        }
 
         /* ---- Boot trace: per-frame chip RAM inspection ---- */
         if (trace_active) {
