@@ -231,21 +231,7 @@ void amiga_run(void)
             frame = 0;
             continue;                    /* restart frame loop */
         }
-        /* KS 2.04: install boot display when strap stalls */
-        if (!is_ks13 && frame == 150 && amiga_agnus.cop1lc <= 0x0008B0) {
-            uint32_t cl = 0x7F00;
-            int p = 0;
-            #define CW(r,v) do { amiga_bus_write16(cl+p,(r)); p+=2; \
-                                 amiga_bus_write16(cl+p,(v)); p+=2; } while(0)
-            CW(0x0100, 0x0200); CW(0x0180, 0x0AAA); CW(0x0182, 0x0000);
-            CW(0x0184, 0x0FFF); CW(0x0186, 0x068B);
-            amiga_bus_write16(cl + p, 0xFFFF);
-            amiga_bus_write16(cl + p + 2, 0xFFFE);
-            #undef CW
-            amiga_agnus.cop1lc = cl;
-            amiga_agnus.copper_pc = cl;
-            amiga_agnus.dmacon |= 0x0280;
-        }
+        (void)frame;  /* used by reset counter at line 231 */
 
         for (int line = 0; line < PAL_LINES; line++) {
             /* Advance Agnus beam counter to the start of this scanline. */
@@ -481,12 +467,52 @@ void amiga_run(void)
                 } /* end if (is_ks13) */
                 /* ---- KS 2.04 workarounds ---- */
                 if (!is_ks13) {
-                    /* Skip strap disk-check (blocks in trackdisk OpenDevice) */
+                    /* Strap disk-check at FCE3A8: blocks in trackdisk
+                     * OpenDevice's timer Wait/GetMsg loop.
+                     *
+                     * First call: redirect to FCE366 (display setup path).
+                     * FCE366 does MOVE.L A5,D5; BSR FCE5AC which allocates
+                     * a screen, opens graphics.library, and draws the
+                     * disk-insert animation.  A6=ExecBase at this point.
+                     *
+                     * Subsequent calls: return D0=-1 ("no disk"). */
                     if (cpu.pc == 0xFCE3A8) {
-                        boot_complete = 1; /* mark boot done → block future RESETs */
-                        cpu.d[0] = 0xFFFFFFFF;
-                        cpu.pc = amiga_bus_read32(cpu.a[7]);
-                        cpu.a[7] += 4;
+                        static int ds_display_gen = -1;
+                        boot_complete = 1;
+                        if (ds_display_gen != boot_gen) {
+                            ds_display_gen = boot_gen;
+                            cpu.a[7] += 4; /* pop BSR return address */
+                            cpu.pc = 0xFCE366; /* → display setup */
+                        } else {
+                            cpu.d[0] = 0xFFFFFFFF;
+                            cpu.pc = amiga_bus_read32(cpu.a[7]);
+                            cpu.a[7] += 4; /* RTS to caller */
+                        }
+                    }
+                    /* Fix COP1LC after LoadView.
+                     *
+                     * FCE9C2 is JSR _LVOWaitTOF (immediately after LoadView
+                     * at FCE9BE in the strap display setup function FCE5AC).
+                     * LoadView sets GfxBase→ActiView but the VBLANK copinit
+                     * server that reloads COP1LC from ActiView→LOFCprList
+                     * each frame doesn't run reliably in our emulator.
+                     *
+                     * At this point A6 = GfxBase.  Read ActiView (offset
+                     * 0x22) → LOFCprList (offset 4) → start (offset 4)
+                     * and force COP1LC so the display becomes visible. */
+                    if (cpu.pc == 0xFCE9C2) {
+                        uint32_t gfx = cpu.a[6];
+                        uint32_t view = amiga_bus_read32(gfx + 0x22);
+                        if (view && view < 0x80000) {
+                            uint32_t lof = amiga_bus_read32(view + 4);
+                            if (lof && lof < 0x80000) {
+                                uint32_t cs = amiga_bus_read32(lof + 4);
+                                if (cs && cs < amiga_bus_chip_ram_size()) {
+                                    amiga_agnus.cop1lc = cs;
+                                    amiga_agnus.copper_pc = cs;
+                                }
+                            }
+                        }
                     }
                 }
                 int c = cpu_step();
@@ -510,14 +536,33 @@ void amiga_run(void)
                                    &framebuffer[line * AMIGA_WIDTH]);
 
                 /*
-                 * Agnus auto-increments each active bitplane pointer by one
-                 * row's worth of bytes after DMA-fetching the row's words.
-                 * 320 pixels / 16 bits per word = 20 words = 40 bytes per row.
+                 * Agnus auto-increments each active bitplane pointer after
+                 * DMA-fetching the row.  The number of words fetched depends
+                 * on DDFSTRT/DDFSTOP and the HIRES bit in BPLCON0:
+                 *   LORES: words = (DDFSTOP - DDFSTRT) / 8 + 1
+                 *   HIRES: words = (DDFSTOP - DDFSTRT) / 4 + 1
+                 * After the fetch, the modulo (BPL1MOD for odd, BPL2MOD for
+                 * even planes, 0-indexed) is added.
                  */
                 int np = (amiga_denise.bplcon0 >> 12) & 7;
                 if (np > DENISE_PLANES) np = DENISE_PLANES;
-                for (int n = 0; n < np; n++)
-                    amiga_denise.bplpt[n] += DENISE_WIDTH / 8;
+                int hires = (amiga_denise.bplcon0 >> 15) & 1;
+                int ddf_diff = (int)amiga_agnus.ddfstop - (int)amiga_agnus.ddfstrt;
+                int fetch_words;
+                if (ddf_diff > 0) {
+                    /* DMA slots = (DDFSTOP - DDFSTRT) / 8 + 1.
+                     * Each slot fetches 1 word (LORES) or 2 words (HIRES). */
+                    int slots = ddf_diff / 8 + 1;
+                    fetch_words = hires ? slots * 2 : slots;
+                } else {
+                    fetch_words = DENISE_WIDTH / 16; /* fallback: 20 words */
+                }
+                int fetch_bytes = fetch_words * 2;
+                for (int n = 0; n < np; n++) {
+                    int16_t mod = (n & 1) ? amiga_agnus.bpl2mod
+                                          : amiga_agnus.bpl1mod;
+                    amiga_denise.bplpt[n] += (uint32_t)(fetch_bytes + mod);
+                }
             }
         }
 
@@ -606,41 +651,39 @@ void amiga_run_headless(int max_frames)
                     cpu.pc = 0xFE8506;
                 }
                 } /* end if (is_ks13) */
-                /* ---- KS 2.04 workaround: strap display setup ----
-                 * Strap's display setup function is at FCE5AC, normally
-                 * called from the expansion-board polling loop at FCE368.
-                 * Without expansion boards, that loop is never entered.
-                 * The disk-check at FCE3A8 returns D0=-1 ("no disk") to
-                 * FCE326, which loops back via FCE34C without ever calling
-                 * the display setup.
-                 *
-                 * Fix: on the first "no disk" return from disk-check,
-                 * redirect to FCE366 which sets D5 and calls BSR FCE5AC
-                 * (the display setup).  D5=0 at this point (first pass). */
-                /* ---- KS 2.04 workaround: skip strap disk-check ----
-                 * The disk-check function at FCE3A8 calls OpenDevice for
-                 * trackdisk.device which blocks forever in Wait() because
-                 * our CIA timer→Paula→scheduler signal chain doesn't complete.
-                 * Skip the entire function and return D0=0 ("show display"),
-                 * which sends the caller to FCE380 → display setup path.
-                 * Also call the display setup (FCE5AC) on first pass. */
-                /* ---- KS 2.04: force strap into display path ----
-                 * The strap main loop at FCE216 has BEQ.W $FCE35A which
-                 * enters the display setup path when the ConfigDev list is
-                 * exhausted.  The loop only runs ONCE because trackdisk's
-                 * OpenDevice blocks at the disk-check (FCE322), preventing
-                 * the second iteration where the list IS exhausted.
-                 *
-                 * Fix: on the first pass through FCE216, force Z=1 so the
-                 * BEQ is taken regardless.  This enters the display path
-                 * at FCE35A which calls FCE5AC (OpenScreen + animation). */
-                /* ---- KS 2.04: skip disk-check ---- */
+                /* ---- KS 2.04: disk-check → display setup ---- */
                 if (!is_ks13 && cpu.pc == 0xFCE3A8) {
+                    static int ds_display_gen_hl = -1;
                     boot_complete = 1;
-                    cpu.d[0] = 0xFFFFFFFF;
-                    cpu.pc = amiga_bus_read32(cpu.a[7]);
-                    cpu.a[7] += 4;
+                    if (ds_display_gen_hl != boot_gen) {
+                        ds_display_gen_hl = boot_gen;
+                        cpu.a[7] += 4;
+                        cpu.pc = 0xFCE366;
+                    } else {
+                        cpu.d[0] = 0xFFFFFFFF;
+                        cpu.pc = amiga_bus_read32(cpu.a[7]);
+                        cpu.a[7] += 4;
+                    }
                 }
+                /* Fix COP1LC after LoadView (same as SDL path) */
+                if (!is_ks13 && cpu.pc == 0xFCE9C2) {
+                    uint32_t gfx = cpu.a[6];
+                    uint32_t view = amiga_bus_read32(gfx + 0x22);
+                    if (view && view < 0x80000) {
+                        uint32_t lof = amiga_bus_read32(view + 4);
+                        if (lof && lof < 0x80000) {
+                            uint32_t cs = amiga_bus_read32(lof + 4);
+                            if (cs && cs < amiga_bus_chip_ram_size()) {
+                                amiga_agnus.cop1lc = cs;
+                                amiga_agnus.copper_pc = cs;
+                            }
+                        }
+                    }
+                }
+                /* Trace FCE5AC error path only */
+                if (!is_ks13 && cpu.pc == 0xFCE606)
+                    printf("[KS204] F%d: display setup ERROR D0=%08X\n",
+                           frame, cpu.d[0]);
 
                 if (trace_active) {
                     bt_total_steps++;

@@ -55,7 +55,7 @@ static void ram_write16(uint8_t *ram, uint32_t addr, uint32_t size, uint16_t val
 uint16_t agnus_read_reg(const agnus_t *ag, uint16_t offset)
 {
     switch (offset) {
-    case 0x002:  /* DMACONR — read mirror; bit 14 = BBUSY (0 = idle, 1 = busy).
+    case 0x002:  /* DMACONR — read mirror; bit 14 = BBUSY (1 = busy, 0 = idle).
                   * Our blitter executes synchronously so it's always idle. */
         return (uint16_t)(ag->dmacon & (uint16_t)~0x4000u);
 
@@ -114,6 +114,12 @@ void agnus_write_reg(agnus_t *ag, uint16_t offset, uint16_t val)
     case 0x070: ag->bltcdat = val; break;
     case 0x072: ag->bltbdat = val; break;
     case 0x074: ag->bltadat = val; break;
+
+    /* ---- Bitplane DMA control -------------------------------------- */
+    case 0x092: ag->ddfstrt = val & 0xFCu; break;   /* DDFSTRT */
+    case 0x094: ag->ddfstop = val & 0xFCu; break;   /* DDFSTOP */
+    case 0x108: ag->bpl1mod = (int16_t)val; break;   /* BPL1MOD */
+    case 0x10A: ag->bpl2mod = (int16_t)val; break;   /* BPL2MOD */
 
     /* ---- Copper --------------------------------------------------- */
     case 0x080: ag->cop1lc = (ag->cop1lc & 0x0000FFFFu) | ((uint32_t)(val & 0x1Fu) << 16); break;

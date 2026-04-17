@@ -150,20 +150,23 @@ void denise_render_line(denise_t *d,
     if (num_planes > DENISE_PLANES)
         num_planes = DENISE_PLANES;
 
+    /*
+     * HIRES mode (BPLCON0 bit 15): each pixel is half the LORES width.
+     * We map 640 HIRES pixels onto the 320-pixel output by sampling
+     * every other HIRES pixel (even pixels: 0, 2, 4, …).
+     */
+    int hires = (d->bplcon0 >> 15) & 1;
+
     for (int px = 0; px < DENISE_WIDTH; px++) {
         /*
          * Locate the bit for this pixel within each bitplane.
          *
-         * Each bitplane is a sequence of 16-bit words stored MSB-first:
-         *   word 0 holds pixels 0–15, word 1 holds pixels 16–31, …
-         *
-         * Within each word, pixel 0 is in bit 15 (the most significant bit)
-         * and pixel 15 is in bit 0.  So:
-         *   word index = px / 16
-         *   bit inside word = 15 − (px % 16)
+         * In LORES: source pixel = px (0–319), 20 words per line.
+         * In HIRES: source pixel = px*2 (0,2,4…638), 40 words per line.
          */
-        int word_idx = px / 16;
-        int bit_pos  = 15 - (px % 16);
+        int src_px   = hires ? px * 2 : px;
+        int word_idx = src_px / 16;
+        int bit_pos  = 15 - (src_px % 16);
 
         uint8_t color_idx = 0;
 
