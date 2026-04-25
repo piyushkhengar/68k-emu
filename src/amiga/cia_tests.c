@@ -348,6 +348,71 @@ static void test_cia_a_pra_clears_ovl_via_bus(void)
 }
 
 /* ------------------------------------------------------------------ */
+/*  Test: cia_tick alone does NOT advance TOD                           */
+/* ------------------------------------------------------------------ */
+/* TOD pin is a discrete pulse input, not derived from E-clock.
+ * cia_tick may run for many E-clocks without the TOD pin pulsing. */
+
+static void test_cia_tick_does_not_advance_tod(void)
+{
+    reset_cia();
+    for (int i = 0; i < 1000; i++) {
+        cia_tick(&cia, 45, &paula, INTREQ_PORTS);
+    }
+    BASSERT(cia.tod_counter == 0,
+            "cia_tick must not advance TOD, got %u", cia.tod_counter);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Test: cia_tod_tick increments by 1 (CIA-A VSYNC pattern)            */
+/* ------------------------------------------------------------------ */
+/* CIA-A's TOD pin is VSYNC: one pulse per PAL frame. */
+
+static void test_tod_a_vsync_pattern(void)
+{
+    reset_cia();
+    cia_tod_tick(&cia);
+    BASSERT(cia.tod_counter == 1,
+            "VSYNC tick should give TOD=1, got %u", cia.tod_counter);
+
+    /* Three more frames worth of pulses. */
+    cia_tod_tick(&cia);
+    cia_tod_tick(&cia);
+    cia_tod_tick(&cia);
+    BASSERT(cia.tod_counter == 4,
+            "Four VSYNC ticks should give TOD=4, got %u", cia.tod_counter);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Test: CIA-B HSYNC pattern — one tick per scanline                   */
+/* ------------------------------------------------------------------ */
+/* CIA-B's TOD pin is HSYNC: one pulse per scanline.  After one PAL
+ * frame (312 lines), TOD should read 312. */
+
+static void test_tod_b_hsync_pattern(void)
+{
+    reset_cia();
+    for (int line = 0; line < 312; line++) {
+        cia_tod_tick(&cia);
+    }
+    BASSERT(cia.tod_counter == 312,
+            "312 HSYNC ticks should give TOD=312, got %u", cia.tod_counter);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Test: TOD wraps at 24 bits                                          */
+/* ------------------------------------------------------------------ */
+
+static void test_tod_24bit_wrap(void)
+{
+    reset_cia();
+    cia.tod_counter = 0xFFFFFFu;
+    cia_tod_tick(&cia);
+    BASSERT(cia.tod_counter == 0,
+            "TOD should wrap at 24 bits, got 0x%X", cia.tod_counter);
+}
+
+/* ------------------------------------------------------------------ */
 /*  Test: timer B basic underflow                                       */
 /* ------------------------------------------------------------------ */
 
@@ -390,6 +455,10 @@ int run_cia_tests(void)
     test_cra_load_strobe();
     test_cia_a_pra_clears_ovl_via_bus();
     test_timer_b_underflow();
+    test_cia_tick_does_not_advance_tod();
+    test_tod_a_vsync_pattern();
+    test_tod_b_hsync_pattern();
+    test_tod_24bit_wrap();
 
     if (failures == 0)
         printf("  CIA 8520: all %d assertions passed.\n", total);

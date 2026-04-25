@@ -181,19 +181,24 @@ void cia_write(cia_t *c, uint8_t reg, uint8_t val)
 }
 
 /* ------------------------------------------------------------------ */
+/*  TOD pin tick (VSYNC for CIA-A, HSYNC for CIA-B)                     */
+/* ------------------------------------------------------------------ */
+
+void cia_tod_tick(cia_t *c)
+{
+    c->tod_counter = (c->tod_counter + 1) & 0xFFFFFFu;  /* 24-bit wrap */
+}
+
+/* ------------------------------------------------------------------ */
 /*  Tick                                                                */
 /* ------------------------------------------------------------------ */
 
 void cia_tick(cia_t *c, int eclocks, paula_t *paula, uint16_t intreq_bit)
 {
-    /* ---- TOD clock ------------------------------------------------- */
-    /* Real TOD ticks at 50 Hz (PAL VSYNC).  E-clock ≈ 70938 Hz.
-     * 70938 / 50 ≈ 1419 E-clocks per TOD tick. */
-    c->tod_eclocks += eclocks;
-    if (c->tod_eclocks >= 1419) {
-        c->tod_eclocks -= 1419;
-        c->tod_counter++;
-    }
+    /* TOD is no longer driven from cia_tick's E-clock accumulator.
+     * On real hardware the TOD pin is a discrete pulse input — VSYNC for
+     * CIA-A (50 Hz), HSYNC for CIA-B (~15.6 kHz).  The run loop in
+     * amiga.c calls cia_tod_tick() at those pulse edges directly. */
 
     /* ---- FLAG pin simulation --------------------------------------- */
     /* For CIA-B (INTREQ_EXTER), simulate a periodic FLAG edge.

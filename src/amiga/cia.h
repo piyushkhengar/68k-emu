@@ -113,13 +113,13 @@ typedef struct {
     paula_t *paula;         /* NULL if not wired */
     uint16_t intreq_bit;    /* INTREQ_PORTS for CIA-A, INTREQ_EXTER for CIA-B */
 
-    /* TOD (Time of Day) / event counter: incremented at ~50 Hz (PAL).
-     * On the 8520 this is a 24-bit event counter (not BCD like the 6526).
+    /* TOD (Time of Day) / event counter — 24-bit incrementing on TOD pin
+     * pulses (VSYNC for CIA-A at 50 Hz, HSYNC for CIA-B at ~15.6 kHz).
+     * Driven externally via cia_tod_tick(); not derived from the E-clock.
      * Reading TODHI latches all 3 bytes; reading TODLO unlatches. */
     uint32_t tod_counter;   /* 24-bit running counter */
     uint32_t tod_latch;     /* latched value (read atomically) */
     int      tod_latched;   /* 1 = latched (reading TODHI latched it) */
-    int      tod_eclocks;   /* E-clock accumulator for ~50 Hz tick rate */
 } cia_t;
 
 /* ------------------------------------------------------------------ */
@@ -156,5 +156,12 @@ void cia_write(cia_t *c, uint8_t reg, uint8_t val);
  * intreq_bit: INTREQ_PORTS for CIA-A, INTREQ_EXTER for CIA-B.
  */
 void cia_tick(cia_t *c, int eclocks, paula_t *paula, uint16_t intreq_bit);
+
+/*
+ * Increment TOD by one (one pulse on the TOD pin).
+ * Call once per VBlank for CIA-A, once per scanline for CIA-B.
+ * The TOD pin is a discrete pulse input — not derived from E-clock.
+ */
+void cia_tod_tick(cia_t *c);
 
 #endif /* AMIGA_CIA_H */

@@ -5,3 +5,6 @@
 
 # Cursor IDE
 .cursor/
+
+# Reference emulators (read-only, for study only)
+reference/

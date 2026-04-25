@@ -277,8 +277,11 @@ void amiga_run(void)
              * in PAL).  Asserting it HERE rather than at the end of the
              * frame ensures the request is pending during the CPU execution
              * of vblank lines, so brief Enable() windows can deliver it. */
-            if (line == AMIGA_HEIGHT)
+            if (line == AMIGA_HEIGHT) {
                 paula_assert_intreq(&amiga_paula, INTREQ_VERTB);
+                /* CIA-A TOD pin is VSYNC: one pulse per frame. */
+                cia_tod_tick(&amiga_cia_a);
+            }
 
             /* Run the Copper — executes MOVEs and WAITs up to this line. */
             agnus_copper_scanline(&amiga_agnus,
@@ -559,6 +562,9 @@ void amiga_run(void)
             cia_tick(&amiga_cia_a, E_CLOCKS_PER_LINE, &amiga_paula, INTREQ_PORTS);
             cia_tick(&amiga_cia_b, E_CLOCKS_PER_LINE, &amiga_paula, INTREQ_EXTER);
 
+            /* CIA-B TOD pin is HSYNC: pulses every scanline. */
+            cia_tod_tick(&amiga_cia_b);
+
             /* Render visible lines into the framebuffer. */
             if (line < AMIGA_HEIGHT) {
                 { int sp, ds, de;
@@ -638,8 +644,11 @@ void amiga_run_headless(int max_frames)
             agnus_tick_scanline(&amiga_agnus, line);
 
             /* Assert VBLANK at start of vertical blank region (PAL line 256). */
-            if (line == 256)
+            if (line == 256) {
                 paula_assert_intreq(&amiga_paula, INTREQ_VERTB);
+                /* CIA-A TOD pin is VSYNC: one pulse per frame. */
+                cia_tod_tick(&amiga_cia_a);
+            }
 
             /* Run CPU for one scanline worth of cycles. */
             int cycles = 0;
@@ -955,6 +964,9 @@ void amiga_run_headless(int max_frames)
             /* Tick CIA-A (PORTS = level 2) and CIA-B (EXTER = level 6). */
             cia_tick(&amiga_cia_a, E_CLOCKS_PER_LINE, &amiga_paula, INTREQ_PORTS);
             cia_tick(&amiga_cia_b, E_CLOCKS_PER_LINE, &amiga_paula, INTREQ_EXTER);
+
+            /* CIA-B TOD pin is HSYNC: pulses every scanline. */
+            cia_tod_tick(&amiga_cia_b);
         }
 
         /* (VBLANK interrupt fires at line AMIGA_HEIGHT above.) */
