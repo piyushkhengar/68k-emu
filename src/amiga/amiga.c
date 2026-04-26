@@ -16,6 +16,7 @@
 #include "cia.h"
 #include "paula.h"
 #include "cpu.h"
+#include "cpu_internal.h"  /* for sync_a7_to_sp */
 #include "memory.h"
 #include <stdio.h>
 
@@ -230,6 +231,23 @@ static void compute_display_params(int *scroll_px, int *diw_start, int *diw_end)
     if (*diw_start < 0) *diw_start = 0;
     *diw_end = ((diwstop_h | 0x100) - 0x81) * 2;
     if (*diw_end > DENISE_HIRES_W) *diw_end = DENISE_HIRES_W;
+}
+
+/*
+ * Vertical DIW range from DIWSTRT/DIWSTOP. On real hardware bitplane DMA only
+ * fetches data for scanlines where vstart <= line < vstop. Outside that range,
+ * BPLPT is NOT advanced and the screen shows the current COLOR00 background
+ * (modified by Copper). Without this gate, our renderer reads stale BPLPT
+ * data into the overscan area and shows garbage in lines 0..vstart-1.
+ */
+static void compute_diw_vertical(int *vstart, int *vstop)
+{
+    int vs = (int)((amiga_agnus.diwstrt >> 8) & 0xFFu);
+    int vp = (int)((amiga_agnus.diwstop >> 8) & 0xFFu);
+    /* OCS DIWSTOP V8 implicit: when vstop high bit (bit 7) is 0, add 256. */
+    if (!(vp & 0x80)) vp += 256;
+    *vstart = vs;
+    *vstop  = vp;
 }
 
 /* ------------------------------------------------------------------ */
@@ -516,11 +534,13 @@ void amiga_run(void)
                         if (ds_display_gen != boot_gen) {
                             ds_display_gen = boot_gen;
                             cpu.a[7] += 4; /* pop BSR return address */
+                            sync_a7_to_sp(); /* keep usp/ssp in sync after direct A7 write */
                             cpu.pc = 0xFCE366; /* → display setup */
                         } else {
                             cpu.d[0] = 0xFFFFFFFF;
                             cpu.pc = amiga_bus_read32(cpu.a[7]);
                             cpu.a[7] += 4; /* RTS to caller */
+                            sync_a7_to_sp();
                         }
                     }
                     /* Fix COP1LC after LoadView.
@@ -567,14 +587,23 @@ void amiga_run(void)
 
             /* Render visible lines into the framebuffer. */
             if (line < AMIGA_HEIGHT) {
+                int vstart, vstop;
+                compute_diw_vertical(&vstart, &vstop);
+                int in_diw_v = (line >= vstart && line < vstop);
                 { int sp, ds, de;
                   compute_display_params(&sp, &ds, &de);
+                  /* Outside vertical DIW: clip to background only by
+                   * passing diw_start = diw_end (no bitplane pixels drawn). */
+                  if (!in_diw_v) ds = de;
                   denise_render_line(&amiga_denise,
                                      amiga_bus_chip_ram(),
                                      amiga_bus_chip_ram_size(),
                                      &framebuffer[line * AMIGA_WIDTH],
                                      sp, ds, de);
                 }
+                /* Skip BPLPT advancement when outside vertical DIW.
+                 * Real Agnus only DMAs bitplane data within vstart..vstop. */
+                if (!in_diw_v) goto skip_bplpt_adv;
 
                 /*
                  * Agnus auto-increments each active bitplane pointer after
@@ -604,6 +633,7 @@ void amiga_run(void)
                                           : amiga_agnus.bpl1mod;
                     amiga_denise.bplpt[n] += (uint32_t)(fetch_bytes + mod);
                 }
+              skip_bplpt_adv: ;
             }
         }
 
@@ -642,6 +672,22 @@ void amiga_run_headless(int max_frames)
         for (int line = 0; line < PAL_LINES; line++) {
             /* Advance Agnus beam counter (needed for VBeamPos polling). */
             agnus_tick_scanline(&amiga_agnus, line);
+
+            /* Restart Copper at top of frame (real hardware does this on
+             * VSYNC start). Without this, the Copper list never runs and
+             * BPLPT/COLOR registers stay at their direct-CPU-write values,
+             * which means the OS's Copper-driven display setup never takes
+             * effect during the live loop — the strap module then sees
+             * stale display state and never progresses past the initial
+             * background fill. */
+            if (line == 0)
+                amiga_agnus.copper_pc = amiga_agnus.cop1lc;
+
+            /* Run the Copper for this scanline. */
+            agnus_copper_scanline(&amiga_agnus,
+                                  amiga_bus_chip_ram(),
+                                  amiga_bus_chip_ram_size(),
+                                  amiga_bus_write_custom);
 
             /* Assert VBLANK at start of vertical blank region (PAL line 256). */
             if (line == 256) {
@@ -702,11 +748,13 @@ void amiga_run_headless(int max_frames)
                     if (ds_display_gen_hl != boot_gen) {
                         ds_display_gen_hl = boot_gen;
                         cpu.a[7] += 4;
+                        sync_a7_to_sp();
                         cpu.pc = 0xFCE366;
                     } else {
                         cpu.d[0] = 0xFFFFFFFF;
                         cpu.pc = amiga_bus_read32(cpu.a[7]);
                         cpu.a[7] += 4;
+                        sync_a7_to_sp();
                     }
                 }
                 /* Fix COP1LC after LoadView (same as SDL path) */
@@ -984,20 +1032,25 @@ void amiga_run_headless(int max_frames)
                 saved_bpl[n] = amiga_denise.bplpt[n];
 
             amiga_agnus.copper_pc = amiga_agnus.cop1lc;
+            int hl_vstart, hl_vstop;
+            compute_diw_vertical(&hl_vstart, &hl_vstop);
             for (int sl = 0; sl < HL_H; sl++) {
                 agnus_tick_scanline(&amiga_agnus, sl);
                 agnus_copper_scanline(&amiga_agnus,
                                       amiga_bus_chip_ram(),
                                       amiga_bus_chip_ram_size(),
                                       amiga_bus_write_custom);
+                int in_diw_v = (sl >= hl_vstart && sl < hl_vstop);
                 { int sp, ds, de;
                   compute_display_params(&sp, &ds, &de);
+                  if (!in_diw_v) ds = de;
                   denise_render_line(&amiga_denise,
                                      amiga_bus_chip_ram(),
                                      amiga_bus_chip_ram_size(),
                                      &fb[sl * HL_W],
                                      sp, ds, de);
                 }
+                if (!in_diw_v) continue;
                 /* Advance bitplane pointers (same as SDL path) */
                 int np = (amiga_denise.bplcon0 >> 12) & 7;
                 if (np > DENISE_PLANES) np = DENISE_PLANES;
