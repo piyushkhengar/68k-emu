@@ -164,11 +164,31 @@ static void custom_write_reg(uint16_t off, uint16_t val)
     /* ---- Agnus: Blitter registers (0x040–0x074) ------------------- */
     if ((off >= 0x040u && off <= 0x066u) ||
         (off >= 0x070u && off <= 0x074u)) {
-        if (off == 0x058u) {
-            /* BLTSIZE write triggers synchronous blit then fires IRQ */
+        if (off == 0x058u || off == 0x05Eu) {
+            /* BLTSIZE (OCS, $58) and BLTSIZH (ECS, $5E) both trigger a blit.
+             *
+             * OCS BLTSIZE encodes height in bits 15:6 (10 bits, 0=1024) and
+             * width in bits 5:0 (6 bits, 0=64).  ECS uses the pair BLTSIZV
+             * ($5C, latched, 15-bit height) + BLTSIZH ($5E, trigger, 11-bit
+             * width).  graphics.library V37+ uses the ECS path on ECS Agnus,
+             * even when the actual size fits in OCS — without this trigger,
+             * BltBitMap silently no-ops (e.g. KS 2.04 disk-insert anim never
+             * copies BitMap1 → BitMap2).
+             *
+             * Repack ECS (h, w) into the OCS BLTSIZE format expected by
+             * agnus_blitter_execute().  Sizes wider than 64 words won't
+             * survive the round-trip, but every blit issued by KS 2.04's
+             * boot path fits. */
+            uint16_t bltsize_to_pass = val;
+            if (off == 0x05Eu) {
+                uint16_t hh = amiga_agnus.bltsizv;
+                uint16_t ww = val & 0x07FFu;
+                bltsize_to_pass = (uint16_t)((hh << 6) | (ww & 0x3F));
+            }
             extern int blt_op_count;
             blt_op_count++;
-            agnus_blitter_execute(&amiga_agnus, chip_ram, CHIP_RAM_SIZE, val);
+            agnus_blitter_execute(&amiga_agnus, chip_ram, CHIP_RAM_SIZE,
+                                  bltsize_to_pass);
             paula_assert_intreq(&amiga_paula, INTREQ_BLIT);
         } else {
             agnus_write_reg(&amiga_agnus, off, val);

@@ -106,6 +106,12 @@ void agnus_write_reg(agnus_t *ag, uint16_t offset, uint16_t val)
     case 0x058: /* BLTSIZE — stores size; blitter_execute called by bus.c */
         break;
 
+    case 0x05C: /* BLTSIZV (ECS) — vertical size, latched until BLTSIZH triggers */
+        ag->bltsizv = val & 0x7FFFu;  /* 15 bits, 0 means 32768 */
+        break;
+    case 0x05E: /* BLTSIZH (ECS) — horizontal size; trigger handled by bus.c */
+        break;
+
     case 0x060: ag->bltcmod = (int16_t)val; break;
     case 0x062: ag->bltbmod = (int16_t)val; break;
     case 0x064: ag->bltamod = (int16_t)val; break;

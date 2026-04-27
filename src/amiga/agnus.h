@@ -100,6 +100,7 @@ typedef struct {
     uint16_t bltadat;    /* A data register (line mode texture)           */
     uint16_t bltbdat;    /* B data register (line mode pattern)           */
     uint16_t bltcdat;    /* C data register                               */
+    uint16_t bltsizv;    /* ECS Blitter vertical size (0x05C)             */
 
     /* Bitplane DMA control (step 4 — display setup) */
     uint16_t ddfstrt;   /* data-fetch start position (0x092)             */
