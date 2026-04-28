@@ -106,6 +106,13 @@ void agnus_write_reg(agnus_t *ag, uint16_t offset, uint16_t val)
     case 0x058: /* BLTSIZE — stores size; blitter_execute called by bus.c */
         break;
 
+    case 0x05A: /* BLTCON0L (ECS) — update only BLTCON0[7:0] (minterm),
+                 * leaving USE/ASH bits intact. graphics.library writes
+                 * this between chained per-plane blits to vary the
+                 * minterm per plane (e.g. JAM1 text: 0xFA for pen-bit
+                 * planes, 0x0A for background planes). */
+        ag->bltcon0 = (uint16_t)((ag->bltcon0 & 0xFF00u) | (val & 0xFFu));
+        break;
     case 0x05C: /* BLTSIZV (ECS) — vertical size, latched until BLTSIZH triggers */
         ag->bltsizv = val & 0x7FFFu;  /* 15 bits, 0 means 32768 */
         break;

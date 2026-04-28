@@ -10,6 +10,7 @@
 #include "paula.h"
 #include "agnus.h"
 #include "denise.h"
+#include "cpu.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -187,6 +188,48 @@ static void custom_write_reg(uint16_t off, uint16_t val)
             }
             extern int blt_op_count;
             blt_op_count++;
+            {
+                static int blit_log = -1;
+                if (blit_log < 0) blit_log = getenv("BLIT_LOG") ? 1 : 0;
+                if (blit_log) {
+                    uint16_t bc0 = amiga_agnus.bltcon0;
+                    uint16_t bc1 = amiga_agnus.bltcon1;
+                    int hh = (int)(bltsize_to_pass >> 6); if (!hh) hh = 1024;
+                    int ww = (int)(bltsize_to_pass & 0x3Fu); if (!ww) ww = 64;
+                    fprintf(stderr,
+                        "BLIT #%d pc=%06X trig=%03X "
+                        "BC0=%04X BC1=%04X "
+                        "USE=%c%c%c%c MT=%02X ASH=%X BSH=%X "
+                        "FWM=%04X LWM=%04X "
+                        "ADAT=%04X BDAT=%04X CDAT=%04X "
+                        "size=%dx%dw "
+                        "A=%06X B=%06X C=%06X D=%06X "
+                        "AMOD=%d BMOD=%d CMOD=%d DMOD=%d\n",
+                        blt_op_count, cpu.pc, off,
+                        bc0, bc1,
+                        (bc0 & 0x800) ? 'A' : '-',
+                        (bc0 & 0x400) ? 'B' : '-',
+                        (bc0 & 0x200) ? 'C' : '-',
+                        (bc0 & 0x100) ? 'D' : '-',
+                        bc0 & 0xFF,
+                        (bc0 >> 12) & 0xF,
+                        (bc1 >> 12) & 0xF,
+                        amiga_agnus.bltafwm,
+                        amiga_agnus.bltalwm,
+                        amiga_agnus.bltadat,
+                        amiga_agnus.bltbdat,
+                        amiga_agnus.bltcdat,
+                        hh, ww,
+                        amiga_agnus.bltapt,
+                        amiga_agnus.bltbpt,
+                        amiga_agnus.bltcpt,
+                        amiga_agnus.bltdpt,
+                        (int16_t)amiga_agnus.bltamod,
+                        (int16_t)amiga_agnus.bltbmod,
+                        (int16_t)amiga_agnus.bltcmod,
+                        (int16_t)amiga_agnus.bltdmod);
+                }
+            }
             agnus_blitter_execute(&amiga_agnus, chip_ram, CHIP_RAM_SIZE,
                                   bltsize_to_pass);
             paula_assert_intreq(&amiga_paula, INTREQ_BLIT);
@@ -350,12 +393,17 @@ void amiga_bus_write8(uint32_t addr, uint8_t val)
     if (addr < 0xDFF000u) return;
 
     /* Custom chip registers: 0xDFF000–0xDFFFFF.
-     * Custom chip registers are 16-bit write-only; 8-bit writes are
-     * not supported by the hardware and silently ignored here.
-     * Use amiga_bus_write16() for correct dispatch.
-     * Agnus and Denise dispatch will be added in Chapter 3. */
-    if (addr < 0xE00000u)
+     * Most regs are word-only; byte writes are silently ignored.
+     * Exception: BLTCON0L ($DFF05A, ECS-only) supports a byte write
+     * to $5B that updates only BLTCON0[7:0] (the minterm) without
+     * disturbing USE/ASH. graphics.library uses this for chained
+     * per-plane minterm updates inside BltTemplate. */
+    if (addr < 0xE00000u) {
+        uint16_t off = (uint16_t)(addr & 0xFFFu);
+        if (off == 0x05Au || off == 0x05Bu)
+            agnus_write_reg(&amiga_agnus, 0x05Au, (uint16_t)val);
         return;
+    }
 
     /* ROM and everything else: writes silently ignored */
 }
