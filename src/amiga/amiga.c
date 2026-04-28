@@ -267,6 +267,215 @@ static void compute_diw_vertical(int *vstart, int *vstop)
 }
 
 /* ------------------------------------------------------------------ */
+/*  KS 1.3 strap workarounds (shared between SDL and headless paths)    */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Apply KS 1.3 strap-module workarounds. Called from the per-instruction
+ * loop in both amiga_run (SDL) and amiga_run_headless, gated externally
+ * on `is_ks13`. Keeping a single copy ensures both paths render the
+ * hand-holding-disk boot screen identically.
+ *
+ * The fixes here address three classes of issues in the strap module
+ * (FE8000-FE8FFF in KS 1.3):
+ *   1. Hangs that need their wait/loop bypassed (FE8F8E, FC0B58, etc.)
+ *   2. Trackdisk OpenDevice/DoIO calls that need fake-success returns
+ *      so the strap reaches its display_setup path (FE8502, FE855C, ...)
+ *   3. ROM Flood NULL-Layer bug (FE8904) — replaced with a C scan-line
+ *      flood fill bounded by the preceding Move/Draw bbox.
+ *   4. LoadView+WaitTOF (FE897A) — install COP1LC from the View's
+ *      LOFCprList and skip the WaitTOF that needs a working scheduler.
+ */
+static void apply_ks13_strap_workarounds(void)
+{
+    /* Skip input.device and intuition.library inits at FC0B58 (PC ahead
+     * of the JSR). cpu.a[1] holds the resident-tag pointer. */
+    if (cpu.pc == 0xFC0B58 &&
+        (cpu.a[1] == 0xFE4C26 || cpu.a[1] == 0xFD3D8C)) {
+        cpu.d[0] = 0;
+        cpu.pc = 0xFC0B5C;
+    }
+    /* Skip trackdisk motor polling loop. */
+    if (cpu.pc == 0xFE8F8E)
+        cpu.pc = 0xFE8FB6;
+    /* Clear HELP watchdog after FC3028 writes it. */
+    if (cpu.pc == 0xFC302C)
+        amiga_bus_write32(0x000000, 0x00000000);
+    /* Suppress Guru: keep LastAlert = -1. */
+    if (cpu.pc == 0xFC3138) {
+        uint32_t eb = amiga_bus_read32(0x04);
+        if (eb >= 0x20 && eb < 0x80000)
+            amiga_bus_write32(eb + 0x202, 0xFFFFFFFF);
+    }
+    /* Force expansion init continue (not RESET). */
+    if (cpu.pc == 0xFC3078)
+        cpu.d[0] = 0;
+    /* Clear AttnResched before user-mode drop. */
+    if (cpu.pc == 0xFC04BE) {
+        uint32_t eb = amiga_bus_read32(0x04);
+        if (eb >= 0x20 && eb < 0x80000)
+            amiga_bus_write8(eb + 0x124, 0x00);
+    }
+
+    /* Track Draw bounding box for Flood containment. The strap's polygons
+     * have intentional openings (disk label slot); we constrain our flood
+     * fill to the bbox of the preceding Move/Draw calls so it can't leak
+     * outside. Statics reset per boot generation. */
+    static int bbox_x0, bbox_y0, bbox_x1, bbox_y1;
+    static int bbox_gen = -1;
+    if (bbox_gen != boot_gen) {
+        bbox_x0 = 9999; bbox_y0 = 9999;
+        bbox_x1 = -1;   bbox_y1 = -1;
+        bbox_gen = boot_gen;
+    }
+    if (cpu.pc == 0xFE88DC || cpu.pc == 0xFE8918) {
+        int dx = cpu.d[0], dy = cpu.d[1];
+        if (dx < bbox_x0) bbox_x0 = dx;
+        if (dx > bbox_x1) bbox_x1 = dx;
+        if (dy < bbox_y0) bbox_y0 = dy;
+        if (dy > bbox_y1) bbox_y1 = dy;
+    }
+
+    /* ROM Flood() doesn't work on a bare RastPort (no Layer). The
+     * NULL-Layer path in graphics.library skips scan-stack init, so the
+     * fill loop does nothing. Intercept JSR Flood and do a C scan-line
+     * fill constrained to the polygon's bounding box. */
+    if (cpu.pc == 0xFE8904) {
+        uint32_t rp = cpu.a[1];
+        uint32_t bm = amiga_bus_read32(rp + 4);
+        int apen = amiga_bus_read8(rp + 0x19);
+        int sx = cpu.d[0], sy = cpu.d[1];
+        if (bm) {
+            int bpr = amiga_bus_read16(bm);
+            int depth = amiga_bus_read8(bm + 5);
+            int rows = amiga_bus_read16(bm + 2);
+            uint32_t planes[6];
+            for (int p = 0; p < depth && p < 6; p++)
+                planes[p] = amiga_bus_read32(bm + 8 + p * 4);
+
+            #define FREAD_PX(x,y) ({ \
+                int _c = 0; \
+                int _bo = (y)*bpr + (x)/8; \
+                int _bi = 7 - ((x)&7); \
+                for (int _p=0; _p<depth; _p++) \
+                    _c |= ((amiga_bus_read8(planes[_p]+_bo) >> _bi) & 1) << _p; \
+                _c; })
+            #define FWRITE_PX(x,y,color) do { \
+                int _bo = (y)*bpr + (x)/8; \
+                int _bi = 7 - ((x)&7); \
+                for (int _p=0; _p<depth; _p++) { \
+                    uint8_t _v = amiga_bus_read8(planes[_p]+_bo); \
+                    if ((color >> _p) & 1) _v |= (1 << _bi); \
+                    else                    _v &= ~(1 << _bi); \
+                    amiga_bus_write8(planes[_p]+_bo, _v); \
+                } } while(0)
+
+            /* Use bbox if seed is inside it; otherwise use full bitmap
+             * (border fills rely on previously-drawn outlines from
+             * multiple polygons, not just the latest one). */
+            int bx0, by0, bx1, by1;
+            if (bbox_x1 >= 0 &&
+                sx >= bbox_x0 && sx <= bbox_x1 &&
+                sy >= bbox_y0 && sy <= bbox_y1) {
+                bx0 = bbox_x0 < 0 ? 0 : bbox_x0;
+                by0 = bbox_y0 < 0 ? 0 : bbox_y0;
+                bx1 = bbox_x1 >= bpr*8 ? bpr*8-1 : bbox_x1;
+                by1 = bbox_y1 >= rows ? rows-1 : bbox_y1;
+            } else {
+                bx0 = 0; by0 = 0;
+                bx1 = bpr*8 - 1; by1 = rows - 1;
+            }
+
+            int seed_color = FREAD_PX(sx, sy);
+            if (seed_color != apen &&
+                sx >= 0 && sx < bpr*8 && sy >= 0 && sy < rows) {
+                static int16_t stack[8192][2];
+                int sp_top = 0;
+                stack[sp_top][0] = (int16_t)sx;
+                stack[sp_top][1] = (int16_t)sy;
+                sp_top++;
+
+                while (sp_top > 0 && sp_top < 8180) {
+                    sp_top--;
+                    int cx = stack[sp_top][0];
+                    int cy = stack[sp_top][1];
+                    if (cx < bx0 || cx > bx1 || cy < by0 || cy > by1)
+                        continue;
+                    if (FREAD_PX(cx, cy) != seed_color)
+                        continue;
+                    int lx = cx;
+                    while (lx > bx0 && FREAD_PX(lx - 1, cy) == seed_color)
+                        lx--;
+                    int rx = cx;
+                    while (rx < bx1 && FREAD_PX(rx + 1, cy) == seed_color)
+                        rx++;
+                    int above = 0, below = 0;
+                    for (int x = lx; x <= rx; x++) {
+                        FWRITE_PX(x, cy, apen);
+                        if (cy > by0) {
+                            int c = FREAD_PX(x, cy - 1);
+                            if (c == seed_color && !above) {
+                                stack[sp_top][0] = (int16_t)x;
+                                stack[sp_top][1] = (int16_t)(cy - 1);
+                                sp_top++;
+                                above = 1;
+                            } else if (c != seed_color) above = 0;
+                        }
+                        if (cy < by1) {
+                            int c = FREAD_PX(x, cy + 1);
+                            if (c == seed_color && !below) {
+                                stack[sp_top][0] = (int16_t)x;
+                                stack[sp_top][1] = (int16_t)(cy + 1);
+                                sp_top++;
+                                below = 1;
+                            } else if (c != seed_color) below = 0;
+                        }
+                    }
+                }
+            }
+            #undef FREAD_PX
+            #undef FWRITE_PX
+        }
+        cpu.pc = 0xFE8908; /* skip JSR Flood */
+    }
+
+    /* display_setup (FE8732) builds a Copper list via MakeVPort/MrgCop
+     * and installs it with LoadView. Two issues in our emulator:
+     *   1. LoadView doesn't write COP1LC (graphics.library bug TBD).
+     *   2. WaitTOF hangs because Exec's Wait() needs a working scheduler.
+     * Fix: at WaitTOF call site (FE897A), read View→LOFCprList→start and
+     * force COP1LC to it. Skip WaitTOF. */
+    if (cpu.pc == 0xFE897A) {
+        static int ds_fix_gen = -1;
+        if (ds_fix_gen != boot_gen) {
+            uint32_t view = 0x3AF8;
+            uint32_t lofcpr = amiga_bus_read32(view + 4);
+            if (lofcpr) {
+                uint32_t cop_start = amiga_bus_read32(lofcpr + 4);
+                if (cop_start && cop_start < amiga_bus_chip_ram_size()) {
+                    amiga_agnus.cop1lc = cop_start;
+                    amiga_agnus.copper_pc = cop_start;
+                    amiga_agnus.dmacon |= 0x0100u; /* BPLEN */
+                    ds_fix_gen = boot_gen;
+                }
+            }
+            cpu.pc = 0xFE897E; /* skip WaitTOF JSR (4 bytes) */
+        }
+    }
+
+    /* Skip strap's OpenDevice + all DoIO calls for disk access:
+     *   FE8502: OpenDevice("trackdisk.device") returns success (D0=0)
+     *   FE855C, FE8570, FE859C: DoIO returns success (D0=0) so strap
+     *     proceeds along the FE8600 → FE8732 display setup path. */
+    if (cpu.pc == 0xFE8502) {
+        cpu.d[0] = 0; cpu.pc = 0xFE8506;
+    }
+    if (cpu.pc == 0xFE855C || cpu.pc == 0xFE8570 || cpu.pc == 0xFE859C) {
+        cpu.d[0] = 0; cpu.pc += 4;
+    }
+}
+
+/* ------------------------------------------------------------------ */
 /*  Run loop                                                            */
 /* ------------------------------------------------------------------ */
 
@@ -335,207 +544,11 @@ void amiga_run(void)
                  * loop (see KS 2.04 gfx init at ~FA8D60). */
                 amiga_agnus.hpos = cycles / 2;  /* 1 color clock = 2 CPU cycles */
 
-                /* ---- KS 1.3-specific workarounds (address-dependent) ---- */
-                /* These ONLY run for KS 1.3 (256KB ROM). Running them on
-                 * KS 2.0+ corrupts execution because the same addresses
-                 * contain different code in the larger ROM. */
-                if (is_ks13) {
-                /* Skip input.device and intuition.library inits. */
-                if (cpu.pc == 0xFC0B58 &&
-                    (cpu.a[1] == 0xFE4C26 || cpu.a[1] == 0xFD3D8C)) {
-                    cpu.d[0] = 0;
-                    cpu.pc = 0xFC0B5C;
-                }
-                /* Skip trackdisk motor polling loop. */
-                if (cpu.pc == 0xFE8F8E)
-                    cpu.pc = 0xFE8FB6;
-                /* Clear HELP watchdog after FC3028 writes it */
-                if (cpu.pc == 0xFC302C)
-                    amiga_bus_write32(0x000000, 0x00000000);
-                /* Suppress Guru: keep LastAlert = -1 */
-                if (cpu.pc == 0xFC3138) {
-                    uint32_t eb = amiga_bus_read32(0x04);
-                    if (eb >= 0x20 && eb < 0x80000)
-                        amiga_bus_write32(eb + 0x202, 0xFFFFFFFF);
-                }
-                /* Force expansion init continue (not RESET) */
-                if (cpu.pc == 0xFC3078)
-                    cpu.d[0] = 0;
-                /* Clear AttnResched before user-mode drop. */
-                if (cpu.pc == 0xFC04BE) {
-                    uint32_t eb = amiga_bus_read32(0x04);
-                    if (eb >= 0x20 && eb < 0x80000)
-                        amiga_bus_write8(eb + 0x124, 0x00);
-                }
-                /* Track Draw bounding box for Flood containment.
-                 * The strap's polygons have intentional openings (disk label
-                 * slot).  We constrain our flood fill to the bounding box
-                 * of the preceding Draw calls so it can't leak outside. */
-                { static int bbox_x0, bbox_y0, bbox_x1, bbox_y1;
-                  static int bbox_gen = -1;
-                  if (bbox_gen != boot_gen) {
-                      bbox_x0 = 9999; bbox_y0 = 9999;
-                      bbox_x1 = -1;   bbox_y1 = -1;
-                      bbox_gen = boot_gen;
-                  }
-                  /* Move and Draw both extend the bounding box */
-                  if (cpu.pc == 0xFE88DC || cpu.pc == 0xFE8918) {
-                      int dx = cpu.d[0], dy = cpu.d[1];
-                      if (dx < bbox_x0) bbox_x0 = dx;
-                      if (dx > bbox_x1) bbox_x1 = dx;
-                      if (dy < bbox_y0) bbox_y0 = dy;
-                      if (dy > bbox_y1) bbox_y1 = dy;
-                  }
-
-                /* Workaround: ROM Flood() doesn't work on a bare RastPort
-                 * (no Layer). The NULL-Layer path in graphics.library
-                 * skips scan-stack initialization, so the fill loop does
-                 * nothing. Intercept JSR Flood and do a C scan-line fill
-                 * constrained to the polygon's bounding box. */
-                if (cpu.pc == 0xFE8904) {
-                    uint32_t rp = cpu.a[1];
-                    uint32_t bm = amiga_bus_read32(rp + 4);
-                    int apen = amiga_bus_read8(rp + 0x19);
-                    int sx = cpu.d[0], sy = cpu.d[1];
-                    if (bm) {
-                        int bpr = amiga_bus_read16(bm);
-                        int depth = amiga_bus_read8(bm + 5);
-                        int rows = amiga_bus_read16(bm + 2);
-                        uint32_t planes[6];
-                        for (int p = 0; p < depth && p < 6; p++)
-                            planes[p] = amiga_bus_read32(bm + 8 + p * 4);
-
-                        #define FREAD_PX(x,y) ({ \
-                            int _c = 0; \
-                            int _bo = (y)*bpr + (x)/8; \
-                            int _bi = 7 - ((x)&7); \
-                            for (int _p=0; _p<depth; _p++) \
-                                _c |= ((amiga_bus_read8(planes[_p]+_bo) >> _bi) & 1) << _p; \
-                            _c; })
-                        #define FWRITE_PX(x,y,color) do { \
-                            int _bo = (y)*bpr + (x)/8; \
-                            int _bi = 7 - ((x)&7); \
-                            for (int _p=0; _p<depth; _p++) { \
-                                uint8_t _v = amiga_bus_read8(planes[_p]+_bo); \
-                                if ((color >> _p) & 1) _v |= (1 << _bi); \
-                                else                    _v &= ~(1 << _bi); \
-                                amiga_bus_write8(planes[_p]+_bo, _v); \
-                            } } while(0)
-
-                        /* Use bbox if seed is inside it; otherwise use full
-                         * bitmap (border fills rely on previously-drawn outlines
-                         * from multiple polygons, not just the latest one). */
-                        int bx0, by0, bx1, by1;
-                        if (bbox_x1 >= 0 &&
-                            sx >= bbox_x0 && sx <= bbox_x1 &&
-                            sy >= bbox_y0 && sy <= bbox_y1) {
-                            bx0 = bbox_x0 < 0 ? 0 : bbox_x0;
-                            by0 = bbox_y0 < 0 ? 0 : bbox_y0;
-                            bx1 = bbox_x1 >= bpr*8 ? bpr*8-1 : bbox_x1;
-                            by1 = bbox_y1 >= rows ? rows-1 : bbox_y1;
-                        } else {
-                            bx0 = 0; by0 = 0;
-                            bx1 = bpr*8 - 1; by1 = rows - 1;
-                        }
-
-                        int seed_color = FREAD_PX(sx, sy);
-                        if (seed_color != apen &&
-                            sx >= 0 && sx < bpr*8 && sy >= 0 && sy < rows) {
-                            /* Scan-line flood fill bounded by polygon bbox */
-                            static int16_t stack[8192][2];
-                            int sp_top = 0;
-                            stack[sp_top][0] = (int16_t)sx;
-                            stack[sp_top][1] = (int16_t)sy;
-                            sp_top++;
-
-                            while (sp_top > 0 && sp_top < 8180) {
-                                sp_top--;
-                                int cx = stack[sp_top][0];
-                                int cy = stack[sp_top][1];
-                                if (cx < bx0 || cx > bx1 || cy < by0 || cy > by1)
-                                    continue;
-                                if (FREAD_PX(cx, cy) != seed_color)
-                                    continue;
-                                /* Scan left within bbox */
-                                int lx = cx;
-                                while (lx > bx0 && FREAD_PX(lx - 1, cy) == seed_color)
-                                    lx--;
-                                /* Scan right within bbox */
-                                int rx = cx;
-                                while (rx < bx1 && FREAD_PX(rx + 1, cy) == seed_color)
-                                    rx++;
-                                /* Fill span and push neighbors */
-                                int above = 0, below = 0;
-                                for (int x = lx; x <= rx; x++) {
-                                    FWRITE_PX(x, cy, apen);
-                                    if (cy > by0) {
-                                        int c = FREAD_PX(x, cy - 1);
-                                        if (c == seed_color && !above) {
-                                            stack[sp_top][0] = (int16_t)x;
-                                            stack[sp_top][1] = (int16_t)(cy - 1);
-                                            sp_top++;
-                                            above = 1;
-                                        } else if (c != seed_color) above = 0;
-                                    }
-                                    if (cy < by1) {
-                                        int c = FREAD_PX(x, cy + 1);
-                                        if (c == seed_color && !below) {
-                                            stack[sp_top][0] = (int16_t)x;
-                                            stack[sp_top][1] = (int16_t)(cy + 1);
-                                            sp_top++;
-                                            below = 1;
-                                        } else if (c != seed_color) below = 0;
-                                    }
-                                }
-                            }
-                        }
-                        #undef FREAD_PX
-                        #undef FWRITE_PX
-                    }
-                    cpu.pc = 0xFE8908; /* skip JSR Flood */
-                }
-                }
-                /* Workaround: strap's display_setup WaitTOF + LoadView.
-                 *
-                 * display_setup (FE8732) builds a Copper list via MakeVPort/MrgCop
-                 * and installs it with LoadView.  Two issues in our emulator:
-                 *   1. LoadView doesn't write COP1LC (graphics.library bug TBD).
-                 *   2. WaitTOF hangs because Exec's Wait() needs a working scheduler.
-                 *
-                 * Fix: at the WaitTOF call site (FE897A), read the View's
-                 * LOFCprList→start and force COP1LC to it.  Skip WaitTOF. */
-                if (cpu.pc == 0xFE897A) {
-                    static int ds_fix_gen = -1;
-                    if (ds_fix_gen != boot_gen) {
-                        uint32_t view = 0x3AF8;
-                        uint32_t lofcpr = amiga_bus_read32(view + 4);
-                        if (lofcpr) {
-                            uint32_t cop_start = amiga_bus_read32(lofcpr + 4);
-                            if (cop_start && cop_start < amiga_bus_chip_ram_size()) {
-                                amiga_agnus.cop1lc = cop_start;
-                                amiga_agnus.copper_pc = cop_start;
-                                amiga_agnus.dmacon |= 0x0100u; /* BPLEN */
-                                ds_fix_gen = boot_gen;
-                            }
-                        }
-                        cpu.pc = 0xFE897E; /* skip WaitTOF JSR (4 bytes) */
-                    }
-                }
-                /* Workaround: skip ALL strap disk operations.
-                 * FE8502: OpenDevice("trackdisk.device") — hangs in motor ctrl
-                 * FE855C, FE8570, FE859C: DoIO calls for disk read
-                 * Skip OpenDevice and jump to FE8600 (display setup path). */
-                /* Skip strap's OpenDevice + all DoIO calls for disk access.
-                 * OpenDevice at FE8502 returns success (D0=0).
-                 * DoIO calls at FE855C, FE8570, FE859C return error (D0=-1)
-                 * so strap takes the FE8600 → FE8732 display setup path. */
-                if (cpu.pc == 0xFE8502) {
-                    cpu.d[0] = 0; cpu.pc = 0xFE8506;  /* OpenDevice ok */
-                }
-                if (cpu.pc == 0xFE855C || cpu.pc == 0xFE8570 || cpu.pc == 0xFE859C) {
-                    cpu.d[0] = 0; cpu.pc += 4;  /* DoIO "success" with empty buffer */
-                }
-                } /* end if (is_ks13) */
+                /* KS 1.3 strap workarounds (gated on ROM size — running
+                 * them on KS 2.0+ corrupts execution since the same
+                 * addresses host different code in the larger ROM). */
+                if (is_ks13)
+                    apply_ks13_strap_workarounds();
                 /* ---- KS 2.04 workarounds ---- */
                 if (!is_ks13) {
                     /* Strap disk-check at FCE3A8: blocks in trackdisk
@@ -739,34 +752,9 @@ void amiga_run_headless(int max_frames)
                 cpu.cycles += (uint32_t)c;
                 cycles += c;
 
-                /* ---- KS 1.3-specific workarounds (same as gfx path) ---- */
-                if (is_ks13) {
-                if (cpu.pc == 0xFE8F8E)
-                    cpu.pc = 0xFE8FB6;
-                if (cpu.pc == 0xFC04BE) {
-                    uint32_t eb = amiga_bus_read32(0x04);
-                    if (eb >= 0x20 && eb < 0x80000)
-                        amiga_bus_write8(eb + 0x124, 0x00);
-                }
-                if (cpu.pc == 0xFC302C)
-                    amiga_bus_write32(0x000000, 0x00000000);
-                if (cpu.pc == 0xFC3138) {
-                    uint32_t eb = amiga_bus_read32(0x04);
-                    if (eb >= 0x20 && eb < 0x80000)
-                        amiga_bus_write32(eb + 0x202, 0xFFFFFFFF);
-                }
-                if (cpu.pc == 0xFC3078)
-                    cpu.d[0] = 0;
-                if (cpu.pc == 0xFC0B58 &&
-                    (cpu.a[1] == 0xFE4C26 || cpu.a[1] == 0xFD3D8C)) {
-                    cpu.d[0] = 0;
-                    cpu.pc = 0xFC0B5C;
-                }
-                if (cpu.pc == 0xFE8502) {
-                    cpu.d[0] = 0xFFFFFFFF;
-                    cpu.pc = 0xFE8506;
-                }
-                } /* end if (is_ks13) */
+                /* KS 1.3 strap workarounds (shared with SDL path). */
+                if (is_ks13)
+                    apply_ks13_strap_workarounds();
                 /* ---- KS 2.04: disk-check → display setup ---- */
                 if (!is_ks13 && cpu.pc == 0xFCE3A8) {
                     static int ds_display_gen_hl = -1;
