@@ -216,8 +216,21 @@ void agnus_copper_scanline(agnus_t *ag,
             } else {
                 /* WAIT: stall until beam reaches position */
                 if (!condition) {
-                    ag->copper_pc -= 4; /* rewind; retry on next scanline */
-                    return;
+                    /* Mid-scanline WAIT: if the requested vertical position is
+                     * the current line and only the horizontal target lies
+                     * ahead, advance hpos to that target and continue. This
+                     * lets a Copper that flips colors at H=$98 (e.g. KS 2.04
+                     * strap rainbow → blue split) fire within the same line
+                     * instead of being deferred to the next. */
+                    uint8_t cur_line8 = (uint8_t)(ag->line & 0xFFu);
+                    if ((bfv & 0x80u) && vp == cur_line8 &&
+                        hp > (ag->hpos & 0xFEu)) {
+                        ag->hpos = hp;
+                        /* condition is now met — fall through */
+                    } else {
+                        ag->copper_pc -= 4; /* rewind; retry on next scanline */
+                        return;
+                    }
                 }
                 /* condition met — fall through and continue */
             }

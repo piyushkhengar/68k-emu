@@ -307,6 +307,9 @@ void amiga_run(void)
                 cia_tod_tick(&amiga_cia_a);
             }
 
+            /* Snapshot palette before Copper runs so denise_render_line can
+             * replay mid-line color writes at the right pixel position. */
+            denise_begin_scanline(&amiga_denise);
             /* Run the Copper — executes MOVEs and WAITs up to this line. */
             agnus_copper_scanline(&amiga_agnus,
                                   amiga_bus_chip_ram(),
@@ -689,6 +692,9 @@ void amiga_run_headless(int max_frames)
             if (line == 0)
                 amiga_agnus.copper_pc = amiga_agnus.cop1lc;
 
+            /* Snapshot palette before Copper runs so denise_render_line can
+             * replay mid-line color writes at the right pixel position. */
+            denise_begin_scanline(&amiga_denise);
             /* Run the Copper for this scanline. */
             agnus_copper_scanline(&amiga_agnus,
                                   amiga_bus_chip_ram(),
@@ -1098,6 +1104,7 @@ void amiga_run_headless(int max_frames)
             compute_diw_vertical(&hl_vstart, &hl_vstop);
             for (int sl = 0; sl < HL_H; sl++) {
                 agnus_tick_scanline(&amiga_agnus, sl);
+                denise_begin_scanline(&amiga_denise);
                 agnus_copper_scanline(&amiga_agnus,
                                       amiga_bus_chip_ram(),
                                       amiga_bus_chip_ram_size(),
@@ -1146,11 +1153,11 @@ void amiga_run_headless(int max_frames)
                      saved_bpl[0], saved_bpl[1],
                      (DENISE_PLANES > 2) ? saved_bpl[2] : 0,
                      amiga_agnus.cop1lc); }
-            /* Dump first 32 Copper instructions from COP1LC */
+            /* Dump Copper instructions from COP1LC */
             if (getenv("CHIP_DUMP")) {
                 uint32_t cp = amiga_agnus.cop1lc;
                 printf("[HEADLESS] Copper list @ %06X:\n", cp);
-                for (int i = 0; i < 64 && cp + 4u <= amiga_bus_chip_ram_size(); i++) {
+                for (int i = 0; i < 4096 && cp + 4u <= amiga_bus_chip_ram_size(); i++) {
                     uint16_t a = amiga_bus_read16(cp);
                     uint16_t b = amiga_bus_read16(cp + 2);
                     if ((a & 1) == 0) {

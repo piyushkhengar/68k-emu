@@ -254,6 +254,16 @@ static void custom_write_reg(uint16_t off, uint16_t val)
          off == 0x100u || off == 0x102u || off == 0x104u ||
         (off >= 0x140u && off <= 0x17Eu) ||
         (off >= 0x180u && off <= 0x1BEu)) {
+        /* Color register write: also record at the current Agnus hpos so the
+         * renderer can replay the change at the right pixel. CPU writes land
+         * at hpos=0 (start of scanline) since we don't model intra-line CPU
+         * timing — that matches the historical behaviour. */
+        if (off >= 0x180u && off <= 0x1BEu) {
+            denise_record_color_change(&amiga_denise,
+                                       (uint16_t)amiga_agnus.hpos,
+                                       (uint8_t)((off - 0x180u) / 2u),
+                                       val & 0x0FFFu);
+        }
         denise_write_reg(&amiga_denise, off, val);
         return;
     }

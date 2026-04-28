@@ -22,6 +22,34 @@ void denise_reset(denise_t *d)
 }
 
 /* ------------------------------------------------------------------ */
+/*  Mid-line color change tracking                                      */
+/* ------------------------------------------------------------------ */
+
+void denise_begin_scanline(denise_t *d)
+{
+    memcpy(d->pre_color, d->color, sizeof(d->pre_color));
+    d->n_mid_changes = 0;
+}
+
+void denise_record_color_change(denise_t *d, uint16_t hpos,
+                                uint8_t color_idx, uint16_t value)
+{
+    if (color_idx >= DENISE_COLORS) return;
+    if (d->n_mid_changes >= DENISE_MAX_MID_CHANGES) return;
+    /* Convert lores hpos to HIRES output pixel: pixel 0 corresponds to
+     * hpos 0x81 (left edge of normal DIW). Negative trigger_x clamps to 0
+     * so writes that happen "before the visible area" apply at line start. */
+    int trigger_x = ((int)hpos - 0x81) * 2;
+    if (trigger_x < 0) trigger_x = 0;
+    if (trigger_x > DENISE_HIRES_W) trigger_x = DENISE_HIRES_W;
+    int i = d->n_mid_changes;
+    d->mid_changes[i].trigger_x = (uint16_t)trigger_x;
+    d->mid_changes[i].color_idx = color_idx;
+    d->mid_changes[i].value     = value;
+    d->n_mid_changes = i + 1;
+}
+
+/* ------------------------------------------------------------------ */
 /*  Colour expansion                                                    */
 /* ------------------------------------------------------------------ */
 
@@ -153,20 +181,38 @@ void denise_render_line(denise_t *d,
 
     int hires = (d->bplcon0 >> 15) & 1;
 
-    /* Fill entire output with background colour (COLOR00). */
-    uint32_t bg = denise_expand_color(d->color[0]);
-    for (int i = 0; i < DENISE_HIRES_W; i++)
-        pixels[i] = bg;
+    /*
+     * Effective per-pixel palette. Start from the snapshot taken at scanline
+     * begin; mid_changes are replayed in order as out_x crosses each
+     * trigger_x. If the caller never invoked denise_begin_scanline (older
+     * test paths, paths that don't run Copper), n_mid_changes is 0 and
+     * pre_color is whatever the last begin_scanline cached — fall back to
+     * d->color in that case so behaviour matches the pre-mid-line code.
+     */
+    uint16_t cur_color[DENISE_COLORS];
+    if (d->n_mid_changes > 0)
+        memcpy(cur_color, d->pre_color, sizeof(cur_color));
+    else
+        memcpy(cur_color, d->color, sizeof(cur_color));
+    int change_idx = 0;
 
+    /* Iterate by OUTPUT pixel so we can apply mid-line color changes in
+     * lock-step with x advancing. Source pixel = out_x - scroll_px. */
     if (hires) {
-        /*
-         * HIRES: 640 source pixels → 640 output pixels (1:1).
-         * DMA data starts at output pixel scroll_px.
-         */
-        for (int px = 0; px < DENISE_HIRES_W; px++) {
-            int out_x = scroll_px + px;
-            if (out_x < diw_start || out_x >= diw_end)
+        for (int out_x = 0; out_x < DENISE_HIRES_W; out_x++) {
+            while (change_idx < d->n_mid_changes &&
+                   d->mid_changes[change_idx].trigger_x <= out_x) {
+                cur_color[d->mid_changes[change_idx].color_idx] =
+                    d->mid_changes[change_idx].value;
+                change_idx++;
+            }
+            uint32_t bg = denise_expand_color(cur_color[0]);
+            int px = out_x - scroll_px;
+            if (out_x < diw_start || out_x >= diw_end ||
+                px < 0 || px >= DENISE_HIRES_W) {
+                pixels[out_x] = bg;
                 continue;
+            }
 
             int word_idx = px / 16;
             int bit_pos  = 15 - (px % 16);
@@ -180,17 +226,24 @@ void denise_render_line(denise_t *d,
                 if ((word >> bit_pos) & 1u)
                     color_idx |= (uint8_t)(1u << n);
             }
-            pixels[out_x] = denise_expand_color(d->color[color_idx]);
+            pixels[out_x] = denise_expand_color(cur_color[color_idx]);
         }
     } else {
-        /*
-         * LORES: 320 source pixels → 640 output pixels (each doubled).
-         * DMA data starts at output pixel scroll_px.
-         */
-        for (int px = 0; px < DENISE_LORES_W; px++) {
-            int out_x = scroll_px + px * 2;
-            if (out_x + 1 < diw_start || out_x >= diw_end)
+        /* LORES: source pixel = (out_x - scroll_px) / 2 (each doubled). */
+        for (int out_x = 0; out_x < DENISE_HIRES_W; out_x++) {
+            while (change_idx < d->n_mid_changes &&
+                   d->mid_changes[change_idx].trigger_x <= out_x) {
+                cur_color[d->mid_changes[change_idx].color_idx] =
+                    d->mid_changes[change_idx].value;
+                change_idx++;
+            }
+            uint32_t bg = denise_expand_color(cur_color[0]);
+            int px = (out_x - scroll_px) / 2;
+            if (out_x < diw_start || out_x >= diw_end ||
+                (out_x - scroll_px) < 0 || px >= DENISE_LORES_W) {
+                pixels[out_x] = bg;
                 continue;
+            }
 
             int word_idx = px / 16;
             int bit_pos  = 15 - (px % 16);
@@ -204,11 +257,7 @@ void denise_render_line(denise_t *d,
                 if ((word >> bit_pos) & 1u)
                     color_idx |= (uint8_t)(1u << n);
             }
-            uint32_t c = denise_expand_color(d->color[color_idx]);
-            if (out_x >= diw_start && out_x < DENISE_HIRES_W)
-                pixels[out_x] = c;
-            if (out_x + 1 >= diw_start && out_x + 1 < DENISE_HIRES_W)
-                pixels[out_x + 1] = c;
+            pixels[out_x] = denise_expand_color(cur_color[color_idx]);
         }
     }
 

@@ -66,6 +66,21 @@ typedef struct {
     uint16_t datb;  /* SPRxDATB: bit-plane B (bit 1 of colour index)             */
 } sprite_t;
 
+/*
+ * Mid-line color register change recorded by Copper between scanline start
+ * and the current hpos. denise_render_line applies these changes per pixel
+ * so a Copper that flips color[4] at H=$98 produces a horizontal split
+ * (e.g. KS 2.04 strap rainbow gradient on the left, dark blue on the right).
+ *
+ * trigger_x is in HIRES output pixels: (hpos - 0x81) * 2.
+ */
+#define DENISE_MAX_MID_CHANGES 64
+typedef struct {
+    uint16_t trigger_x;
+    uint8_t  color_idx;   /* 0..31 */
+    uint16_t value;       /* 12-bit 0x0RGB */
+} denise_mid_change_t;
+
 typedef struct {
     uint16_t color[DENISE_COLORS];     /* palette: 12-bit 0x0RGB per entry */
     uint16_t bplcon0;                  /* bitplane control register 0       */
@@ -73,6 +88,12 @@ typedef struct {
     uint16_t bplcon2;                  /* priority control (stored only)    */
     uint32_t bplpt[DENISE_PLANES];     /* bitplane pointers into chip RAM   */
     sprite_t spr[DENISE_SPRITES];      /* sprite registers                  */
+
+    /* Per-scanline mid-line color change tracking (populated by Copper writes
+     * via denise_record_color_change; consumed by denise_render_line). */
+    uint16_t pre_color[DENISE_COLORS];
+    denise_mid_change_t mid_changes[DENISE_MAX_MID_CHANGES];
+    int      n_mid_changes;
 } denise_t;
 
 /* Lifecycle */
@@ -112,5 +133,17 @@ void denise_render_line(denise_t *d,
                         const uint8_t *chip_ram, uint32_t chip_ram_size,
                         uint32_t *pixels,
                         int scroll_px, int diw_start, int diw_end);
+
+/* denise_begin_scanline — call before Copper runs for a scanline.
+ * Snapshots the current palette as the "scanline-start" state and clears
+ * the mid-line change buffer. */
+void denise_begin_scanline(denise_t *d);
+
+/* denise_record_color_change — called by the bus on color-register writes
+ * during a scanline. hpos is the Agnus beam horizontal position in lores
+ * cycles; this is the point at which the color change takes effect for the
+ * remainder of the scanline. */
+void denise_record_color_change(denise_t *d, uint16_t hpos,
+                                uint8_t color_idx, uint16_t value);
 
 #endif /* AMIGA_DENISE_H */
