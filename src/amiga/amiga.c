@@ -19,6 +19,7 @@
 #include "cpu_internal.h"  /* for sync_a7_to_sp */
 #include "memory.h"
 #include <stdio.h>
+#include <stdlib.h>
 
 #ifdef HAVE_SDL2
 #  include "renderer.h"
@@ -223,6 +224,11 @@ static void compute_display_params(int *scroll_px, int *diw_start, int *diw_end)
     /* Scroll: HIRES pixel offset of DMA pixel 0 in the 640px output. */
     int delay = hires ? 9 : 17;
     *scroll_px = (2 * ddfstrt + delay - 0x81) * 2;
+    /* BPLCON1 PF1H (odd-plane horizontal scroll, OCS bits 0-3): each unit is
+     * one lores pixel = two hires output pixels. KS 2.04's strap sets BPLCON1
+     * to compensate for its non-standard DDFSTRT/DIWSTRT pair; without honoring
+     * it the leftmost ~16 hires pixels of bitmap data fall outside DIW. */
+    *scroll_px += (int)(amiga_denise.bplcon1 & 0x0F) * 2;
 
     /* DIW clipping range in the 640px output (HIRES pixels).
      * Output pixel 0 corresponds to hardware position 0x81.
@@ -777,6 +783,62 @@ void amiga_run_headless(int max_frames)
                     printf("[KS204] F%d: display setup ERROR D0=%08X\n",
                            frame, cpu.d[0]);
 
+                /* Dump RastPort state at strap Text() call sites */
+                if (!is_ks13 && getenv("RP_DUMP") &&
+                    (cpu.pc == 0xFCE788 || cpu.pc == 0xFCE7BA ||
+                     cpu.pc == 0xFCEA3C)) {
+                    static int dumped[3] = {0, 0, 0};
+                    int idx = (cpu.pc == 0xFCE788) ? 0 :
+                              (cpu.pc == 0xFCE7BA) ? 1 : 2;
+                    if (!dumped[idx]) {
+                        dumped[idx] = 1;
+                        uint32_t rp  = cpu.a[1];
+                        uint32_t bm  = amiga_bus_read32(rp + 0x04);
+                        uint32_t tr  = amiga_bus_read32(rp + 0x0C);
+                        uint32_t fnt = amiga_bus_read32(rp + 0x34);
+                        uint8_t  fg  = (uint8_t)amiga_bus_read8(rp + 0x19);
+                        uint8_t  bg  = (uint8_t)amiga_bus_read8(rp + 0x1A);
+                        uint8_t  drm = (uint8_t)amiga_bus_read8(rp + 0x1C);
+                        uint16_t mask= (uint16_t)amiga_bus_read8(rp + 0x18);
+                        printf("[RP_DUMP @ PC=%06X] RP=%06X BitMap=%06X "
+                               "TmpRas=%06X Font=%06X "
+                               "FgPen=%u BgPen=%u DrMd=%02X Mask=%02X\n",
+                               cpu.pc, rp, bm, tr, fnt, fg, bg, drm, mask);
+                        if (bm && bm < 0x80000) {
+                            uint8_t  depth = (uint8_t)amiga_bus_read8(bm + 0x05);
+                            uint16_t bpr   = (uint16_t)amiga_bus_read16(bm + 0x00);
+                            uint16_t rows  = (uint16_t)amiga_bus_read16(bm + 0x02);
+                            uint32_t p0    = amiga_bus_read32(bm + 0x08);
+                            uint32_t p1    = amiga_bus_read32(bm + 0x0C);
+                            uint32_t p2    = amiga_bus_read32(bm + 0x10);
+                            printf("[RP_DUMP] BitMap fields: BytesPerRow=%u Rows=%u "
+                                   "Depth=%u Plane0=%06X Plane1=%06X Plane2=%06X\n",
+                                   bpr, rows, depth, p0, p1, p2);
+                        }
+                        if (tr && tr < 0x80000) {
+                            uint32_t trbuf = amiga_bus_read32(tr + 0x00);
+                            uint32_t trsz  = amiga_bus_read32(tr + 0x04);
+                            printf("[RP_DUMP] TmpRas: RasPtr=%06X Size=%u\n",
+                                   trbuf, trsz);
+                        }
+                        /* Cursor pos at the moment of Text() call */
+                        int16_t cpx = (int16_t)amiga_bus_read16(rp + 0x24);
+                        int16_t cpy = (int16_t)amiga_bus_read16(rp + 0x26);
+                        printf("[RP_DUMP] cp_x=%d cp_y=%d D0(len)=%u A0(str)=%06X\n",
+                               cpx, cpy, cpu.d[0], cpu.a[0]);
+                        /* Print the string pointed to by A0 */
+                        if (cpu.a[0] && cpu.d[0] > 0 && cpu.d[0] < 200) {
+                            printf("[RP_DUMP] String: \"");
+                            for (uint32_t i = 0; i < cpu.d[0]; i++) {
+                                uint8_t ch = amiga_bus_read8(cpu.a[0] + i);
+                                if (ch >= 0x20 && ch < 0x7F) putchar(ch);
+                                else printf("\\x%02X", ch);
+                            }
+                            printf("\"\n");
+                        }
+                    }
+                }
+
                 if (trace_active) {
                     bt_total_steps++;
                     uint32_t pc_after = cpu.pc;
@@ -1070,12 +1132,42 @@ void amiga_run_headless(int max_frames)
                 amiga_denise.bplpt[n] = saved_bpl[n];
 
             /* Diagnostic: print display register state */
-            printf("[HEADLESS] BPLCON0=%04X DDFSTRT=%04X DDFSTOP=%04X "
+            printf("[HEADLESS] BPLCON0=%04X BPLCON1=%04X DDFSTRT=%04X DDFSTOP=%04X "
                    "DIWSTRT=%04X DIWSTOP=%04X BPL1MOD=%d BPL2MOD=%d\n",
-                   amiga_denise.bplcon0,
+                   amiga_denise.bplcon0, amiga_denise.bplcon1,
                    amiga_agnus.ddfstrt, amiga_agnus.ddfstop,
                    amiga_agnus.diwstrt, amiga_agnus.diwstop,
                    amiga_agnus.bpl1mod, amiga_agnus.bpl2mod);
+            { int sp, ds, de;
+              compute_display_params(&sp, &ds, &de);
+              printf("[HEADLESS] computed scroll_px=%d diw_start=%d diw_end=%d "
+                     "BPLPT_post[0]=%06X [1]=%06X [2]=%06X COP1LC=%06X\n",
+                     sp, ds, de,
+                     saved_bpl[0], saved_bpl[1],
+                     (DENISE_PLANES > 2) ? saved_bpl[2] : 0,
+                     amiga_agnus.cop1lc); }
+            /* Dump first 32 Copper instructions from COP1LC */
+            if (getenv("CHIP_DUMP")) {
+                uint32_t cp = amiga_agnus.cop1lc;
+                printf("[HEADLESS] Copper list @ %06X:\n", cp);
+                for (int i = 0; i < 64 && cp + 4u <= amiga_bus_chip_ram_size(); i++) {
+                    uint16_t a = amiga_bus_read16(cp);
+                    uint16_t b = amiga_bus_read16(cp + 2);
+                    if ((a & 1) == 0) {
+                        /* MOVE: a=reg-offset (only $80..$1FE valid), b=value */
+                        printf("  [%06X] MOVE $%03X = $%04X\n",
+                               cp, a & 0x1FE, b);
+                    } else if ((b & 1) == 0) {
+                        printf("  [%06X] WAIT  v=$%02X h=$%02X mask=$%04X\n",
+                               cp, (a >> 8) & 0xFF, a & 0xFE, b);
+                    } else {
+                        printf("  [%06X] SKIP  v=$%02X h=$%02X mask=$%04X\n",
+                               cp, (a >> 8) & 0xFF, a & 0xFE, b);
+                    }
+                    cp += 4;
+                    if (a == 0xFFFF && b == 0xFFFE) break;
+                }
+            }
 
             /* Write PPM */
             FILE *ppm = fopen("ks204_headless.ppm", "wb");
@@ -1090,6 +1182,15 @@ void amiga_run_headless(int max_frames)
                 fclose(ppm);
                 printf("[HEADLESS] Wrote ks204_headless.ppm (%dx%d)\n",
                        HL_W, HL_H);
+            }
+            if (getenv("CHIP_DUMP")) {
+                FILE *cr = fopen("/tmp/chip_ram.bin", "wb");
+                if (cr) {
+                    fwrite(amiga_bus_chip_ram(), 1,
+                           amiga_bus_chip_ram_size(), cr);
+                    fclose(cr);
+                    printf("[HEADLESS] Wrote /tmp/chip_ram.bin\n");
+                }
             }
             #undef HL_W
             #undef HL_H
