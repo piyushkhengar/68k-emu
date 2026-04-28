@@ -33,6 +33,16 @@
 #define CPU_CYCLES_PER_LINE 454
 #define E_CLOCKS_PER_LINE    45   /* 454 / 10, rounded */
 
+/*
+ * PAL frames have ~26-32 lines of vertical blanking above the first visible
+ * line. The OS positions content via DIWSTRT.V in PAL beam-line space (e.g.
+ * KS 1.3 standard Workbench uses DIWSTRT.V=44; KS 2.04 strap uses 99). With
+ * AMIGA_HEIGHT=256, painting beam line N into framebuffer row N puts content
+ * visibly in the lower portion of the output. Skip PAL_VBL_LINES at the top
+ * so that beam line N maps to fb row N - PAL_VBL_LINES.
+ */
+#define PAL_VBL_LINES        26
+
 /* ------------------------------------------------------------------ */
 /*  Bus vtable                                                          */
 /* ------------------------------------------------------------------ */
@@ -594,8 +604,12 @@ void amiga_run(void)
             /* CIA-B TOD pin is HSYNC: pulses every scanline. */
             cia_tod_tick(&amiga_cia_b);
 
-            /* Render visible lines into the framebuffer. */
-            if (line < AMIGA_HEIGHT) {
+            /* Render visible lines into the framebuffer.
+             * Beam line `line` (PAL space) maps to framebuffer row
+             * `line - PAL_VBL_LINES`, so DIWSTRT.V values land in the
+             * upper portion of the 256-row output. */
+            int fb_line = line - PAL_VBL_LINES;
+            if (fb_line >= 0 && fb_line < AMIGA_HEIGHT) {
                 int vstart, vstop;
                 compute_diw_vertical(&vstart, &vstop);
                 int in_diw_v = (line >= vstart && line < vstop);
@@ -607,7 +621,7 @@ void amiga_run(void)
                   denise_render_line(&amiga_denise,
                                      amiga_bus_chip_ram(),
                                      amiga_bus_chip_ram_size(),
-                                     &framebuffer[line * AMIGA_WIDTH],
+                                     &framebuffer[fb_line * AMIGA_WIDTH],
                                      sp, ds, de);
                 }
                 /* Skip BPLPT advancement when outside vertical DIW.
@@ -1102,7 +1116,11 @@ void amiga_run_headless(int max_frames)
             amiga_agnus.copper_pc = amiga_agnus.cop1lc;
             int hl_vstart, hl_vstop;
             compute_diw_vertical(&hl_vstart, &hl_vstop);
-            for (int sl = 0; sl < HL_H; sl++) {
+            /* Walk the PAL beam through VBL + visible region so the Copper
+             * sees the full timeline (incl. WAITs in/around VBL) and so
+             * BPLPT advancement covers the actual DIW range. Beam line `sl`
+             * paints into framebuffer row `sl - PAL_VBL_LINES`. */
+            for (int sl = 0; sl < PAL_VBL_LINES + HL_H; sl++) {
                 agnus_tick_scanline(&amiga_agnus, sl);
                 denise_begin_scanline(&amiga_denise);
                 agnus_copper_scanline(&amiga_agnus,
@@ -1110,14 +1128,16 @@ void amiga_run_headless(int max_frames)
                                       amiga_bus_chip_ram_size(),
                                       amiga_bus_write_custom);
                 int in_diw_v = (sl >= hl_vstart && sl < hl_vstop);
-                { int sp, ds, de;
-                  compute_display_params(&sp, &ds, &de);
-                  if (!in_diw_v) ds = de;
-                  denise_render_line(&amiga_denise,
-                                     amiga_bus_chip_ram(),
-                                     amiga_bus_chip_ram_size(),
-                                     &fb[sl * HL_W],
-                                     sp, ds, de);
+                int fb_row = sl - PAL_VBL_LINES;
+                if (fb_row >= 0 && fb_row < HL_H) {
+                    int sp, ds, de;
+                    compute_display_params(&sp, &ds, &de);
+                    if (!in_diw_v) ds = de;
+                    denise_render_line(&amiga_denise,
+                                       amiga_bus_chip_ram(),
+                                       amiga_bus_chip_ram_size(),
+                                       &fb[fb_row * HL_W],
+                                       sp, ds, de);
                 }
                 if (!in_diw_v) continue;
                 /* Advance bitplane pointers (same as SDL path) */
