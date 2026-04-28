@@ -86,25 +86,30 @@ static void test_tick_scanline_stores_line(void)
 
 static void test_vposr_beam_high_bit(void)
 {
+    /* VPOSR layout: bit 15 = LOF (1 for non-interlaced PAL long frame),
+     * bits 14:8 = Agnus ID (0x20 for ECS PAL on A500+), bit 0 = V8.
+     * Base value is therefore 0xA000; bit 0 toggles on line >= 256.
+     * KS 2.04 reads these ID bits to compute VBlankFrequency (commit
+     * 7dd6249). */
     reset_agnus();
 
-    /* Lines 0-255: bit 8 = 0, so VPOSR should be 0. */
+    /* Lines 0-255: V8 = 0. */
     agnus_tick_scanline(&ag, 0);
-    BASSERT(agnus_read_reg(&ag, 0x004) == 0,
-            "VPOSR should be 0 for line 0");
+    BASSERT(agnus_read_reg(&ag, 0x004) == 0xA000,
+            "VPOSR should be 0xA000 for line 0");
 
     agnus_tick_scanline(&ag, 255);
-    BASSERT(agnus_read_reg(&ag, 0x004) == 0,
-            "VPOSR should be 0 for line 255 (bit 8 still 0)");
+    BASSERT(agnus_read_reg(&ag, 0x004) == 0xA000,
+            "VPOSR should be 0xA000 for line 255 (V8 still 0)");
 
-    /* Line 256: bit 8 becomes 1, so VPOSR bit 0 = 1. */
+    /* Line 256+: V8 = 1. */
     agnus_tick_scanline(&ag, 256);
-    BASSERT(agnus_read_reg(&ag, 0x004) == 1,
-            "VPOSR should be 1 for line 256 (bit 8 = 1)");
+    BASSERT(agnus_read_reg(&ag, 0x004) == 0xA001,
+            "VPOSR should be 0xA001 for line 256 (V8 = 1)");
 
     agnus_tick_scanline(&ag, 311);
-    BASSERT(agnus_read_reg(&ag, 0x004) == 1,
-            "VPOSR should be 1 for line 311");
+    BASSERT(agnus_read_reg(&ag, 0x004) == 0xA001,
+            "VPOSR should be 0xA001 for line 311");
 }
 
 /* ------------------------------------------------------------------ */
@@ -173,17 +178,19 @@ static void test_dmaconr_read(void)
     reset_agnus();
 
     /*
-     * DMACONR bit 14 = BLTDONE (1 = blitter idle/done).
-     * In our synchronous model the blitter is always done, so bit 14
-     * is always set regardless of the dmacon state.
+     * DMACONR bit 14 = BBUSY (1 = blitter busy, 0 = idle).
+     * Our synchronous blitter is always idle, so bit 14 is always
+     * masked to 0 regardless of the DMACON state. (Real-HW polarity
+     * fixed in commit dfc872c — graphics.library WaitBlit() needs
+     * BBUSY=0 to return.)
      */
-    BASSERT(agnus_read_reg(&ag, 0x002) == 0x4000u,
-            "DMACONR should be 0x4000 (BLTDONE set) after init");
+    BASSERT(agnus_read_reg(&ag, 0x002) == 0x0000u,
+            "DMACONR should be 0x0000 (BBUSY=0, idle) after init");
 
     /* Set master DMA enable (bit 9) */
     agnus_write_reg(&ag, 0x096, 0x8200);   /* 0x8000 | DMACON_DMAEN */
-    BASSERT(agnus_read_reg(&ag, 0x002) == (DMACON_DMAEN | 0x4000u),
-            "DMACONR should reflect DMACON_DMAEN | BLTDONE after SET write");
+    BASSERT(agnus_read_reg(&ag, 0x002) == DMACON_DMAEN,
+            "DMACONR should be DMACON_DMAEN after SET write (bit 14 stays 0)");
 }
 
 /* ------------------------------------------------------------------ */

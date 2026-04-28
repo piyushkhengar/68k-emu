@@ -192,14 +192,17 @@ static void test_chip_ram_write_through_ovl(void)
 
 static void test_slow_ram_rw(void)
 {
+    /* Slow RAM is disabled (bus.c #if 0) — see comment there about
+     * ExecBase placement breaking Kickstart's validity check. The
+     * 0xC00000–0xDFEFFF window currently reads as open bus (0xFF). */
     reset_bus();
     amiga_bus_write8(0xC00000, 0x5A);
-    BASSERT(amiga_bus_read8(0xC00000) == 0x5A,
-            "slow RAM[0]: expected 0x5A, got 0x%02X",
+    BASSERT(amiga_bus_read8(0xC00000) == 0xFF,
+            "slow RAM disabled: expected 0xFF, got 0x%02X",
             amiga_bus_read8(0xC00000));
     amiga_bus_write8(0xC07FFF, 0xA5);
-    BASSERT(amiga_bus_read8(0xC07FFF) == 0xA5,
-            "slow RAM[end]: expected 0xA5, got 0x%02X",
+    BASSERT(amiga_bus_read8(0xC07FFF) == 0xFF,
+            "slow RAM disabled: expected 0xFF, got 0x%02X",
             amiga_bus_read8(0xC07FFF));
 }
 
@@ -254,11 +257,11 @@ static void test_custom_reg_stub_read(void)
     reset_bus();
     /*
      * 0xDFF002 = DMACONR high byte.
-     * Bit 14 (BLTDONE) is always 1 in our synchronous model, so the
-     * high byte = 0x40 and the low byte = 0x00 at reset.
+     * Bit 14 = BBUSY (1 = busy, 0 = idle). Synchronous blitter is
+     * always idle, so the high byte = 0x00 at reset.
      */
-    BASSERT(amiga_bus_read8(0xDFF002) == 0x40,
-            "DMACONR high byte: expected 0x40 (BLTDONE), got 0x%02X",
+    BASSERT(amiga_bus_read8(0xDFF002) == 0x00,
+            "DMACONR high byte: expected 0x00 (BBUSY=0, idle), got 0x%02X",
             amiga_bus_read8(0xDFF002));
     BASSERT(amiga_bus_read8(0xDFF000) == 0x00,
             "custom 0xDFF000 stub: expected 0x00, got 0x%02X",

@@ -275,8 +275,10 @@ static void test_timer_irq_chain(void)
      */
     cia_write(&cia, CIA_ICR, 0x80 | CIA_ICR_TA);  /* mask bit 0 = TA */
 
-    /* Enable Paula master + PORTS in the enable register (p->intreq field). */
-    paula_write_reg(&paula, 0x09C, 0x8000 | 0x4000 | INTREQ_PORTS);
+    /* Enable Paula master + PORTS in the enable register (p->intreq field).
+     * HW INTENA write is at $DFF09A, which paula_write_reg routes to
+     * p->intreq (the field used as the enable mask in paula_update_irq). */
+    paula_write_reg(&paula, 0x09A, 0x8000 | 0x4000 | INTREQ_PORTS);
 
     cia_write(&cia, CIA_TALO, 0x02);
     cia_write(&cia, CIA_TAHI, 0x00);
