@@ -478,6 +478,91 @@ static void test_tick_negative_sample(void)
             "negative sample: left expected -128, got %d", (int)left);
 }
 
+/* ====================================================================
+ *  Disk DMA: minimal "no disk" fast-path
+ * ====================================================================
+ *
+ * Until Chapter 6 wires the MFM streamer, Paula needs to recognise that
+ * trackdisk has kicked off a disk read into an empty drive and complete
+ * the DMA immediately so the device's Wait() unblocks. Otherwise the
+ * boot-strap probe in trackdisk's OpenDevice will hang forever.
+ */
+
+#define DSKPTH   0x020u
+#define DSKPTL   0x022u
+#define DSKLEN   0x024u
+#define DSKBYTR  0x01Au
+
+#define DSKLEN_DMAEN 0x8000u   /* bit 15: start trigger */
+
+static void test_dsklen_no_disk_fires_dskblk(void)
+{
+    /*
+     * Normal trackdisk sequence: write DSKLEN twice with bit 15 set
+     * (the "double-write" guard against accidental DMA). With no disk
+     * inserted Paula must mark INTREQ_DSKBLK so the I/O request completes.
+     */
+    reset_paula();
+    /* Enable INTENA master + DSKBLK so paula_update_irq drives cpu_ipl. */
+    paula_write_reg(&p, INTENA, 0x8000 | 0x4000 | INTREQ_DSKBLK);
+
+    paula_disk_set_present(&p, false);
+    paula_write_reg(&p, DSKLEN, DSKLEN_DMAEN | 100);  /* 100 words */
+    paula_write_reg(&p, DSKLEN, DSKLEN_DMAEN | 100);  /* arm */
+
+    /* hardware INTREQ register lives in p->adkcon (legacy field naming) */
+    BASSERT((p.adkcon & INTREQ_DSKBLK) != 0,
+            "no-disk DSKLEN start: INTREQ_DSKBLK should be set, adkcon=0x%04X",
+            p.adkcon);
+}
+
+static void test_dsklen_disk_present_does_not_fire_dskblk(void)
+{
+    /*
+     * If a disk is actually present, the no-disk shortcut must NOT fire.
+     * MFM streaming will arrive in Chapter 6 — for now the DMA stays
+     * pending and DSKBLK only fires when that path completes.
+     */
+    reset_paula();
+    paula_write_reg(&p, INTENA, 0x8000 | 0x4000 | INTREQ_DSKBLK);
+    paula_disk_set_present(&p, true);
+    paula_write_reg(&p, DSKLEN, DSKLEN_DMAEN | 100);
+    paula_write_reg(&p, DSKLEN, DSKLEN_DMAEN | 100);
+
+    BASSERT((p.adkcon & INTREQ_DSKBLK) == 0,
+            "disk present + no MFM yet: DSKBLK must NOT fire, adkcon=0x%04X",
+            p.adkcon);
+}
+
+static void test_dsklen_idle_write_does_not_fire_dskblk(void)
+{
+    /* Writing DSKLEN without the start bit (e.g. Kickstart's "stop" write
+     * of zero) must never raise DSKBLK. */
+    reset_paula();
+    paula_disk_set_present(&p, false);
+    paula_write_reg(&p, DSKLEN, 0x0000);
+    paula_write_reg(&p, DSKLEN, 0x4000);   /* write direction bit, no start */
+    BASSERT((p.adkcon & INTREQ_DSKBLK) == 0,
+            "idle DSKLEN write should not fire DSKBLK, adkcon=0x%04X",
+            p.adkcon);
+}
+
+static void test_dskbytr_idle_returns_no_dma_active(void)
+{
+    /*
+     * Reading DSKBYTR with no DMA active must not look like a successful
+     * byte read. Bit 14 (DMAON) and bit 15 (DSKBYT, byte-ready) both stay
+     * 0 so trackdisk's poll loops do not spin forever expecting new bytes.
+     */
+    reset_paula();
+    paula_disk_set_present(&p, false);
+    uint16_t v = paula_read_reg(&p, DSKBYTR);
+    BASSERT((v & 0x8000u) == 0,
+            "idle DSKBYTR: DSKBYT bit must be 0, got 0x%04X", v);
+    BASSERT((v & 0x4000u) == 0,
+            "idle DSKBYTR: DMAON bit must be 0, got 0x%04X", v);
+}
+
 /* ------------------------------------------------------------------ */
 /*  Entry point                                                         */
 /* ------------------------------------------------------------------ */
@@ -535,6 +620,12 @@ int run_paula_tests(void)
     test_tick_stereo_routing();
     test_tick_multi_channel_mix();
     test_tick_negative_sample();
+
+    /* Disk DMA: no-disk fail-fast path */
+    test_dsklen_no_disk_fires_dskblk();
+    test_dsklen_disk_present_does_not_fire_dskblk();
+    test_dsklen_idle_write_does_not_fire_dskblk();
+    test_dskbytr_idle_returns_no_dma_active();
 
     if (failures == 0)
         printf("  Paula: all %d assertions passed.\n", total);

@@ -56,6 +56,31 @@ void paula_write_reg(paula_t *p, uint16_t offset, uint16_t val)
     case 0x09A: setclr(&p->intreq, val); paula_update_irq(p); return;
     case 0x09C: setclr(&p->adkcon, val); paula_update_irq(p); return;
     case 0x09E: setclr(&p->intena, val); return;
+
+    case 0x024: /* DSKLEN */
+        /*
+         * Hardware double-write guard: the disk DMA logic only starts
+         * after software writes DSKLEN with bit 15 set TWICE in
+         * succession.  A write with bit 15 clear disarms it.  This
+         * stops bus glitches from triggering an accidental disk read.
+         *
+         * Until Ch 6 wires the MFM streamer we use the second-arm
+         * write as the trigger for the no-disk fast path: without a
+         * disk in df0, fire DSKBLK immediately so trackdisk's I/O
+         * request completes instead of waiting forever.
+         */
+        if (val & 0x8000u) {
+            if (p->dsklen_armed && !p->disk_present)
+                paula_assert_intreq(p, INTREQ_DSKBLK);
+            p->dsklen_armed = !p->dsklen_armed
+                              ? true            /* first arm-write */
+                              : false;          /* second consumes the arm */
+        } else {
+            p->dsklen_armed = false;
+        }
+        p->dsklen = val;
+        return;
+
     default: break;
     }
 
@@ -149,6 +174,11 @@ void paula_assert_intreq(paula_t *p, uint16_t bits)
 {
     p->adkcon |= (bits & 0x7FFFu);
     paula_update_irq(p);
+}
+
+void paula_disk_set_present(paula_t *p, bool present)
+{
+    p->disk_present = present;
 }
 
 void paula_update_irq(paula_t *p)

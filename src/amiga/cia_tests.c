@@ -18,8 +18,9 @@
 
 #include "cia.h"
 #include "cia_tests.h"
-#include "bus.h"     /* amiga_bus_init/read8/write8 for OVL test */
-#include "cpu.h"     /* cpu_ipl */
+#include "bus.h"          /* amiga_bus_init/read8/write8 for OVL test */
+#include "cpu.h"          /* cpu_ipl */
+#include "disk_drive.h"   /* disk-presence integration tests */
 #include <stdio.h>
 #include <string.h>
 
@@ -432,6 +433,266 @@ static void test_timer_b_underflow(void)
             cia.icr_data);
 }
 
+/* ====================================================================
+ *  Disk-drive presence (CIA-B PRB → disk_drive → CIA-A PRA inputs)
+ * ====================================================================
+ *
+ * The strap module's "no disk in df0:" detection relies on accurate
+ * disk-pin emulation: with no disk inserted, /CHNG must read low after a
+ * step pulse, /RDY must stay high, /TK0 must report the head position.
+ * These tests pin down that behaviour at the cia_t / disk_drive interface.
+ */
+
+/* Active-low CIA-B PRB output bits (mirrors disk_drive.c). */
+#define PRB_MTR    0x80u
+#define PRB_SEL0   0x08u
+#define PRB_SEL1   0x10u
+#define PRB_SIDE   0x04u
+#define PRB_DIR    0x02u
+#define PRB_STEP   0x01u
+
+#define PRA_RDY    0x20u
+#define PRA_TK0    0x10u
+#define PRA_WPRO   0x08u
+#define PRA_CHNG   0x04u
+
+static void test_disk_drive_init_no_drive_selected(void)
+{
+    amiga_disk_drive_t d;
+    amiga_disk_drive_init(&d);
+    BASSERT(d.selected == -1, "init: selected should be -1, got %d", d.selected);
+    BASSERT(!d.motor_on, "init: motor should be off");
+    /* No drive selected → all four disk bits report inactive (high). */
+    uint8_t s = amiga_disk_drive_pra_status(&d);
+    BASSERT((s & PRA_RDY)  == PRA_RDY,  "init: /RDY should be high");
+    BASSERT((s & PRA_TK0)  == PRA_TK0,  "init: /TK0 should be high");
+    BASSERT((s & PRA_WPRO) == PRA_WPRO, "init: /WPRO should be high");
+    BASSERT((s & PRA_CHNG) == PRA_CHNG, "init: /CHNG should be high");
+}
+
+static void test_disk_drive_select_df0_no_disk_chng_low(void)
+{
+    /* No disk in df0. Select df0 with motor on. */
+    amiga_disk_drive_t d;
+    amiga_disk_drive_init(&d);
+    amiga_disk_drive_apply_prb(&d, (uint8_t)~(PRB_MTR | PRB_SEL0) & 0xFFu);
+    BASSERT(d.selected == 0, "df0 selected: got %d", d.selected);
+    BASSERT(d.motor_on,      "motor should be on after falling /SEL0 with /MTR=0");
+
+    uint8_t s = amiga_disk_drive_pra_status(&d);
+    /* /CHNG must be low (= bit clear) — drive sees no disk. */
+    BASSERT((s & PRA_CHNG) == 0,
+            "df0 no disk: /CHNG should be 0, got status=0x%02X", s);
+    /* /RDY: motor on but no disk → stays HIGH (not ready). */
+    BASSERT((s & PRA_RDY) == PRA_RDY,
+            "df0 no disk: /RDY should stay high, got status=0x%02X", s);
+    /* Head defaults to track 0 → /TK0 = 0. */
+    BASSERT((s & PRA_TK0) == 0,
+            "df0 head at track 0: /TK0 should be 0, got status=0x%02X", s);
+    /* /WPRO: no disk → not write-protected (high). */
+    BASSERT((s & PRA_WPRO) == PRA_WPRO,
+            "df0 no disk: /WPRO should be high, got status=0x%02X", s);
+}
+
+/* Pulse /STEP low while a drive is selected. /STEP is active low; the falling
+ * edge (high→low) is what real hardware steps on. */
+static void pulse_step(amiga_disk_drive_t *d, uint8_t base_with_step_high)
+{
+    amiga_disk_drive_apply_prb(d, base_with_step_high);
+    amiga_disk_drive_apply_prb(d, base_with_step_high & (uint8_t)~PRB_STEP);
+    amiga_disk_drive_apply_prb(d, base_with_step_high);
+}
+
+static void test_disk_drive_step_no_disk_does_not_set_chng(void)
+{
+    amiga_disk_drive_t d;
+    amiga_disk_drive_init(&d);
+    /* Select df0 with motor on, /STEP idle (PRB_STEP bit set). */
+    uint8_t base = (uint8_t)~(PRB_MTR | PRB_SEL0) & 0xFFu;
+    amiga_disk_drive_apply_prb(&d, base);
+    pulse_step(&d, base);
+
+    uint8_t s = amiga_disk_drive_pra_status(&d);
+    BASSERT((s & PRA_CHNG) == 0,
+            "/STEP with no disk must NOT clear /CHNG flag, got 0x%02X", s);
+}
+
+static void test_disk_drive_step_with_disk_sets_chng(void)
+{
+    amiga_disk_drive_t d;
+    amiga_disk_drive_init(&d);
+    amiga_disk_drive_insert(&d, 0, false);
+    uint8_t base = (uint8_t)~(PRB_MTR | PRB_SEL0) & 0xFFu;
+    amiga_disk_drive_apply_prb(&d, base);
+    /* Pre-step: /CHNG still low because the drive has not yet seen a step
+     * since the disk was inserted (real hardware). */
+    BASSERT((amiga_disk_drive_pra_status(&d) & PRA_CHNG) == 0,
+            "pre-step with new disk: /CHNG should still be low");
+    /* /STEP pulse falling edge while a disk is present: latch /CHNG high. */
+    pulse_step(&d, base);
+    BASSERT((amiga_disk_drive_pra_status(&d) & PRA_CHNG) == PRA_CHNG,
+            "/STEP with disk: /CHNG should latch high");
+    /* /RDY now low because motor is on AND disk present. */
+    BASSERT((amiga_disk_drive_pra_status(&d) & PRA_RDY) == 0,
+            "motor+disk: /RDY should be low (ready)");
+}
+
+static void test_disk_drive_step_advances_head(void)
+{
+    amiga_disk_drive_t d;
+    amiga_disk_drive_init(&d);
+    /* Select df0, motor on, /STEP idle, DIR=0 (inward → track++). */
+    uint8_t base = (uint8_t)~(PRB_MTR | PRB_SEL0) & 0xFFu;
+    base &= (uint8_t)~PRB_DIR;
+    amiga_disk_drive_apply_prb(&d, base);
+    for (int i = 0; i < 3; i++)
+        pulse_step(&d, base);
+    BASSERT(d.df[0].track == 3,
+            "3 inward steps: track should be 3, got %d", d.df[0].track);
+    BASSERT((amiga_disk_drive_pra_status(&d) & PRA_TK0) == PRA_TK0,
+            "head off track 0: /TK0 should be high");
+
+    /* Step outward (DIR=1 == bit set on PRB → track--). */
+    base |= PRB_DIR;
+    amiga_disk_drive_apply_prb(&d, base);
+    pulse_step(&d, base);
+    BASSERT(d.df[0].track == 2,
+            "1 outward step from track 3: should be 2, got %d", d.df[0].track);
+}
+
+static void test_disk_drive_track_clamped_at_limits(void)
+{
+    amiga_disk_drive_t d;
+    amiga_disk_drive_init(&d);
+    uint8_t base = (uint8_t)~(PRB_MTR | PRB_SEL0) & 0xFFu;
+    base |= PRB_DIR; /* DIR=1: outward */
+    amiga_disk_drive_apply_prb(&d, base);
+    pulse_step(&d, base);
+    BASSERT(d.df[0].track == 0,
+            "outward step at track 0: should clamp at 0, got %d", d.df[0].track);
+
+    /* Step inward 100 times — must clamp at 79. */
+    base &= (uint8_t)~PRB_DIR;
+    amiga_disk_drive_apply_prb(&d, base);
+    for (int i = 0; i < 100; i++)
+        pulse_step(&d, base);
+    BASSERT(d.df[0].track == 79,
+            "100 inward steps: should clamp at 79, got %d", d.df[0].track);
+}
+
+static void test_disk_drive_eject_clears_chng_latch(void)
+{
+    amiga_disk_drive_t d;
+    amiga_disk_drive_init(&d);
+    amiga_disk_drive_insert(&d, 0, false);
+    uint8_t base = (uint8_t)~(PRB_MTR | PRB_SEL0) & 0xFFu;
+    amiga_disk_drive_apply_prb(&d, base);
+    pulse_step(&d, base);
+    BASSERT((amiga_disk_drive_pra_status(&d) & PRA_CHNG) == PRA_CHNG,
+            "pre-eject /CHNG should be high after step");
+
+    amiga_disk_drive_eject(&d, 0);
+    /* /CHNG immediately low (drive notices ejection). */
+    BASSERT((amiga_disk_drive_pra_status(&d) & PRA_CHNG) == 0,
+            "post-eject /CHNG should be low");
+    /* /RDY now high — disk gone. */
+    BASSERT((amiga_disk_drive_pra_status(&d) & PRA_RDY) == PRA_RDY,
+            "post-eject /RDY should go high again");
+}
+
+static void test_disk_drive_deselect_floats_pins_high(void)
+{
+    /* When /SELn is released, the bus pulls the lines high regardless of
+     * what the (unselected) drive thinks. */
+    amiga_disk_drive_t d;
+    amiga_disk_drive_init(&d);
+    amiga_disk_drive_insert(&d, 0, false);
+    /* Select df0 + step + deselect. */
+    uint8_t sel  = (uint8_t)~(PRB_MTR | PRB_SEL0) & 0xFFu;
+    amiga_disk_drive_apply_prb(&d, sel);
+    pulse_step(&d, sel);
+    /* Deselect: all SELn high (and MTR irrelevant when nothing selected). */
+    amiga_disk_drive_apply_prb(&d, 0xFFu);
+    BASSERT(d.selected == -1, "no /SELn asserted: selected should be -1");
+    uint8_t s = amiga_disk_drive_pra_status(&d);
+    BASSERT(s == 0xFFu,
+            "deselected drive should expose all-1s on PRA, got 0x%02X", s);
+}
+
+/* --- CIA-B PRB write hook fires post_write_hook ------------------- */
+
+static int test_hook_count;
+static uint8_t test_hook_last_reg;
+static uint8_t test_hook_last_val;
+static void test_hook_fn(cia_t *self, uint8_t reg, uint8_t val)
+{
+    (void)self;
+    test_hook_count++;
+    test_hook_last_reg = reg;
+    test_hook_last_val = val;
+}
+
+static void test_cia_post_write_hook_fires_on_prb(void)
+{
+    reset_cia();
+    test_hook_count = 0;
+    cia.post_write_hook = test_hook_fn;
+    cia_write(&cia, CIA_PRB, 0xF7);    /* /SEL0 asserted */
+    BASSERT(test_hook_count == 1,
+            "PRB write should fire post_write_hook once, got %d", test_hook_count);
+    BASSERT(test_hook_last_reg == CIA_PRB,
+            "hook reg: expected CIA_PRB, got %u", test_hook_last_reg);
+    BASSERT(test_hook_last_val == 0xF7,
+            "hook val: expected 0xF7, got 0x%02X", test_hook_last_val);
+    cia.post_write_hook = NULL;
+}
+
+/* --- Integration: CIA-B PRB → disk_drive → CIA-A pra_input -------- */
+
+static cia_t   integ_cia_a;
+static cia_t   integ_cia_b;
+static amiga_disk_drive_t integ_drive;
+
+/* Same shape as amiga.c's hook: PRB writes update drive, then refresh
+ * CIA-A's pra_input from drive status. CIA-A's non-disk PRA inputs (joystick
+ * fire bits 7,6 + LED/OVL outputs 1,0) stay 1, matching the bus pull-ups. */
+static void integ_cia_b_post_write(cia_t *self, uint8_t reg, uint8_t val)
+{
+    if (reg != CIA_PRB)
+        return;
+    (void)self;
+    amiga_disk_drive_apply_prb(&integ_drive, val);
+    integ_cia_a.pra_input = amiga_disk_drive_pra_status(&integ_drive);
+}
+
+static void test_cia_b_prb_write_updates_cia_a_pra_input(void)
+{
+    cia_init(&integ_cia_a);
+    cia_init(&integ_cia_b);
+    amiga_disk_drive_init(&integ_drive);
+    integ_cia_a.pra_input = 0xFF;
+    integ_cia_b.post_write_hook = integ_cia_b_post_write;
+
+    /* DDRA = 0 so all PRA reads come from pra_input. */
+    cia_write(&integ_cia_a, CIA_DDRA, 0);
+
+    /* Initial state: nothing selected on CIA-B → CIA-A PRA reads 0xFF. */
+    BASSERT(cia_read(&integ_cia_a, CIA_PRA) == 0xFF,
+            "pre-select: CIA-A PRA should be 0xFF, got 0x%02X",
+            cia_read(&integ_cia_a, CIA_PRA));
+
+    /* Software writes CIA-B PRB to assert /MTR + /SEL0 (no disk in df0). */
+    uint8_t prb = (uint8_t)~(PRB_MTR | PRB_SEL0) & 0xFFu;
+    cia_write(&integ_cia_b, CIA_PRB, prb);
+
+    uint8_t pra = cia_read(&integ_cia_a, CIA_PRA);
+    BASSERT((pra & PRA_CHNG) == 0,
+            "after /SEL0 with no disk: /CHNG must read 0 on CIA-A PRA, got 0x%02X",
+            pra);
+    BASSERT((pra & PRA_TK0) == 0,
+            "head at track 0: /TK0 must read 0, got 0x%02X", pra);
+}
+
 /* ------------------------------------------------------------------ */
 /*  Entry point                                                         */
 /* ------------------------------------------------------------------ */
@@ -461,6 +722,18 @@ int run_cia_tests(void)
     test_tod_a_vsync_pattern();
     test_tod_b_hsync_pattern();
     test_tod_24bit_wrap();
+
+    /* Disk-drive presence + PRB→PRA wiring. */
+    test_disk_drive_init_no_drive_selected();
+    test_disk_drive_select_df0_no_disk_chng_low();
+    test_disk_drive_step_no_disk_does_not_set_chng();
+    test_disk_drive_step_with_disk_sets_chng();
+    test_disk_drive_step_advances_head();
+    test_disk_drive_track_clamped_at_limits();
+    test_disk_drive_eject_clears_chng_latch();
+    test_disk_drive_deselect_floats_pins_high();
+    test_cia_post_write_hook_fires_on_prb();
+    test_cia_b_prb_write_updates_cia_a_pra_input();
 
     if (failures == 0)
         printf("  CIA 8520: all %d assertions passed.\n", total);

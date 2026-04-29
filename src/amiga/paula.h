@@ -96,6 +96,20 @@ typedef struct {
     uint16_t adkcon;    /* latched ADKCON register state */
     uint16_t intena;    /* latched INTENA register state */
     uint16_t intreq;    /* latched INTREQ register state */
+
+    /*
+     * Disk DMA state. Until Chapter 6 wires the MFM streamer, this just
+     * gates the "no disk" fail-fast: a fully armed DSKLEN write with
+     * `disk_present == false` immediately fires INTREQ_DSKBLK so the
+     * trackdisk DoIO probe completes instead of hanging.
+     *
+     * dsklen_armed mirrors the real hardware double-write guard: software
+     * must write DSKLEN with bit 15 set TWICE in succession before DMA
+     * actually starts. A write with bit 15 clear cancels the priming.
+     */
+    bool     disk_present;
+    bool     dsklen_armed;
+    uint16_t dsklen;     /* last value written to DSKLEN */
 } paula_t;
 
 /* ------------------------------------------------------------------ */
@@ -144,6 +158,16 @@ void paula_assert_intreq(paula_t *p, uint16_t bits);
  * and write it to cpu_ipl.  Called automatically by paula_assert_intreq().
  */
 void paula_update_irq(paula_t *p);
+
+/*
+ * Set the "disk inserted in df0" flag. Called from amiga.c whenever a disk
+ * is inserted/ejected so DSKLEN-armed DMA starts can immediately complete
+ * with INTREQ_DSKBLK when no disk is present.
+ *
+ * Until Chapter 6 brings real MFM streaming, drives 1..3 are ignored —
+ * only df0 matters for the trackdisk boot probe.
+ */
+void paula_disk_set_present(paula_t *p, bool present);
 
 /*
  * Advance Paula by color_clocks Amiga color clocks (~280 ns each).

@@ -178,6 +178,11 @@ void cia_write(cia_t *c, uint8_t reg, uint8_t val)
 
     default: break;
     }
+
+    /* Notify any external observer (used by amiga.c on CIA-B to mirror
+     * PRB writes into disk_drive and recompute CIA-A's pra_input). */
+    if (c->post_write_hook)
+        c->post_write_hook(c, reg, val);
 }
 
 /* ------------------------------------------------------------------ */

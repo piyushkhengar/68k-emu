@@ -42,6 +42,10 @@
 #include <stdint.h>
 #include "paula.h"
 
+/* Forward declaration for the post-write callback. */
+struct cia_t_;
+typedef void (*cia_post_write_fn)(struct cia_t_ *self, uint8_t reg, uint8_t val);
+
 /* ---- CIA register index constants ----------------------------------- */
 #define CIA_PRA    0u
 #define CIA_PRB    1u
@@ -76,7 +80,7 @@
 /*  Data type                                                           */
 /* ------------------------------------------------------------------ */
 
-typedef struct {
+typedef struct cia_t_ {
     uint8_t  pra, prb;      /* Port data registers (output latch) */
     uint8_t  ddra, ddrb;    /* Port data-direction (1=output) */
     uint8_t  pra_input;     /* External input pin state for Port A (default 0xFF) */
@@ -120,6 +124,15 @@ typedef struct {
     uint32_t tod_counter;   /* 24-bit running counter */
     uint32_t tod_latch;     /* latched value (read atomically) */
     int      tod_latched;   /* 1 = latched (reading TODHI latched it) */
+
+    /*
+     * Optional callback invoked after every successful register write.
+     * amiga.c uses this on CIA-B so PRB writes can drive disk_drive
+     * selection/motor/step state and refresh CIA-A's pra_input.
+     * NULL = ignored. ctx is opaque, passed to the hook via self->post_write_ctx.
+     */
+    cia_post_write_fn post_write_hook;
+    void             *post_write_ctx;
 } cia_t;
 
 /* ------------------------------------------------------------------ */

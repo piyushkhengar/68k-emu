@@ -15,6 +15,7 @@
 #include "bus.h"
 #include "cia.h"
 #include "paula.h"
+#include "disk_drive.h"
 #include "cpu.h"
 #include "cpu_internal.h"  /* for sync_a7_to_sp */
 #include "memory.h"
@@ -97,6 +98,41 @@ static void amiga_int_ack(int level)
  * workarounds (ds_fix_done, etc.) re-arm for the new boot cycle. */
 static int boot_gen;
 
+/* Floppy-drive presence model. Owned here so we can wire it into both CIA-A
+ * (PRA disk-status reads) and CIA-B (PRB disk-control writes). */
+static amiga_disk_drive_t amiga_disk_drive;
+
+/*
+ * Refresh CIA-A's PRA input lines from the currently selected drive.
+ * Called from the CIA-B post-write hook on every PRB update so that the
+ * /RDY, /TK0, /WPRO, /CHNG bits track the live drive state without any
+ * polling.  Bits 7 and 6 of pra_input come from the joystick fire buttons
+ * (assumed not pressed → 1) and bits 1, 0 are CIA-A outputs (driven from
+ * the PRA register, ignored by cia_read with DDRA=0 mask).
+ */
+static void amiga_refresh_cia_a_disk_inputs(void)
+{
+    uint8_t status = amiga_disk_drive_pra_status(&amiga_disk_drive);
+    /* Status already has bits 7,6,1,0 = 1 — fold in to existing pra_input
+     * so any future joystick wiring on bits 7,6 keeps working. */
+    amiga_cia_a.pra_input = (uint8_t)((amiga_cia_a.pra_input & 0xC3u) |
+                                      (status & 0x3Cu));
+}
+
+/*
+ * CIA-B post-write hook: every PRB write updates disk_drive selection,
+ * motor latch and head, then refreshes CIA-A's disk-status inputs so the
+ * next CIA-A PRA read reports the new state.
+ */
+static void amiga_cia_b_post_write(cia_t *self, uint8_t reg, uint8_t val)
+{
+    (void)self;
+    if (reg != CIA_PRB)
+        return;
+    amiga_disk_drive_apply_prb(&amiga_disk_drive, val);
+    amiga_refresh_cia_a_disk_inputs();
+}
+
 /*
  * Restore CIA simulation parameters that cia_reset() zeroes.
  * Called after every hardware reset so that keyboard init, disk
@@ -112,26 +148,19 @@ static void cia_restore_simulation(void)
     /* CIA-B FLAG pin: simulate periodic disk-index/ready signal. */
     amiga_cia_b.flag_period = 14000;
     amiga_cia_b.flag_count  = 14000;
-    /* CIA-A PRA input pins: disk drive signals.
-     * On a real A500 with no disk inserted:
-     *   Bit 5 (/RDY)  = 0 (drive mechanism ready — motor spins freely)
-     *   Bit 4 (/TK0)  = 0 (head at track 0 — initial position)
-     *   Bit 3 (/WPRO) = 1 (not write-protected)
-     *   Bit 2 (/CHNG) = 0 (disk changed — no disk present!)
-     *   Other bits default to 1 (inactive).
-     * trackdisk reads bit 2 for disk presence, bit 5 for drive ready. */
-    /* CIA-A PRA input pins: disk drive signals.
-     *   Bit 5 (/RDY)  = 1 (not ready — no disk spinning)
-     *   Bit 4 (/TK0)  = 1 (not at track 0)
-     *   Bit 3 (/WPRO) = 1 (not write-protected)
-     *   Bit 2 (/CHNG) = 1 (no change — prevents trackdisk blocking)
-     * /CHNG=1 tells trackdisk "disk hasn't changed" which avoids the
-     * drive-init sequence that blocks in Wait().  Strap detects "no disk"
-     * via a separate workaround on the TD_CHANGESTATE result. */
-    /* CIA-A PRA bit 2 (/CHNG) = 0 means "disk changed / no disk."
-     * With the VPOSR fix, timer.device works correctly, so trackdisk's
-     * motor spin-up timeout completes and OpenDevice doesn't block. */
-    amiga_cia_a.pra_input = 0xFB;  /* bit 2 clear = /CHNG active (no disk) */
+
+    /* Disk-drive presence model: power-up state with no disks loaded.
+     * The CIA-B PRB hook keeps CIA-A's pra_input in sync with df0..df3
+     * status so trackdisk reads /CHNG=0 = "no disk" naturally. */
+    amiga_disk_drive_init(&amiga_disk_drive);
+    paula_disk_set_present(&amiga_paula, false);
+    amiga_cia_b.post_write_hook = amiga_cia_b_post_write;
+    /* Joystick fire bits 7,6 default high (idle). Disk bits 5..2 are filled
+     * in by the next CIA-B PRB write; until then they read all-1 (no drive
+     * selected). */
+    amiga_cia_a.pra_input = 0xFFu;
+    amiga_refresh_cia_a_disk_inputs();
+
     /* CIA-A keyboard: queue power-up key stream ($FE init, $FD self-test). */
     amiga_cia_a.kbd_queue[0] = 0xFE;
     amiga_cia_a.kbd_queue[1] = 0xFD;
@@ -295,9 +324,6 @@ static void apply_ks13_strap_workarounds(void)
         cpu.d[0] = 0;
         cpu.pc = 0xFC0B5C;
     }
-    /* Skip trackdisk motor polling loop. */
-    if (cpu.pc == 0xFE8F8E)
-        cpu.pc = 0xFE8FB6;
     /* Clear HELP watchdog after FC3028 writes it. */
     if (cpu.pc == 0xFC302C)
         amiga_bus_write32(0x000000, 0x00000000);
@@ -551,14 +577,17 @@ void amiga_run(void)
                     apply_ks13_strap_workarounds();
                 /* ---- KS 2.04 workarounds ---- */
                 if (!is_ks13) {
-                    /* Strap disk-check at FCE3A8: blocks in trackdisk
-                     * OpenDevice's timer Wait/GetMsg loop.
+                    /* Strap disk-check at FCE3A8: trackdisk's OpenDevice
+                     * task signal/wait flow still needs subsystem work
+                     * (signal delivery from drive → unit task → caller),
+                     * so this hack is retained for KS 2.04. KS 1.3 reaches
+                     * its disk-insert wait via faithful disk_drive bits.
+                     *
+                     * Without this redirect, KS 2.04 halts in the exec
+                     * dispatcher around F813A8 because trackdisk never
+                     * replies to the strap's I/O request.
                      *
                      * First call: redirect to FCE366 (display setup path).
-                     * FCE366 does MOVE.L A5,D5; BSR FCE5AC which allocates
-                     * a screen, opens graphics.library, and draws the
-                     * disk-insert animation.  A6=ExecBase at this point.
-                     *
                      * Subsequent calls: return D0=-1 ("no disk"). */
                     if (cpu.pc == 0xFCE3A8) {
                         static int ds_display_gen = -1;
@@ -566,12 +595,12 @@ void amiga_run(void)
                         if (ds_display_gen != boot_gen) {
                             ds_display_gen = boot_gen;
                             cpu.a[7] += 4; /* pop BSR return address */
-                            sync_a7_to_sp(); /* keep usp/ssp in sync after direct A7 write */
-                            cpu.pc = 0xFCE366; /* → display setup */
+                            sync_a7_to_sp();
+                            cpu.pc = 0xFCE366;
                         } else {
                             cpu.d[0] = 0xFFFFFFFF;
                             cpu.pc = amiga_bus_read32(cpu.a[7]);
-                            cpu.a[7] += 4; /* RTS to caller */
+                            cpu.a[7] += 4;
                             sync_a7_to_sp();
                         }
                     }
@@ -755,7 +784,7 @@ void amiga_run_headless(int max_frames)
                 /* KS 1.3 strap workarounds (shared with SDL path). */
                 if (is_ks13)
                     apply_ks13_strap_workarounds();
-                /* ---- KS 2.04: disk-check → display setup ---- */
+                /* KS 2.04 disk-check + LoadView fixes (same as SDL path) */
                 if (!is_ks13 && cpu.pc == 0xFCE3A8) {
                     static int ds_display_gen_hl = -1;
                     boot_complete = 1;
@@ -771,7 +800,6 @@ void amiga_run_headless(int max_frames)
                         sync_a7_to_sp();
                     }
                 }
-                /* Fix COP1LC after LoadView (same as SDL path) */
                 if (!is_ks13 && cpu.pc == 0xFCE9C2) {
                     uint32_t gfx = cpu.a[6];
                     uint32_t view = amiga_bus_read32(gfx + 0x22);

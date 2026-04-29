@@ -38,6 +38,7 @@ AMIGA_SRCS = src/amiga/bus.c src/amiga/bus_tests.c \
              src/amiga/cia.c src/amiga/cia_tests.c \
              src/amiga/agnus.c src/amiga/agnus_tests.c \
              src/amiga/denise.c src/amiga/denise_tests.c \
+             src/amiga/disk_drive.c \
              src/amiga/amiga.c
 
 SRCS = $(CORE_SRCS) $(GENESIS_SRCS) $(AMIGA_SRCS) $(MACHINE_TEST_SRCS)
