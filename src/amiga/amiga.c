@@ -577,33 +577,6 @@ void amiga_run(void)
                     apply_ks13_strap_workarounds();
                 /* ---- KS 2.04 workarounds ---- */
                 if (!is_ks13) {
-                    /* Strap disk-check at FCE3A8: trackdisk's OpenDevice
-                     * task signal/wait flow still needs subsystem work
-                     * (signal delivery from drive → unit task → caller),
-                     * so this hack is retained for KS 2.04. KS 1.3 reaches
-                     * its disk-insert wait via faithful disk_drive bits.
-                     *
-                     * Without this redirect, KS 2.04 halts in the exec
-                     * dispatcher around F813A8 because trackdisk never
-                     * replies to the strap's I/O request.
-                     *
-                     * First call: redirect to FCE366 (display setup path).
-                     * Subsequent calls: return D0=-1 ("no disk"). */
-                    if (cpu.pc == 0xFCE3A8) {
-                        static int ds_display_gen = -1;
-                        boot_complete = 1;
-                        if (ds_display_gen != boot_gen) {
-                            ds_display_gen = boot_gen;
-                            cpu.a[7] += 4; /* pop BSR return address */
-                            sync_a7_to_sp();
-                            cpu.pc = 0xFCE366;
-                        } else {
-                            cpu.d[0] = 0xFFFFFFFF;
-                            cpu.pc = amiga_bus_read32(cpu.a[7]);
-                            cpu.a[7] += 4;
-                            sync_a7_to_sp();
-                        }
-                    }
                     /* Fix COP1LC after LoadView.
                      *
                      * FCE9C2 is JSR _LVOWaitTOF (immediately after LoadView
@@ -784,22 +757,6 @@ void amiga_run_headless(int max_frames)
                 /* KS 1.3 strap workarounds (shared with SDL path). */
                 if (is_ks13)
                     apply_ks13_strap_workarounds();
-                /* KS 2.04 disk-check + LoadView fixes (same as SDL path) */
-                if (!is_ks13 && cpu.pc == 0xFCE3A8) {
-                    static int ds_display_gen_hl = -1;
-                    boot_complete = 1;
-                    if (ds_display_gen_hl != boot_gen) {
-                        ds_display_gen_hl = boot_gen;
-                        cpu.a[7] += 4;
-                        sync_a7_to_sp();
-                        cpu.pc = 0xFCE366;
-                    } else {
-                        cpu.d[0] = 0xFFFFFFFF;
-                        cpu.pc = amiga_bus_read32(cpu.a[7]);
-                        cpu.a[7] += 4;
-                        sync_a7_to_sp();
-                    }
-                }
                 if (!is_ks13 && cpu.pc == 0xFCE9C2) {
                     uint32_t gfx = cpu.a[6];
                     uint32_t view = amiga_bus_read32(gfx + 0x22);
@@ -814,67 +771,6 @@ void amiga_run_headless(int max_frames)
                         }
                     }
                 }
-                /* Trace FCE5AC error path only */
-                if (!is_ks13 && cpu.pc == 0xFCE606)
-                    printf("[KS204] F%d: display setup ERROR D0=%08X\n",
-                           frame, cpu.d[0]);
-
-                /* Dump RastPort state at strap Text() call sites */
-                if (!is_ks13 && getenv("RP_DUMP") &&
-                    (cpu.pc == 0xFCE788 || cpu.pc == 0xFCE7BA ||
-                     cpu.pc == 0xFCEA3C)) {
-                    static int dumped[3] = {0, 0, 0};
-                    int idx = (cpu.pc == 0xFCE788) ? 0 :
-                              (cpu.pc == 0xFCE7BA) ? 1 : 2;
-                    if (!dumped[idx]) {
-                        dumped[idx] = 1;
-                        uint32_t rp  = cpu.a[1];
-                        uint32_t bm  = amiga_bus_read32(rp + 0x04);
-                        uint32_t tr  = amiga_bus_read32(rp + 0x0C);
-                        uint32_t fnt = amiga_bus_read32(rp + 0x34);
-                        uint8_t  fg  = (uint8_t)amiga_bus_read8(rp + 0x19);
-                        uint8_t  bg  = (uint8_t)amiga_bus_read8(rp + 0x1A);
-                        uint8_t  drm = (uint8_t)amiga_bus_read8(rp + 0x1C);
-                        uint16_t mask= (uint16_t)amiga_bus_read8(rp + 0x18);
-                        printf("[RP_DUMP @ PC=%06X] RP=%06X BitMap=%06X "
-                               "TmpRas=%06X Font=%06X "
-                               "FgPen=%u BgPen=%u DrMd=%02X Mask=%02X\n",
-                               cpu.pc, rp, bm, tr, fnt, fg, bg, drm, mask);
-                        if (bm && bm < 0x80000) {
-                            uint8_t  depth = (uint8_t)amiga_bus_read8(bm + 0x05);
-                            uint16_t bpr   = (uint16_t)amiga_bus_read16(bm + 0x00);
-                            uint16_t rows  = (uint16_t)amiga_bus_read16(bm + 0x02);
-                            uint32_t p0    = amiga_bus_read32(bm + 0x08);
-                            uint32_t p1    = amiga_bus_read32(bm + 0x0C);
-                            uint32_t p2    = amiga_bus_read32(bm + 0x10);
-                            printf("[RP_DUMP] BitMap fields: BytesPerRow=%u Rows=%u "
-                                   "Depth=%u Plane0=%06X Plane1=%06X Plane2=%06X\n",
-                                   bpr, rows, depth, p0, p1, p2);
-                        }
-                        if (tr && tr < 0x80000) {
-                            uint32_t trbuf = amiga_bus_read32(tr + 0x00);
-                            uint32_t trsz  = amiga_bus_read32(tr + 0x04);
-                            printf("[RP_DUMP] TmpRas: RasPtr=%06X Size=%u\n",
-                                   trbuf, trsz);
-                        }
-                        /* Cursor pos at the moment of Text() call */
-                        int16_t cpx = (int16_t)amiga_bus_read16(rp + 0x24);
-                        int16_t cpy = (int16_t)amiga_bus_read16(rp + 0x26);
-                        printf("[RP_DUMP] cp_x=%d cp_y=%d D0(len)=%u A0(str)=%06X\n",
-                               cpx, cpy, cpu.d[0], cpu.a[0]);
-                        /* Print the string pointed to by A0 */
-                        if (cpu.a[0] && cpu.d[0] > 0 && cpu.d[0] < 200) {
-                            printf("[RP_DUMP] String: \"");
-                            for (uint32_t i = 0; i < cpu.d[0]; i++) {
-                                uint8_t ch = amiga_bus_read8(cpu.a[0] + i);
-                                if (ch >= 0x20 && ch < 0x7F) putchar(ch);
-                                else printf("\\x%02X", ch);
-                            }
-                            printf("\"\n");
-                        }
-                    }
-                }
-
                 if (trace_active) {
                     bt_total_steps++;
                     uint32_t pc_after = cpu.pc;

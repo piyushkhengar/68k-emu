@@ -212,6 +212,61 @@ static void test_timer_a_one_shot(void)
 }
 
 /* ------------------------------------------------------------------ */
+/*  Test: 8520 quirk — TAHI write in one-shot mode auto-starts timer    */
+/* ------------------------------------------------------------------ */
+/* Per AHRM: "In one-shot mode, a write to timer-high will transfer
+ * the timer latch to the counter and initiate counting regardless of
+ * the start bit." KS 2.04 timer.device's MICROHZ unit relies on this:
+ * it pre-arms CRA with RUNMODE=1, START=0, then writes TAHI without
+ * ever touching START again. Without the quirk the timer never runs. */
+static void test_timer_a_tahi_auto_start_one_shot(void)
+{
+    reset_cia();
+    /* Pre-arm one-shot mode with START=0 (the timer.device pattern). */
+    cia_write(&cia, CIA_CRA, CIA_CR_RUNMODE);
+    BASSERT(!(cia.cra & CIA_CR_START),
+            "Pre-write: START must be 0, cra=0x%02X", cia.cra);
+
+    /* Now write the latch high byte. The 8520 quirk should auto-start. */
+    cia_write(&cia, CIA_TALO, 0x00);
+    cia_write(&cia, CIA_TAHI, 0x10);
+
+    BASSERT(cia.cra & CIA_CR_START,
+            "TAHI in one-shot must auto-set START, cra=0x%02X", cia.cra);
+    BASSERT(cia.ta_cnt == 0x1000,
+            "TAHI in one-shot must force counter=latch, ta_cnt=0x%04X",
+            cia.ta_cnt);
+}
+
+/* Continuous-mode TAHI must NOT auto-start (only the one-shot quirk). */
+static void test_timer_a_tahi_no_auto_start_continuous(void)
+{
+    reset_cia();
+    /* Continuous mode (RUNMODE=0), START=0. */
+    cia_write(&cia, CIA_CRA, 0x00);
+    cia_write(&cia, CIA_TALO, 0x00);
+    cia_write(&cia, CIA_TAHI, 0x10);
+
+    BASSERT(!(cia.cra & CIA_CR_START),
+            "Continuous-mode TAHI must NOT auto-start, cra=0x%02X", cia.cra);
+}
+
+/* Same quirk for Timer B. */
+static void test_timer_b_tbhi_auto_start_one_shot(void)
+{
+    reset_cia();
+    cia_write(&cia, CIA_CRB, CIA_CR_RUNMODE);
+    cia_write(&cia, CIA_TBLO, 0x00);
+    cia_write(&cia, CIA_TBHI, 0x20);
+
+    BASSERT(cia.crb & CIA_CR_START,
+            "TBHI in one-shot must auto-set START, crb=0x%02X", cia.crb);
+    BASSERT(cia.tb_cnt == 0x2000,
+            "TBHI in one-shot must force counter=latch, tb_cnt=0x%04X",
+            cia.tb_cnt);
+}
+
+/* ------------------------------------------------------------------ */
 /*  Test: ICR mask SET/CLR write protocol                               */
 /* ------------------------------------------------------------------ */
 
@@ -712,6 +767,9 @@ int run_cia_tests(void)
     test_timer_a_underflow_icr();
     test_timer_a_continuous_reload();
     test_timer_a_one_shot();
+    test_timer_a_tahi_auto_start_one_shot();
+    test_timer_a_tahi_no_auto_start_continuous();
+    test_timer_b_tbhi_auto_start_one_shot();
     test_icr_mask_setclr();
     test_icr_auto_clear_on_read();
     test_timer_irq_chain();

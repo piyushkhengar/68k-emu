@@ -5,7 +5,6 @@
 
 #include "cia.h"
 #include <string.h>
-#include <stdio.h>
 
 /* ------------------------------------------------------------------ */
 /*  Lifecycle                                                           */
@@ -105,6 +104,16 @@ void cia_write(cia_t *c, uint8_t reg, uint8_t val)
         /* When timer is stopped, load latch into counter immediately. */
         if (!(c->cra & CIA_CR_START))
             c->ta_cnt = c->ta_latch;
+        /* MOS 8520 quirk (Amiga's CIA): "In one-shot mode, a write to
+         * timer-high will transfer the timer latch to the counter and
+         * initiate counting regardless of the start bit." [HRM]
+         * timer.device's MICROHZ unit on KS 2.04 relies on this — it
+         * sets CRA bit 3 (one-shot), writes TAHI, and never sets START
+         * explicitly. Without this, the timer never runs. */
+        if (c->cra & CIA_CR_RUNMODE) {
+            c->ta_cnt = c->ta_latch;
+            c->cra   |= CIA_CR_START;
+        }
         break;
 
     case CIA_TBLO:
@@ -114,6 +123,11 @@ void cia_write(cia_t *c, uint8_t reg, uint8_t val)
         c->tb_latch = ((uint16_t)val << 8) | (c->tb_latch & 0x00FFu);
         if (!(c->crb & CIA_CR_START))
             c->tb_cnt = c->tb_latch;
+        /* MOS 8520 one-shot quirk — see CIA_TAHI for explanation. */
+        if (c->crb & CIA_CR_RUNMODE) {
+            c->tb_cnt = c->tb_latch;
+            c->crb   |= CIA_CR_START;
+        }
         break;
 
     case CIA_TODLO:
@@ -153,22 +167,12 @@ void cia_write(cia_t *c, uint8_t reg, uint8_t val)
         }
         break;
 
-    case CIA_CRA: {
+    case CIA_CRA:
         /* LOAD bit is a strobe: immediately copy latch → counter. */
         if (val & CIA_CR_LOAD)
             c->ta_cnt = c->ta_latch;
-        uint8_t old = c->cra;
         c->cra = val & (uint8_t)~CIA_CR_LOAD;
-        /* Debug: trace START bit changes */
-        if ((old ^ c->cra) & CIA_CR_START) {
-            static int cra_trace = 0;
-            if (cra_trace++ < 10)
-                fprintf(stderr, "[CIA-%c CRA] %02X→%02X START=%d latch=%04X cnt=%04X\n",
-                        c->intreq_bit == 0x0008u ? 'A' : 'B',
-                        old, c->cra, c->cra & 1, c->ta_latch, c->ta_cnt);
-        }
         break;
-    }
 
     case CIA_CRB:
         if (val & CIA_CR_LOAD)
