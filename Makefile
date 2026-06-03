@@ -60,9 +60,9 @@ MUSASHI_CFLAGS = $(CFLAGS) -Ideps/musashi -Ideps/musashi/softfloat -DMUSASHI_DIF
 
 .PHONY: all clean test mcl68-test genesis amiga processor-tests processor-tests-68010 processor-tests-68020 processor-tests-68030 processor-tests-68040 processor-tests-68060 processor-tests-68080 musashi-diff baremetal qemu-bm qemu-bm-headless qemu-bm-elf burn-usb clean-bm
 
-include bare-metal/Makefile.baremetal
-
 all: $(TARGET)
+
+include bare-metal/Makefile.baremetal
 
 $(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)

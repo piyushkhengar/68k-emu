@@ -6,5 +6,8 @@
 # Cursor IDE
 .cursor/
 
+# Claude Code
+.claude/
+
 # Reference emulators (read-only, for study only)
 reference/
